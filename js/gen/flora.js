@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { WATER, WORLD_R } from '../config.js';
-import { height, terrainType, soilRichness } from '../terrain.js';
+import { height, terrainType, soilRichness, groundSink } from '../terrain.js';
 import { rand, randint, fork } from '../rng.js';
 import { makeGrassTexture, makeFruitTexture, makePussywillowTexture, makeCattailTexture, makeAcornTexture, makeMushroomTexture, makeTrinketTexture } from '../textures.js';
 import { makeLeafAtlas } from './leaf.js';
@@ -25,7 +25,7 @@ function buildArchetypes(rng, speciesList, atlas){
 // beneath them and keep grass from growing under the canopy).
 const ZERO_MTX = new THREE.Matrix4().makeScale(0, 0, 0);
 
-function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scaleRange, choose, extraMat, collect){
+function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scaleRange, choose, extraMat, collect, flareR = 1.4){
   const buckets = archetypes.map(() => []);
   const placed = [];
   for (let i = 0; i < count; i++){
@@ -50,7 +50,11 @@ function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scale
     trunks.frustumCulled = false; if (leaves) leaves.frustumCulled = false; if (nuts) nuts.frustumCulled = false;
     list.forEach(([x, z, yaw, sc], i) => {
       q.setFromAxisAngle(UP, yaw);
-      v.set(x, height(x, z), z);
+      // sink the base into a slope so the downhill root flare reaches soil rather
+      // than floating (and the uphill side buries into the bank) — 60% of the
+      // measured drop, so gentle ground is barely touched. Flat ground => 0.
+      const sink = groundSink(x, z, flareR * sc) * 0.6;
+      v.set(x, height(x, z) - sink, z);
       mtx.compose(v, q, new THREE.Vector3(sc, sc, sc));
       trunks.setMatrixAt(i, mtx);
       if (leaves) leaves.setMatrixAt(i, mtx);
@@ -243,9 +247,9 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   // giants) rather than clustering around each archetype's set height
   const treePos = scatter(scene, fork(rng), treeArch,    barkMat, leafMat, trees,    new Set(['grass','mud']),        [0.55, 1.55], bySoil);
   const shrubRecs = [];   // removable: each shrub can be chopped down for firewood
-  scatter(scene, fork(rng), shrubArch,   barkMat, leafMat, shrubs,   new Set(['grass','mud','sand']), [0.65, 1.5], null, null, shrubRecs);
-  const redwoodPos = scatter(scene, fork(rng), redwoodArch, barkMat, leafMat, redwoods, new Set(['grass','mud']),        [0.7, 1.35]);
-  const oakPos     = scatter(scene, fork(rng), oakArch,     barkMat, oakLeafMat, oaks,  new Set(['grass','mud']),        [0.6, 1.45], null, acornMat);
+  scatter(scene, fork(rng), shrubArch,   barkMat, leafMat, shrubs,   new Set(['grass','mud','sand']), [0.65, 1.5], null, null, shrubRecs, 0.6);
+  const redwoodPos = scatter(scene, fork(rng), redwoodArch, barkMat, leafMat, redwoods, new Set(['grass','mud']),        [0.7, 1.35], null, null, null, 3.0);
+  const oakPos     = scatter(scene, fork(rng), oakArch,     barkMat, oakLeafMat, oaks,  new Set(['grass','mud']),        [0.6, 1.45], null, acornMat, null, 2.4);
 
   // litter footprint per tree (big trees cast a wider duff ring than maples)
   const litter = [...treePos.map(([x,z]) => [x, z, 3.6]),

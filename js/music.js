@@ -6,15 +6,15 @@
 // at biome borders.
 
 const TRACKS = {
-  menu:  'menu.mp3',
-  grass: 'grass.mp3',
-  mud:   'mud.mp3',
-  sand:  'sand.mp3',
-  water: 'water.mp3',
-  rock:  'rock.mp3',
+  menu:  '01 - Main Menu.flac',
+  grass: '18 - Grass Theme.flac',
+  mud:   '17 - Dirt Theme.flac',
+  sand:  '13 - Desert Theme.flac',
+  water: '16 - Ocean Theme.flac',
+  rock:  '12 - Wasteland Theme.flac',
 };
 
-const SOUNDS   = 'sounds/';   // bundled, relative — works under the GitHub Pages subpath
+const SOUNDS   = '/sounds/';
 const VOL      = 0.5;
 const FADE_MS  = 4000;  // crossfade duration
 const DWELL_S  = 3;     // seconds on new terrain before committing
@@ -27,6 +27,7 @@ export class MusicPlayer {
     this._pending = null;     // terrain candidate (may not be committed yet)
     this._dwellT  = 0;        // seconds spent continuously on _pending
     this._ready   = false;
+    this._gain    = VOL;      // playing volume (0..1), adjustable from settings
 
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
@@ -51,7 +52,7 @@ export class MusicPlayer {
     const delta = (target - from) / steps;
     let v = from;
     el._fid = setInterval(() => {
-      v = Math.max(0, Math.min(VOL, v + delta));
+      v = Math.max(0, Math.min(1, v + delta));
       el.volume = v;
       const done = delta < 0 ? v <= target : v >= target;
       if (done) {
@@ -73,7 +74,7 @@ export class MusicPlayer {
     na.src = SOUNDS + encodeURIComponent(file);
     na.volume = 0;
     na.play().catch(() => {});
-    this._fade(na, VOL);
+    this._fade(na, this._gain);
 
     this._key = key;
     this._cur = next;
@@ -81,6 +82,12 @@ export class MusicPlayer {
 
   // Call once on first user gesture to unlock browser autoplay.
   init() { this._ready = true; }
+
+  // Set playing volume (0..1). Fades the live track to the new level.
+  setVolume(v) {
+    this._gain = Math.max(0, Math.min(1, v));
+    if (this._key) this._fade(this._els[this._cur], this._gain);
+  }
 
   // Immediate switch — use for deliberate mode changes (menu ↔ game).
   play(key) {

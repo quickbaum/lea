@@ -180,9 +180,13 @@ class AnimNPC {
       swayBob = (Math.cos(ph * 2) * 0.5 + 0.5) * this.h * 0.03;
     }
 
-    const sit = this.sitting ? this.h*0.28 : 0;   // drop the sprite so it reads as seated
-    this.mesh.position.set(this.x, height(this.x,this.z)+this.h/2 - sit - chopDip + hopOff + swayBob, this.z);
-    if (this.label) this.label.position.set(this.x, height(this.x,this.z)+this.h+0.6 - sit + hopOff, this.z);
+    // seated NPCs render as standing for now (no shrink/lower — that sank their feet
+    // into the ground, worse on a slope). Better seated sprites will come later.
+    const sy = 1;
+    this.mesh.scale.y = sy;
+    const gy = height(this.x, this.z), halfH = this.h * sy / 2;
+    this.mesh.position.set(this.x, gy + halfH - chopDip + hopOff + swayBob, this.z);
+    if (this.label) this.label.position.set(this.x, gy + this.h * sy + 0.5 + hopOff, this.z);
 
     const toCam = Math.atan2(cam.position.x - this.x, cam.position.z - this.z);
     this.mesh.rotation.y = toCam;
@@ -202,13 +206,13 @@ class AnimNPC {
     if (this.hopGait) col = this.idleCol;              // legs-together frame reads as a bound
     this.setCell(row, col, flip);
 
-    this._updatePack(toCam, sit, tint, hopOff);
+    this._updatePack(toCam, sy, tint, hopOff);
   }
 
   // Show a backpack on the NPC's back when it's carrying. Placed behind the body
   // along its heading, so it reads as a pack (visible when you see their back,
   // tucked behind them from the front). Texture redrawn only when contents change.
-  _updatePack(toCam, sit, tint, hopOff = 0){
+  _updatePack(toCam, sy = 1, tint, hopOff = 0){
     const food = this.pack | 0, wood = this.firewood | 0, trink = this.trinkets | 0;
     if (food <= 0 && wood <= 0 && trink <= 0){ this.packMesh.visible = false; return; }
     const kind = this.packKind || 'food';
@@ -220,7 +224,7 @@ class AnimNPC {
     }
     const back = 0.18, fx = Math.sin(this.heading), fz = Math.cos(this.heading);
     this.packMesh.position.set(
-      this.x - fx*back, height(this.x,this.z) + this.h*0.6 - sit + hopOff, this.z - fz*back);
+      this.x - fx*back, height(this.x,this.z) + this.h*0.6*sy + hopOff, this.z - fz*back);
     this.packMesh.rotation.set(0, toCam, 0, 'YXZ');
     this.packMesh.material.color.copy(tint || WHITE);
     this.packMesh.visible = true;

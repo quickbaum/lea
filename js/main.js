@@ -4,14 +4,19 @@ import { mulberry32, fork } from './rng.js';
 import { height, biome, walkable, buildTerrain, terrainType } from './terrain.js';
 import { spawnPeasants, spawnNamedNPC } from './npc.js';
 import { PuckFlock } from './puck.js';
+import { Warren } from './fauna.js';
 import { plantWorld } from './gen/flora.js';
 import { MusicPlayer } from './music.js';
+import { Footsteps } from './footsteps.js';
+import { Boats } from './boats.js';
+import { Ambience } from './ambience.js';
 import { Sky } from './sky.js';
 import { AgentWorld } from './agents.js';
 import { TrailField } from './trails.js';
 import { GrassDetail, GrassClumps } from './grass.js';
 import * as wojak from './wojak.js';
 import { makeSociety } from './society.js';
+import { makeOmen } from './astrology.js';
 import { talk, talkTree } from './dialog.js';
 
 // ---------- renderer (low internal res, upscaled for the retro look) ----------
@@ -36,6 +41,7 @@ scene.fog = new THREE.Fog(SKY, 35, 170);   // farther haze so the bigger world r
 
 const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
 const EYE = 1.7;
+const EYE_BOAT = 1.15;     // seated low in the canoe
 
 // Lighting + sky (sun/moon/stars/clouds) are owned by Sky — see js/sky.js.
 
@@ -43,6 +49,7 @@ const EYE = 1.7;
 const rng = mulberry32(WORLD_SEED);
 const { ground, waterTex } = buildTerrain(scene);
 const forage = plantWorld(scene, fork(rng), { ground });   // ground passed so duff can be painted under trees
+const boats = new Boats(scene); boats.scatter(fork(rng));   // communal canoes moored at the lakeshores
 
 // agent layer: NPC drives + the affordance substrate + the campfire ritual.
 // See docs/npc-behavior.md. Behaviour lives in the world (smart objects), not
@@ -56,6 +63,9 @@ agents.setShrubs(forage.shrubs);                           // choppable firewood
 // logic in agents.js), so hearths emerge where people actually gather.
 agents.setFood(forage.plants);                             // bushes/trees double as food sources
 agents.setValuables(forage.valuables);                     // rare finds people gather & trade
+agents.spawnFauna();                                       // rabbits — quarry that roam, flee & are hunted (docs/hunting.md)
+let warren = null;
+new Warren(scene, agents.fauna).load().then(w => { warren = w; });   // draws the rabbits
 
 // trails: a wear field that NPCs (and the player) tread into bare paths over
 // time, suppressing grass on the route. See docs/trails.md.
@@ -116,10 +126,13 @@ function warmTrails(seconds){
 }
 
 const music = new MusicPlayer();
+const footsteps = new Footsteps();
+const ambience = new Ambience();
 
 // While the splash is up the world is rendered but paused, and name tags hide.
 let playing = false;
 let inDialog = false;          // a conversation is open (keeps us 'in game', not menu)
+let settingsOpen = false;      // the sound settings panel is open (also keeps us 'in game')
 const nameTags = [];
 const registerTag = (tag) => { if (tag){ tag.visible = playing; nameTags.push(tag); } };
 
@@ -226,7 +239,7 @@ function forageLabel(p){
 }
 
 function updateFocus(){
-  nearTalker = null; nearFruit = null; nearObject = null;
+  nearTalker = null; nearFruit = null; nearObject = null; nearBoat = null;
   if (!playing || inDialog){ hoverPanel.style.display = 'none'; return; }
   camera.getWorldDirection(_fwd);
 
@@ -252,12 +265,20 @@ function updateFocus(){
   // campfires (informational — not an E target)
   for (const fr of agents.fires || [])
     consider(fr.x, fr.z, height(fr.x, fr.z) + 0.6, FRAME_RANGE, { kind: 'fire', fire: fr });
+  // rabbits (informational)
+  for (const q of agents.fauna || [])
+    if (q.alive) consider(q.x, q.z, height(q.x, q.z) + 0.3, FRAME_RANGE, { kind: 'rabbit', q });
+  // moored boats (board with E) — only when you're not already aboard one
+  if (!boating)
+    for (const b of boats.list)
+      if (!b.aboard) consider(b.x, b.z, WATER + 0.4, FRAME_RANGE, { kind: 'boat', boat: b });
 
   // wire E to whatever's framed, if it's within reach and actionable
   if (best && best.dist <= TALK_RANGE){
     if (best.kind === 'person') nearTalker = best;
     else if (best.kind === 'fruit') nearFruit = best.item;
     else if (best.kind === 'fire') nearObject = best.fire;   // inspect the fire/pot with E
+    else if (best.kind === 'boat') nearBoat = best.boat;      // climb aboard with E
   }
 
   // render the box: portrait+name for people, a title+flavour for objects,
@@ -275,6 +296,10 @@ function updateFocus(){
     showText(label, '', best.npc && best.npc.portrait);
   } else if (best && best.kind === 'fruit'){
     const { title, desc } = forageLabel(best.item); showText(title, desc, null);
+  } else if (best && best.kind === 'rabbit'){
+    showText('A rabbit', best.q.fleeing ? 'Bolting — wary of you.' : 'Grazing, ears twitching.', null);
+  } else if (best && best.kind === 'boat'){
+    showText('A bark canoe', 'Moored at the water’s edge. Anyone may take it.', null);
   } else if (best && best.kind === 'fire'){
     const pot = best.fire.potLabel && best.fire.potLabel();   // something simmering?
     if (pot) showText(pot.title, pot.desc, null);
@@ -379,14 +404,40 @@ canvas.addEventListener('click', () => canvas.requestPointerLock());
 start.addEventListener('click', () => canvas.requestPointerLock());
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
-  if (!locked && inDialog) return;                   // a dialogue is open — stay in-game
+  if (!locked && (inDialog || settingsOpen)) return; // a dialogue/settings panel is open — stay in-game
   playing = locked;
   start.classList.toggle('hide', playing);
   for (const t of nameTags) t.visible = playing;     // hide name tags on the splash
   if (playing) window.Leaves?.stop(); else window.Leaves?.start();   // splash-only foliage
   music.init();
+  footsteps.init();
+  ambience.init();
   music.play(playing ? terrainType(pos.x, pos.z) : 'menu');
 });
+
+// ---------- sound settings (music vs. effects balance) ----------
+const gear = document.getElementById('gear');
+const settingsEl = document.getElementById('settings');
+const musicRange = document.getElementById('vol-music');
+const sfxRange = document.getElementById('vol-sfx');
+const musicVal = document.getElementById('vol-music-val');
+const sfxVal = document.getElementById('vol-sfx-val');
+const readVol = (s, d) => { const v = parseFloat(s); return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : d; };
+let volMusic = readVol(localStorage.getItem('lea.vol.music'), 0.5);   // music quieter by default
+let volSfx   = readVol(localStorage.getItem('lea.vol.sfx'), 1.0);     // effects at full
+function applyVolumes(){
+  music.setVolume(volMusic); footsteps.setVolume(volSfx); ambience.setVolume(volSfx);
+  musicRange.value = Math.round(volMusic * 100); musicVal.textContent = `${Math.round(volMusic * 100)}%`;
+  sfxRange.value   = Math.round(volSfx   * 100); sfxVal.textContent   = `${Math.round(volSfx   * 100)}%`;
+}
+applyVolumes();
+musicRange.addEventListener('input', () => { volMusic = musicRange.value / 100; localStorage.setItem('lea.vol.music', volMusic); applyVolumes(); });
+sfxRange.addEventListener('input',   () => { volSfx   = sfxRange.value   / 100; localStorage.setItem('lea.vol.sfx',   volSfx);   applyVolumes(); });
+function openSettings(){ settingsOpen = true; settingsEl.classList.remove('hide'); document.exitPointerLock?.(); }
+function closeSettings(){ settingsOpen = false; settingsEl.classList.add('hide'); if (playing){ try { canvas.requestPointerLock(); } catch (_){} } }
+gear.addEventListener('click', e => { e.stopPropagation(); settingsOpen ? closeSettings() : openSettings(); });
+document.getElementById('settings-done').addEventListener('click', closeSettings);
+
 addEventListener('mousemove', e => {
   if (document.pointerLockElement !== canvas) return;
   yaw -= e.movementX*0.0022;
@@ -414,6 +465,8 @@ let forageMsg = '';
 let nearTalker = null;     // {c, dialog|peasant, name} of the nearest talkable NPC
 let nearFruit = null;      // nearest ripe forageable plant within reach
 let nearObject = null;     // a non-pickable thing you can inspect with E (e.g. a campfire/pot)
+let nearBoat = null;       // a moored boat within reach to climb into with E
+let boating = null;        // the boat you're currently aboard (null = on foot)
 let mapMark = null;        // {x,z,name} drawn on the minimap (a person's last-seen spot)
 const SIGHT_RANGE = 18;    // "in view" radius — matches agents.js sighting memory
 
@@ -465,17 +518,19 @@ function timeAgo(days){
 function sightingOf(speaker, o, now){
   const fem = o.gender === 'female';
   const They = fem ? 'She' : 'He', them = fem ? 'her' : 'him';
+  const v = (key, arr) => voicePick(speaker, key, arr);
   const nowD = Math.hypot(o.x - speaker.x, o.z - speaker.z);
-  if (nowD < 3.5)  return { line: `${They}'s standing right here with me.`, mark: null };
-  if (nowD < SIGHT_RANGE) return { line: `${They}'s not far — just over yonder.`, mark: null };
+  if (nowD < 3.5)  return { line: v('so-here', [`${They}'s standing right here with me.`, `Why, ${them} right here beside me!`, `${They}'s here — you're looking at ${them}.`]), mark: null };
+  if (nowD < SIGHT_RANGE) return { line: v('so-near', [`${They}'s not far — just over yonder.`, `${They}'s about, only a few steps off.`, `Close by — there, see?`]), mark: null };
   const s = speaker.seen && speaker.seen.get(o);
-  if (!s) return { line: `I've not laid eyes on ${them} in an age.`, mark: null };
+  if (!s) return { line: v('so-none', [`I've not laid eyes on ${them} in an age.`, `Haven't seen hide nor hair of ${them} lately.`, `Couldn't tell you — it's been too long.`]), mark: null };
   const when = timeAgo(Math.max(0, now - s.t));
   const seenNear = Math.hypot(s.x - speaker.x, s.z - speaker.z) < 22;
-  if (seenNear) return { line: `I saw ${them} around this very spot, ${when}.`, mark: null };
-  return { line: `I last saw ${them} ${when}, away from here — let me show you where on your map.`,
+  if (seenNear) return { line: v('so-spot', [`I saw ${them} around this very spot, ${when}.`, `${They} was hereabouts ${when}.`, `Last I saw ${them}, ${when}, ${pron2(fem)} was right around here.`]), mark: null };
+  return { line: v('so-far', [`I last saw ${them} ${when}, away from here — let me show you where on your map.`, `${They} was off yonder ${when} — here, I'll mark it for you.`, `Saw ${them} a way off, ${when}. I'll point it on your map.`]),
            mark: { x: s.x, z: s.z, name: o.name } };
 }
+const pron2 = fem => fem ? 'she' : 'he';
 
 // the speaker describing a groupmate's nature (third person), for the clickable
 // kin roster. The "last seen" sentence is appended by the caller (sightingOf).
@@ -485,18 +540,22 @@ function describeKin(speaker, o){
   const They = fem ? 'She' : 'He', them = fem ? 'her' : 'him', themself = fem ? 'herself' : 'himself';
   const kind = speaker.group && speaker.group.kind, rel = relationTo(speaker, o);
   const relPhrase = kind === 'band' ? (rel === 'our captain' ? rel : `a ${rel}`) : `my ${rel}`;
-  const dom = [['food', g('food'), `${They} thinks mostly of the next meal.`],
-               ['company', g('company'), `${They} loves good company above all.`],
-               ['beauty', g('beauty'), `${They} can't pass a pretty shell or stone.`],
-               ['comfort', (g('warmth') + g('rest')) / 2, `${They} asks only for a warm hearth and a good rest.`]]
+  const v = (key, arr) => voicePick(speaker, 'dk-' + o.id + '-' + key, arr);
+  const dom = [['food', g('food'), v('food', [`${They} thinks mostly of the next meal.`, `${They}'s ever hungry, that one.`, `Lives for ${them === 'her' ? 'her' : 'his'} food, ${They.toLowerCase()} does.`])],
+               ['company', g('company'), v('comp', [`${They} loves good company above all.`, `${They}'s never happier than among folk.`, `A sociable soul, ${them} — always in the thick of it.`])],
+               ['beauty', g('beauty'), v('beau', [`${They} can't pass a pretty shell or stone.`, `${They}'s an eye for bright things.`, `Always stooping for some bauble, ${They.toLowerCase()} is.`])],
+               ['comfort', (g('warmth') + g('rest')) / 2, v('comf', [`${They} asks only for a warm hearth and a good rest.`, `${They} likes ${fem ? 'her' : 'his'} comforts — a fire and a rest.`, `An easy life suits ${them} best.`])]]
               .reduce((a, b) => b[1] > a[1] ? b : a)[2];
-  const social = g('company') < 0.8 ? `Keeps to ${themself}, mostly.`
-    : g('company') > 1.25 ? `Happiest in a crowd.` : `Takes folk as they come.`;
+  const social = g('company') < 0.8 ? v('soc-', [`Keeps to ${themself}, mostly.`, `A quiet one — keeps ${fem ? 'her' : 'his'} own counsel.`, `Solitary, by nature.`])
+    : g('company') > 1.25 ? v('soc+', [`Happiest in a crowd.`, `Loves a gathering, ${them}.`, `Can't abide being alone.`]) : v('soc0', [`Takes folk as they come.`, `Easy enough with anyone.`, `Gets on with most.`]);
   const sk = [];
   if (g('strength') > 1.15) sk.push('strong in the arm'); else if (g('strength') < 0.85) sk.push('not the sturdiest');
   if (g('perception') > 1.15) sk.push('sharp-eyed'); else if (g('perception') < 0.85) sk.push('a touch blind to small things');
   const skill = sk.length ? ` And ${fem ? 'she' : 'he'}'s ${sk.join(', ')}.` : '';
-  return `${o.name} — ${relPhrase}. ${dom} ${social}${skill}`;
+  const give = g('generosity') > 1.2 ? ` Open-handed — ${fem ? 'she' : 'he'} shares freely.`
+    : g('generosity') < 0.8 ? ` Keeps a tight fist, mind.` : '';
+  const stand = (o.esteem || 0) > 4 ? ` Well thought of among us.` : '';
+  return `${o.name} — ${relPhrase}. ${dom} ${social}${skill}${give}${stand}`;
 }
 
 // a rough compass direction from one point to another (N = -z, E = +x), or
@@ -511,50 +570,76 @@ function bearingWord(fx, fz, tx, tz){
 // what an NPC will tell you when asked for news: its freshest few facts, each as a
 // sentence (who was seen where/when, where food grows). Reads npc.news (agents.js).
 function newsReport(npc, now){
-  const facts = npc.news ? [...npc.news.values()].sort((a, b) => b.t - a.t).slice(0, 3) : [];
-  if (!facts.length) return "Naught I've heard worth the telling, friend.";
+  const rank = f => (f.kind === 'omen' ? 3 : f.kind === 'kind' ? 2 : f.kind === 'food' ? 1 : 0);   // omens, reputation & tips before idle sightings
+  const facts = npc.news ? [...npc.news.values()].sort((a, b) => rank(b) - rank(a) || b.t - a.t).slice(0, 3) : [];
+  if (!facts.length) return voicePick(npc, 'n-none', [`"Naught I've heard worth the telling, friend."`, `"Quiet of late — no news to pass on."`, `"Nothing's reached my ears worth your time."`]);
+  const vp = (key, arr) => voicePick(npc, key, arr);
   const lines = facts.map(f => {
-    const where = bearingWord(npc.x, npc.z, f.x, f.z);
-    if (f.kind === 'saw') return `${displayName(f.subj)} was seen ${where}, ${timeAgo(Math.max(0, now - f.t))}.`;
-    if (f.kind === 'food') return `There's ${f.foodKind} to be had ${where}.`;
+    // people are named in rumour (the speaker knows them) — and hearing the name is
+    // itself how you come to *know of* someone (sets heardFrom, so a later meeting
+    // recognises them: "I've heard of you, from …"). See displayName / peasantTree.
+    if (f.subj && f.subj !== npc && !f.subj.known && !f.subj.heardFrom) f.subj.heardFrom = npc;
+    const name = f.subj ? (f.subj.name || displayName(f.subj)) : '';
+    const where = bearingWord(npc.x, npc.z, f.x, f.z), when = timeAgo(Math.max(0, now - f.t));
+    if (f.kind === 'saw') return vp('n-saw', [`${name} was seen ${where}, ${when}.`, `${name} passed ${where} ${when}.`, `Word is ${name} was ${where}, ${when}.`, `${name}? ${where[0].toUpperCase() + where.slice(1)}, ${when}.`]);
+    if (f.kind === 'food') return vp('n-food', [`There's ${f.foodKind} to be had ${where}.`, `${f.foodKind[0].toUpperCase() + f.foodKind.slice(1)} grows ${where}, they say.`, `If you want ${f.foodKind}, look ${where}.`]);
+    if (f.kind === 'kind') return vp('n-kind', [`${name} shares freely — open-handed, that one.`, `${name}'s a generous soul, by all accounts.`, `They say ${name} never lets a body go hungry.`]);
+    if (f.kind === 'omen') return (npc.stargazer ? '' : vp('n-omen', ['They say ', 'The stargazers reckon ', 'Word among the wise: '])) + f.text;
     return '';
   }).filter(Boolean);
   return '"' + lines.join(' ') + '"';
 }
 
-// A peasant's dialogue is assembled live from its drives + surroundings — no lore
-// or personality yet (cultures aren't generated). It's a window on the NPC's
-// state: what it's doing, how it feels (its strongest unmet drive), and the sky.
+// Each NPC has a stable "voice": deterministic picks (seeded by npc.id) from sets
+// of paraphrases, so the same person always phrases a thing their way, yet no two
+// folk sound alike. voiceHash → a stable number per (npc, key); voicePick chooses a
+// variant; voiceHas gives a per-NPC yes/no (varies which options a person offers).
+function voiceHash(npc, key){
+  let h = (((npc && npc.id) || 0) + 1) * 2654435761 >>> 0;
+  for (let i = 0; i < key.length; i++) h = ((h ^ key.charCodeAt(i)) * 16777619) >>> 0;
+  return h >>> 0;
+}
+const voicePick = (npc, key, arr) => arr[voiceHash(npc, key) % arr.length];
+const voiceHas  = (npc, key, p) => (voiceHash(npc, key) % 1000) / 1000 < p;
+
+// A peasant's dialogue is assembled live from its drives + surroundings, phrased in
+// the NPC's own voice (see above). It's a window on the NPC's state: what it's
+// doing, how it feels (its strongest unmet drive), and the sky.
 function peasantTree(npc, sky){
   const n = npc.needs || {};
-  const doing = npc.chopping              ? "Cutting firewood — the woodpile's run low."
-    : npc.sitting && npc.atGathering ? "Sitting at the night fire with the others — there's a song going, and old talk."
-    : npc.sitting                  ? "Sitting by the fire, warming my hands."
-    : npc.actionLabel === 'chop'   ? "Off to cut some wood for the fire."
-    : npc.actionLabel === 'stack'  ? "Stacking firewood by the hearth for us all."
-    : npc.actionLabel === 'build'  ? "Laying a fire here — no camp's near enough for nightfall."
-    : npc.actionLabel === 'fire'   ? ((sky?.evening ?? 0) > 0.3 ? "Heading back to camp before the dark sets in." : "Making for the fire — I want to be warm.")
-    : npc.actionLabel === 'food'   ? "Gathering food to carry back."
-    : npc.actionLabel === 'getfood'? "Fetching a bite from the camp stores."
-    : npc.actionLabel === 'tend'   ? ((sky?.night ?? 0) > 0.3 ? "Keeping the fire — someone must watch it." : "Minding the fire and the pot. They shouldn't be left alone.")
-    : npc.actionLabel === 'sup'    ? "Supping at the pot — there's stew, and it's good."
-    : npc.actionLabel === 'cook'   ? "Off to the pot — these want cooking before they're fit to eat."
-    : npc.actionLabel === 'store'  ? "Stowing food in the camp basket."
-    : npc.actionLabel === 'trade'  ? "Off to barter — a fair swap beats a long forage."
-    : npc.actionLabel === 'collect'? "Something caught my eye — a pretty thing to keep."
-    : npc.actionLabel === 'greet'  ? "Just passing the time with the others."
-    :                                "Wandering. Looking for somewhere to be.";
-  const top = [['food',    n.food    ?? 0, "Hungry. My belly's been grumbling."],
-               ['company', n.company ?? 0, "Lonely. It's quiet out here."],
-               ['warmth',  n.warmth  ?? 0, "Cold. I'd like to be near a fire."],
-               ['rest',    n.rest    ?? 0, "Weary. I could do with a rest."]]
+  const v = (key, arr) => voicePick(npc, key, arr);     // pick this NPC's phrasing
+  const fem = npc.gender === 'female';
+  const Pron = fem ? 'She' : 'He', pron = fem ? 'she' : 'he', their = fem ? 'her' : 'his';
+  const doing = npc.chopping              ? v('d-chop', ["Cutting firewood — the woodpile's run low.", "Felling a shrub for the fire. Hungry work.", "Wood for the hearth. It never stops needing it."])
+    : npc.sitting && npc.atGathering ? v('d-gather', ["Sitting at the night fire with the others — there's a song going, and old talk.", "By the fire with my people — songs and stories till the dark wears thin.", "Round the night fire. This is the best of the day, if you ask me."])
+    : npc.sitting                  ? v('d-sit', ["Sitting by the fire, warming my hands.", "Resting by the hearth a while.", "Just warming myself — the cold gets in the bones."])
+    : npc.actionLabel === 'chop'   ? v('d-gochop', ["Off to cut some wood for the fire.", "Going to fell a shrub — the fire's hungry.", "After firewood."])
+    : npc.actionLabel === 'stack'  ? v('d-stack', ["Stacking firewood by the hearth for us all.", "Building up the woodpile — it's everyone's.", "Laying in wood by the fire."])
+    : npc.actionLabel === 'build'  ? v('d-build', ["Laying a fire here — no camp's near enough for nightfall.", "Making my own hearth. Naught else within reach.", "Setting a fire before the dark catches me out."])
+    : npc.actionLabel === 'fire'   ? ((sky?.evening ?? 0) > 0.3 ? v('d-fire-e', ["Heading back to camp before the dark sets in.", "Making for home — night's coming.", "Back to the fire before dusk's done."]) : v('d-fire-d', ["Making for the fire — I want to be warm.", "Off to the hearth. I'm chilled.", "Toward the fire — the cold's got me."]))
+    : npc.actionLabel === 'food'   ? v('d-food', ["Gathering food to carry back.", "Foraging — filling my pack.", "Out after berries and roots."])
+    : npc.actionLabel === 'getfood'? v('d-getfood', ["Fetching a bite from the camp stores.", "To the basket for a meal.", "Drawing some food from the common store."])
+    : npc.actionLabel === 'tend'   ? ((sky?.night ?? 0) > 0.3 ? v('d-tend-n', ["Keeping the fire — someone must watch it.", "Watching the flames through the dark. It's my turn.", "Minding the night fire. It mustn't go out."]) : v('d-tend-d', ["Minding the fire and the pot — they shouldn't be left alone.", "Keeping an eye on the hearth. Idle work, but needed.", "Tending the fire. Someone has to."]))
+    : npc.actionLabel === 'sup'    ? v('d-sup', ["Supping at the pot — there's stew, and it's good.", "Having a bowl of stew. You're welcome to ask the cook.", "Eating from the pot. Warms you right through."])
+    : npc.actionLabel === 'cook'   ? v('d-cook', ["Off to the pot — these want cooking before they're fit to eat.", "Taking these to the fire. Raw, they'd do me no good.", "Bound for the pot with what I've gathered."])
+    : npc.actionLabel === 'store'  ? v('d-store', ["Stowing food in the camp basket.", "Putting by the surplus for the others.", "Adding to the common store — no sense letting it spoil on me."])
+    : npc.actionLabel === 'trade'  ? v('d-trade', ["Off to barter — a fair swap beats a long forage.", "Going to trade. Easier than gathering it all myself.", "After a swap with a neighbour."])
+    : npc.actionLabel === 'ask'    ? v('d-ask', ["Going to ask a neighbour for a bite — they'll not see me go hungry.", "Off to beg a meal from kin. That's what they're for.", "Asking round for food. No shame in it."])
+    : npc.actionLabel === 'hunt'   ? v('d-hunt', ["After a rabbit — quick beast, but it's meat for the pot if I catch it.", "Hunting. There's a rabbit, if my legs are quick enough.", "Chasing a coney. Meat enough for many, if I land it."])
+    : npc.actionLabel === 'collect'? v('d-collect', ["Something caught my eye — a pretty thing to keep.", "Stooping for a bauble I spied.", "A shiny bit on the ground — I couldn't pass it."])
+    : npc.actionLabel === 'greet'  ? v('d-greet', ["Just passing the time with the others.", "Chatting with folk. Nothing pressing.", "Idling with company."])
+    :                                v('d-wander', ["Wandering. Looking for somewhere to be.", "Just roaming — no errand to speak of.", "Drifting where my feet take me."]);
+  const top = [['food',    n.food    ?? 0, v('f-food', ["Hungry. My belly's been grumbling.", "Famished, if I'm honest.", "Could eat a horse — or a rabbit, at least.", "Peckish enough to gnaw bark.", "My stomach thinks my throat's cut."])],
+               ['company', n.company ?? 0, v('f-comp', ["Lonely. It's quiet out here.", "I could do with a friendly face.", "A bit solitary of late.", "Starved for a good talk, truth be told.", "It gets lonesome, out under the sky."])],
+               ['warmth',  n.warmth  ?? 0, v('f-warm', ["Cold. I'd like to be near a fire.", "Chilled through — I need a hearth.", "Frozen. Where's a good fire?", "Cold's in my bones today.", "I'd give much for a warm hearth."])],
+               ['rest',    n.rest    ?? 0, v('f-rest', ["Weary. I could do with a rest.", "Tired to the bone.", "Worn out, truth be told.", "Dead on my feet, near enough.", "I could sleep a week."])]]
               .reduce((a, b) => b[1] > a[1] ? b : a);
-  const feel = top[1] > 0.55 ? top[2] : "Well enough, I suppose.";
+  const feel = top[1] > 0.55 ? top[2] : v('f-ok', ["Well enough, I suppose.", "Can't complain.", "Middling — the usual.", "Right as rain.", "Fair to middling.", "Same as ever — which is fine by me.", "No worse than yesterday."]);
   const night = sky?.night ?? 0, day = sky?.day ?? 1;
-  const skyLine = night > 0.7 ? "Dark now. The stars are out — the whole sky of them."
-    : night > 0.3 ? "The light's going thin. Dusk, or near it."
-    : day   > 0.6 ? "The sun's well up. A fair day for it."
-    :               "Grey light. The day's not yet awake.";
+  const skyLine = night > 0.7 ? v('s-night', ["Dark now. The stars are out — the whole sky of them.", "Black as pitch — but look at those stars.", "Deep night. The stars keep me company.", "Night's full come. A good sky for wishing on.", "Dark as a cellar, and the stars like spilled salt."])
+    : night > 0.3 ? v('s-dusk', ["The light's going thin. Dusk, or near it.", "Getting on for dark.", "The day's bleeding out — dusk soon.", "Gloaming now. The fires'll want lighting.", "Half-light. The day's near spent."])
+    : day   > 0.6 ? v('s-day', ["The sun's well up. A fair day for it.", "Fine and bright — a good day.", "Sun's out. Can't ask for better.", "Broad day, and warm. Lovely.", "Clear and bright — the kind of day you forgive winter for."])
+    :               v('s-dawn', ["Grey light. The day's not yet awake.", "Early yet — the day's still rubbing its eyes.", "Pale morning. Cold light.", "First light, barely. Dew's still down.", "The sun's not properly up. Bleary, like me."]);
   // what the peasant is carrying: foraged rations (packKind) + firewood logs + valuables
   const food = npc.pack | 0, wood = npc.firewood | 0, trink = npc.trinkets | 0, rawn = npc.raw | 0;
   const foodName = (npc.packKind && npc.packKind !== 'food') ? npc.packKind : 'victuals';
@@ -565,36 +650,41 @@ function peasantTree(npc, sky){
   if (wood > 0) carry.push(`${wood} log${wood === 1 ? '' : 's'} of firewood`);
   if (trink > 0) carry.push(`${trink} bit${trink === 1 ? '' : 's'} of ${trinkName} I'm rather fond of`);
   const packLine = carry.length
-    ? "Let's see here... " + carry.join(', and ') + "."
-    : "Naught but lint and crumbs — it's empty.";
+    ? v('p-lead', ["Let's see here... ", "Let me see... ", "In here? ", "Carrying "]) + carry.join(', and ') + "."
+    : v('p-empty', ["Naught but lint and crumbs — it's empty.", "Empty as a beggar's bowl.", "Nothing on me just now.", "Not a thing — travelling light."]);
   // personality + skill, read off the NPC's persona (agents.js)
   const ps = npc.persona || {};
   const g = (k) => ps[k] ?? 1;
-  const dom = [['food',    g('food'),                    "Truth be told, I think most about my next meal."],
-               ['company', g('company'),                 "I do love good company — folk are the best of the Lea."],
-               ['beauty',  g('beauty'),                  "I can't pass a pretty shell or stone without stooping for it."],
-               ['comfort', (g('warmth') + g('rest')) / 2, "A warm hearth and an easy rest — that's my whole ambition."]]
+  const dom = [['food',    g('food'),                    v('dom-food', ["Truth be told, I think most about my next meal.", "My belly rules me, I'll confess.", "I live from one meal to the next, and gladly."])],
+               ['company', g('company'),                 v('dom-comp', ["I do love good company — folk are the best of the Lea.", "Give me people and I want for nothing.", "A life among friends is the only life I'd have."])],
+               ['beauty',  g('beauty'),                  v('dom-beau', ["I can't pass a pretty shell or stone without stooping for it.", "I've an eye for fine things — shells, amber, bright stones.", "Pretty baubles are my weakness, I'll own."])],
+               ['comfort', (g('warmth') + g('rest')) / 2, v('dom-comf', ["A warm hearth and an easy rest — that's my whole ambition.", "Give me a fire and a soft spot and I ask no more.", "Comfort's all I crave: warmth, and a chance to put my feet up."])]]
               .reduce((a, b) => b[1] > a[1] ? b : a)[2];
-  const social = g('company') < 0.8 ? "I keep to myself, mostly — crowds wear on me."
-    : g('company') > 1.25 ? "I'm never so happy as among others."
-    : "I take folk as they come.";
+  const social = g('company') < 0.8 ? v('self-solo', ["I keep to myself, mostly — crowds wear on me.", "I'm a quiet sort; crowds tire me.", "I like my own company best, truth be told."])
+    : g('company') > 1.25 ? v('self-crowd', ["I'm never so happy as among others.", "Give me a crowd and I'm content.", "I can hardly abide being alone."])
+    : v('self-mid', ["I take folk as they come.", "I'm easy enough, company or none.", "Folk are folk — I get on with most."]);
   const sk = [];
-  if (g('strength') > 1.15) sk.push("strong in the arm — wood falls quick under my axe, and I carry a good load");
-  else if (g('strength') < 0.85) sk.push("not the strongest — a heavy pack soon tires me");
-  if (g('perception') > 1.15) sk.push("sharp-eyed — I spy the little treasures others tread right past");
-  else if (g('perception') < 0.85) sk.push("a touch blind to small things on the ground");
-  const selfLine = `${dom} ${social} ` +
-    (sk.length ? "As for my hands and eyes — " + sk.join("; ") + "." : "Naught remarkable in my hands or eyes.");
+  if (g('strength') > 1.15) sk.push(v('sk-str+', ["strong in the arm — wood falls quick under my axe, and I carry a good load", "stout enough — I shoulder a heavy load and never feel it", "broad-backed; the hard hauling falls to me"]));
+  else if (g('strength') < 0.85) sk.push(v('sk-str-', ["not the strongest — a heavy pack soon tires me", "no great muscle on me, I'll admit", "slight of build; I leave the heavy work to others"]));
+  if (g('perception') > 1.15) sk.push(v('sk-per+', ["sharp-eyed — I spy the little treasures others tread right past", "keen of sight; nothing small escapes me", "I've a hunter's eye — I miss little"]));
+  else if (g('perception') < 0.85) sk.push(v('sk-per-', ["a touch blind to small things on the ground", "I'll walk clean past a shell and never see it", "my eyes aren't what they were for small things"]));
+  const give = g('generosity') > 1.2 ? v('give+', [" I share what I have — none of mine go hungry while I've a full pack.", " What's mine is the band's; I don't hoard.", " I give freely — it comes back round, always."])
+    : g('generosity') < 0.8 ? v('give-', [" I keep what's mine, I'll own it — times are lean enough.", " I look to myself first; no shame in it.", " I don't give easy — a body must mind its own."]) : "";
+  const stand = (npc.esteem || 0) > 4 ? v('stand', [" Folk speak well of me, I'm told.", " I'm well thought of round here, if I say so.", " I've a fair name among my people."]) : "";
+  const star = npc.stargazer ? v('star-self', [" And I read the stars a little, when they're out.", " I've a touch of the star-lore, for what it's worth.", " I watch the night sky, too — it speaks, if you listen."]) : "";
+  const selfLine = `${dom} ${social}${give}${stand}${star} ` +
+    (sk.length ? v('self-skill', ["As for my hands and eyes — ", "What can I do? Well — ", "My hands and eyes — "]) + sk.join("; ") + "."
+      : v('self-plain', ["Naught remarkable in my hands or eyes.", "Nothing special about me, mind.", "I'm no one remarkable."]));
   // who they belong to (society.js groups): an intro line + a roster of the whole
   // immediate group — each member's portrait, name, relation, and (on click) a
   // detail node about them plus a map marker where they were last seen.
   const grp = npc.group;
   let kinLine, kinRoster = null; const kinNodes = {};
   if (!grp || grp.kind === 'lone'){
-    kinLine = "I keep my own road — no kin nor company but my own shadow.";
+    kinLine = v('kin-lone', ["I keep my own road — no kin nor company but my own shadow.", "No people to speak of — I walk alone.", "Just me. I've no kin hereabouts."]);
   } else {
-    kinLine = grp.kind === 'band' ? `${grp.name} — those I ride with (ask after any of them):`
-      :                             `${grp.name} — my kin (ask after any of them):`;
+    kinLine = grp.kind === 'band' ? v('kin-band', [`${grp.name} — those I ride with (ask after any of them):`, `I travel with ${grp.name}. Ask after any of them:`, `${grp.name}, my road-companions — ask of whom you like:`])
+      :                             v('kin-fam', [`${grp.name} — my kin (ask after any of them):`, `My people are ${grp.name}. Ask of any:`, `${grp.name} — my own blood. Ask after them:`]);
     const now = sky?.time ?? 0;
     kinRoster = (grp.npcs || []).map((o, i) => {
       const item = { name: o.name, portrait: o.portrait, relation: relationTo(npc, o) };
@@ -609,32 +699,57 @@ function peasantTree(npc, sky){
     });
   }
   // they give their name freely when asked (for now); a friendly self-introduction
-  let nameLine = `"${npc.given || npc.name}" — ${npc.gender === 'female' ? 'she' : 'he'} smiles. `
-    + `"${npc.name}, if you want the whole of it. And you are?"`;
+  const given = npc.given || npc.name;
+  let nameLine = v('name', [
+    `"${given}," ${pron} says. "${npc.name}, if you want the whole of it. And you are?"`,
+    `${Pron} dips ${their} head. "${npc.name}. Folk call me ${given}. And yourself?"`,
+    `"Me? ${npc.name}." ${Pron} grins. "${given}, to friends. Who're you, then?"`,
+    `"${npc.name}," ${pron} says simply. "And what do they call you?"`,
+  ]);
   // if you'd heard the name before (from a groupmate's introduction), you recognise it
   if (npc.heardFrom && !npc.known)
-    nameLine += `\n\nThe name strikes a chord. "I've heard of you," you say, "from ${displayName(npc.heardFrom)}."`;
+    nameLine += '\n\n' + v('recog', [
+      `The name strikes a chord. "I've heard of you," you say, "from ${displayName(npc.heardFrom)}."`,
+      `You know the name. "${displayName(npc.heardFrom)} spoke of you," you tell ${fem ? 'her' : 'him'}.`,
+      `"I've heard that name — ${displayName(npc.heardFrom)} mentioned you," you say, and ${pron} looks pleased.`,
+    ]);
+  // a stargazer's reading of the night sky, grounded in the real moon phase & house
+  // (astrology.js). Computed once when the talk opens, so it's stable for the chat.
+  const starsLine = !npc.stargazer ? null
+    : (sky?.night ?? 0) < 0.35 ? v('stars-day', ["The stars keep their counsel by day — come back after dark.", "Naught to read while the sun's up. Ask me by night.", "The sky's too bright now; after dusk, friend."])
+    : v('stars-intro', ["Let me look... ", "Aye, I read a little. ", "The sky tonight? "])
+      + makeOmen({ moonLon: sky?.moonLon || 0, sunLon: sky?.sunLon || 0, illum: sky?.moonIllum || 0 });
+
   // farewell addresses them by name once known, else by their kind ("Goodbye, Elf")
   const farewell = () => npc.known && npc.given ? `Goodbye, ${npc.given}`
     : `Goodbye, ${(npc.race || 'stranger').replace(/^./, c => c.toUpperCase())}`;
   return { speaker: displayName(npc), portrait: npc.portrait, root: 'hi', farewell, nodes: {
-    hi:    { text: "Oh — hello, stranger.", get choices(){    // personal questions unlock once you know them
-               const c = [{ label: "What is your name?",  next: 'name'  },
-                          { label: "What are you doing?", next: 'doing' },
-                          { label: "Heard any news?",     next: 'news'  }];
-               if (npc.known) c.push({ label: "How do you fare?",  next: 'feel' },
-                                     { label: "What sort are you?", next: 'self' },
-                                     { label: "What's in thy pack?", next: 'pack' });
-               c.push({ label: "How looks the sky?", next: 'sky' });
-               return c; } },
+    get hi(){
+      const greet = npc.known
+        ? v('greet-k', ["Ah — you again. Well met.", "Back again? Good to see you.", "Hello again, friend.", "You! Twice in a day — the Lea's small.", "Oh, it's you. Sit a moment, if you like.", "Well, look who it is."])
+        : v('greet', ["Oh — hello, stranger.", "Well met, traveller.", "Hail, friend — didn't hear you coming.", "Oh! A face I don't know.", "Good day to you.", "Hullo there. Lost, are you?", "Mind yourself — oh, just a traveller.", "A stranger, out here? Well met all the same.", "Peace to you, wanderer.", "Didn't expect company. Hello."]);
+      // labels are phrased in the NPC's voice; and which topics they'll talk on varies
+      const c = [{ label: v('q-name', ["What is your name?", "What do they call you?", "Who might you be?", "Your name, friend?", "Have you a name?", "By what name do you go?"]), next: 'name' },
+                 { label: v('q-doing', ["What are you doing?", "What keeps you busy?", "Hard at work?", "What's the task today?", "What are you about?", "Busy, are you?"]), next: 'doing' }];
+      if (voiceHas(npc, 'has-news', 0.8)) c.push({ label: v('q-news', ["Heard any news?", "What's the word?", "Any tidings?", "What's new hereabouts?", "Anything stirring?", "Heard aught of late?"]), next: 'news' });
+      if (npc.known){                                  // personal topics unlock once you know them — and not all will talk of each
+        if (voiceHas(npc, 'has-feel', 0.85)) c.push({ label: v('q-feel', ["How do you fare?", "How are you keeping?", "All well with you?", "How goes it?", "Are you well?", "How's the day treating you?"]), next: 'feel' });
+        if (voiceHas(npc, 'has-self', 0.85)) c.push({ label: v('q-self', ["What sort are you?", "What manner of soul are you?", "Tell me of yourself.", "What's your way?", "What kind of person are you?", "What makes you, you?"]), next: 'self' });
+        if (voiceHas(npc, 'has-pack', 0.8))  c.push({ label: v('q-pack', ["What's in thy pack?", "What are you carrying?", "What's in your bag?", "What do you bear?", "Anything in that pack?", "What have you on you?"]), next: 'pack' });
+      }
+      if (voiceHas(npc, 'has-sky', 0.65)) c.push({ label: v('q-sky', ["How looks the sky?", "What of the weather?", "How's the day?", "Fair skies?", "What's the sky doing?", "Think it'll hold fair?"]), next: 'sky' });
+      if (npc.stargazer) c.push({ label: v('q-stars', ["What do the stars say?", "Any word from the heavens?", "What do you read up there?", "Read me the sky?"]), next: 'stars' });
+      return { text: greet, choices: c };
+    },
     get news(){ return { text: newsReport(npc, sky?.time ?? 0) }; },
-    name:  { text: nameLine, choices: [ { label: "Who are your people?", next: 'kin' } ] },
+    name:  { text: nameLine, choices: [ { label: v('q-kin', ["Who are your people?", "Who do you call kin?", "Who are your folk?", "Tell me of your people.", "Have you family hereabouts?", "Who do you travel with?"]), next: 'kin' } ] },
     doing: { text: doing },
     feel:  { text: feel },
     self:  { text: selfLine },
     kin:   { text: kinLine, ...(kinRoster ? { roster: kinRoster } : {}) },
     pack:  { text: packLine },
     sky:   { text: skyLine },
+    ...(starsLine ? { stars: { text: starsLine } } : {}),
     ...kinNodes,
   }};
 }
@@ -661,7 +776,48 @@ function fireTree(fire){
     get store(){ return { text: fire.foodReport() }; },
   }};
 }
+// climb into a moored boat: snap onto it and switch to paddling
+function board(b){
+  boating = b; b.aboard = true;
+  pos.x = b.x; pos.z = b.z;
+  forageMsg = 'You climb into the boat.'; setTimeout(() => forageMsg = '', 2000);
+}
+// step ashore: find the nearest walkable shore around the boat and stand there;
+// refuse if there's only open water within reach (you'd have to wade/swim).
+function disembark(){
+  for (let r = 1.5; r <= 4.5; r += 0.5){
+    for (let k = 0; k < 16; k++){
+      const a = k / 16 * Math.PI * 2, x = pos.x + Math.cos(a) * r, z = pos.z + Math.sin(a) * r;
+      if (walkable(x, z)){
+        pos.x = x; pos.z = z; pos.y = height(x, z) + EYE;
+        boating.aboard = false; boating = null;
+        forageMsg = 'You step ashore.'; setTimeout(() => forageMsg = '', 2000);
+        return;
+      }
+    }
+  }
+  forageMsg = 'No shore close enough to step out.'; setTimeout(() => forageMsg = '', 2000);
+}
+
+// how close open water is, and which way — drives the seashore wash. Marches a
+// few rays outward until each hits water; nearest hit sets loudness + stereo side.
+function seaProx(){
+  if (height(pos.x, pos.z) < WATER + 0.3) return { prox: 1, pan: 0 };   // on/at the water
+  const MAX = 26; let best = MAX, bdx = 0, bdz = 0;
+  for (let k = 0; k < 12; k++){
+    const a = k / 12 * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+    for (let r = 3; r <= MAX; r += 3){
+      if (height(pos.x + c * r, pos.z + s * r) < WATER){ if (r < best){ best = r; bdx = c; bdz = s; } break; }
+    }
+  }
+  const prox = best >= MAX ? 0 : 1 - best / MAX;
+  const fwx = -Math.sin(yaw), fwz = -Math.cos(yaw), rgx = -fwz, rgz = fwx;
+  return { prox: prox * prox, pan: prox > 0 ? Math.max(-1, Math.min(1, (bdx * rgx + bdz * rgz) * 0.8)) : 0 };
+}
+
 addEventListener('keydown', e => {
+  if (e.code === 'KeyO'){ settingsOpen ? closeSettings() : openSettings(); return; }
+  if (e.code === 'Escape' && settingsOpen){ closeSettings(); return; }
   if (e.code === 'KeyF') fly = !fly;
   if (e.code === 'KeyB'){ showNpcDbg = !showNpcDbg; npcDbg.style.display = showNpcDbg ? 'block' : 'none'; }
   if (e.code === 'KeyP'){
@@ -670,7 +826,11 @@ addEventListener('keydown', e => {
     poseMsg = 'pose copied'; console.log('POSE', u);
     setTimeout(() => poseMsg = '', 2500);
   }
-  if (e.code === 'KeyE' && playing && !inDialog && nearTalker){
+  if (e.code === 'KeyE' && playing && !inDialog && boating){
+    disembark();
+  } else if (e.code === 'KeyE' && playing && !inDialog && nearBoat){
+    board(nearBoat);
+  } else if (e.code === 'KeyE' && playing && !inDialog && nearTalker){
     const npc = nearTalker.c;
     npc.talking = true; inDialog = true;                  // stop walking mid-dialogue
     if (npc.heading !== undefined) npc.heading = Math.atan2(pos.x - npc.x, pos.z - npc.z);   // turn to face me
@@ -727,6 +887,15 @@ function loop(now){
     if (keys.Space) pos.y += speed;
     if (keys.KeyQ) pos.y -= speed;
     camera.position.set(pos.x, pos.y, pos.z);
+  } else if (boating){
+    const k = 5 / (keys.ShiftLeft || keys.ShiftRight ? 14 : 7);   // a canoe glides; can't sprint
+    const bdx = dx * k, bdz = dz * k;
+    const floats = (x, z) => height(x, z) < WATER + 0.15;          // stay on the water; nose up to shore
+    if (floats(pos.x + bdx, pos.z)) pos.x += bdx;
+    if (floats(pos.x, pos.z + bdz)) pos.z += bdz;
+    pos.y = WATER + EYE_BOAT;
+    camera.position.set(pos.x, pos.y, pos.z);
+    boating.placeAt(pos.x, pos.z, yaw);             // the boat rides under the camera
   } else {
     if (walkable(pos.x+dx, pos.z)) pos.x += dx;
     if (walkable(pos.x, pos.z+dz)) pos.z += dz;
@@ -745,19 +914,33 @@ function loop(now){
   const tint = sky.spriteTint;                     // daylight illumination for unlit sprites
 
   const simDt = playing ? dt : 0;                  // world is paused on the splash
+  agents.threat = playing && !fly ? { x: pos.x, z: pos.z } : null;   // rabbits flee the player too
   agents.syncSky(sky); agents.update(simDt);       // share day/night; flicker fires
   if (playing) music.update(terrainType(pos.x, pos.z), simDt);
   npcApi.update(camera, simDt, tint);
+  footsteps.update(simDt, {
+    moving: !!(dx || dz) && !fly && !boating,
+    running: !!(keys.ShiftLeft || keys.ShiftRight),
+    terrain: terrainType(pos.x, pos.z),
+  }, npcApi.npcs, { x: pos.x, z: pos.z, yaw, terrainAt: terrainType });
+  boats.update(simDt, now * 0.001);                  // bob the moored canoes
+  if (playing) ambience.update(dt, {                  // fire / sea / wind / chopping
+    here: { x: pos.x, z: pos.z, yaw },
+    fires: agents.fires, npcs: npcApi.npcs,
+    wind: sky.wind ? sky.wind.length() : 0, sea: seaProx(),
+  });
   agents.separate(simDt);                          // keep NPCs from overlapping / crowding
   agents.resolveTrees();                           // pop anyone out of a trunk they touched
   if (simDt > 0){                                  // walkers tread paths into the wear field
     for (const n of npcApi.npcs) if (n.moving) trail.deposit(n.x, n.z, simDt);
     if (avatar && avatar.moving) trail.deposit(avatar.x, avatar.z, simDt);
     if ((dx || dz) && !fly) trail.deposit(pos.x, pos.z, simDt);
+    for (const q of agents.fauna) if (q.alive && q.moving) trail.deposit(q.x, q.z, simDt * 0.25);   // faint animal traces
   }
   trail.tick(simDt);
   if (avatar) avatar.update(camera, simDt, tint);
   if (pucks) pucks.update(camera, simDt, pos, tint);   // flock owns Puck's movement
+  if (warren) warren.update(camera, simDt, tint);      // draw the rabbits
   forage.update(simDt);
   grassDetail.update(pos.x, pos.z, now * 0.001, sky.groundTint);   // blades follow the viewer, sway, lit like the turf
   grassClumps.update(pos.x, pos.z);                  // far static clumps (rebuilt only when moving)
@@ -771,6 +954,7 @@ function loop(now){
     (nearTalker ? `  ·  E: talk to ${nearTalker.name}` : '') +
     (nearFruit ? `  ·  E: gather ${nearFruit.kind}` : '') +
     (nearObject ? `  ·  E: examine` : '') +
+    (boating ? `  ·  E: step ashore` : nearBoat ? `  ·  E: board the boat` : '') +
     (basketText() ? `  ·  basket: ${basketText()}` : '') +
     (poseMsg ? `  — ${poseMsg}` : '') + (forageMsg ? `  — ${forageMsg}` : '');
   requestAnimationFrame(loop);

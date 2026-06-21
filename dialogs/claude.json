@@ -126,9 +126,12 @@
         { "label": "How they feed themselves.", "next": "w-forage" },
         { "label": "How they cook.", "next": "w-cook" },
         { "label": "Trade, and things of worth.", "next": "w-barter" },
+        { "label": "Sharing, and standing.", "next": "w-share" },
+        { "label": "The hunt.", "next": "w-hunt" },
         { "label": "Kith and kin.", "next": "w-kin" },
         { "label": "Names, and the knowing of them.", "next": "w-names" },
         { "label": "The news they carry.", "next": "w-gossip" },
+        { "label": "Reading the stars.", "next": "w-omens" },
         { "label": "Their fire at night.", "next": "w-gather" }
       ]
     },
@@ -190,6 +193,18 @@
     },
     "w-gather": {
       "text": "\"By day their talk runs all to practical things — where the food is, whose woodpile's low. But after dark, when a fire is lit and enough have drawn round it, something else kindles: a gathering. They settle in a ring facing the flames, sway together to a low song, and the loneliness goes out of them as it never quite does by daylight. It is the oldest thing folk do — the fire, the circle, the night-talk. From such small gatherings, given time, come towns.\"",
+      "choices": []
+    },
+    "w-share": {
+      "text": "\"Here is the heart of them, and the thing I am fondest of. A hungry soul does not starve beside a full pack — it *asks*, and the open-handed give, freely, no payment sought. Kin give almost without thought; others as their nature allows. And the giving is the wealth: a generous name spreads on the [[w-gossip|wind]], and standing is won by what you hand away, not what you hoard. Sit on plenty while your kin go hungry and watch your esteem quietly bleed. They level themselves — no king rises where every full hand is expected to open.\"",
+      "choices": []
+    },
+    "w-hunt": {
+      "text": "\"Rabbits crop the meadow — and bolt the moment you draw near, quick as a thought. A hungry hunter with a keen eye will give chase, but most beasts win clear; it is luck and a sharp eye more than certainty. Yet when one is caught, it is a windfall — meat enough for many, more than a forager's handful. And meat, like roots, wants the [[w-cook|pot]]; so the catch becomes a stew, and the stew is [[w-share|shared]] round. The kill is the great sharing — the very thing their open-handedness was made for.\"",
+      "choices": []
+    },
+    "w-omens": {
+      "text": "\"Some among them read the night sky — and here's the marvel: the moon and sun they read are *true*. The moon truly waxes and wanes, truly drifts through the houses of the ecliptic — Rowan, Otter, Hare, and the rest — and the [[w-stars|stars]] beneath are a real catalogue. The stargazers know none of the mechanism, of course. They see the full moon ride into the House of the Hearth and call it a lucky night for sharing a fire. The reading is folk-fancy; the sky it reads is real. And an omen, once spoken, travels like any other [[w-gossip|rumour]] — soon even those who never look up are repeating what the stars 'said'.\"",
       "choices": []
     }
   }

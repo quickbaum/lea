@@ -495,6 +495,7 @@ export class Sky {
     this.sunLight.color.setRGB(1.0, 0.93 - 0.2 * warm, 0.82 - 0.35 * warm);
     this.moonLight.position.copy(this.moonDir).multiplyScalar(100);
     const moonIllum = (1 - Math.cos(this.moonLon - this.sunLon)) / 2;
+    this.moonIllum = moonIllum;                            // exposed for astrology (read by agents/dialogue)
     this.moonLight.intensity = clamp(this.moonDir.y, 0, 1) * 0.22 * moonIllum * night;
     this.hemi.intensity = 0.3 + 1.05 * day;
     this.hemi.color.setRGB(0.6 + 0.4 * day, 0.65 + 0.35 * day, 0.7 + 0.3 * day);

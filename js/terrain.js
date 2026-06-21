@@ -44,6 +44,21 @@ export function terrainType(x, z){
 }
 export const walkable = (x, z) => height(x, z) > WATER + 0.25;
 
+// How far to lower an object's base so a flat footprint of radius r doesn't float
+// on a slope: the drop from the centre down to the lowest ground under that
+// footprint. Used to sink tree trunks into a hillside so the downhill roots reach
+// soil instead of hanging in the air (trees stay vertical — we bury, not tilt).
+export function groundSink(x, z, r){
+  const h0 = height(x, z);
+  let mn = h0;
+  for (let k = 0; k < 8; k++){
+    const a = k / 8 * Math.PI * 2;
+    const h = height(x + Math.cos(a) * r, z + Math.sin(a) * r);
+    if (h < mn) mn = h;
+  }
+  return h0 - mn;     // >= 0
+}
+
 // Soil richness 0..1: moist lowland grass/mud is rich; dry sand and high rock
 // are poor. Plants grown on richer soil fill out broader and fuller.
 export function soilRichness(x, z){
