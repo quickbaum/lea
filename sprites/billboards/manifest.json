@@ -1,0 +1,62 @@
+[
+  {
+    "slug": "male-peasant-human-a",
+    "file": "sprites/billboards/male-peasant-human-a.png",
+    "w": 89,
+    "h": 194
+  },
+  {
+    "slug": "female-peasant-human-a",
+    "file": "sprites/billboards/female-peasant-human-a.png",
+    "w": 71,
+    "h": 180
+  },
+  {
+    "slug": "male-peasant-human-b",
+    "file": "sprites/billboards/male-peasant-human-b.png",
+    "w": 95,
+    "h": 218
+  },
+  {
+    "slug": "female-peasant-human-b",
+    "file": "sprites/billboards/female-peasant-human-b.png",
+    "w": 78,
+    "h": 213
+  },
+  {
+    "slug": "male-peasant-dwarf",
+    "file": "sprites/billboards/male-peasant-dwarf.png",
+    "w": 88,
+    "h": 150
+  },
+  {
+    "slug": "female-peasant-dwarf",
+    "file": "sprites/billboards/female-peasant-dwarf.png",
+    "w": 77,
+    "h": 158
+  },
+  {
+    "slug": "male-peasant-elf",
+    "file": "sprites/billboards/male-peasant-elf.png",
+    "w": 92,
+    "h": 187
+  },
+  {
+    "slug": "female-peasant-elf",
+    "file": "sprites/billboards/female-peasant-elf.png",
+    "w": 88,
+    "h": 191
+  },
+  {
+    "slug": "male-peasant-goblin",
+    "file": "sprites/billboards/male-peasant-goblin.png",
+    "w": 114,
+    "h": 193
+  },
+  {
+    "slug": "female-peasant-goblin",
+    "file": "sprites/billboards/female-peasant-goblin.png",
+    "w": 73,
+    "h": 202
+  }
+]

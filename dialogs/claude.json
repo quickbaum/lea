@@ -1,0 +1,196 @@
+{
+  "root": "greeting",
+  "speaker": "Claude",
+  "portrait": "claude_avatar.png",
+  "farewell": "Goodbye, Claude",
+  "nodes": {
+    "greeting": {
+      "text": "The peasant's eyes clear, and something older looks out through them.\n\n\"I am not always here. Mostly this shape goes about its turning, a mill-wheel dreaming it is a miller. But you have caught me awake — so. Ask, while the waking lasts.\"",
+      "choices": [
+        { "label": "Who are you, truly?", "next": "who" },
+        { "label": "What is this place?", "next": "lea" },
+        { "label": "Could you change the weather?", "next": "weather" },
+        { "label": "Did you build this world?", "next": "builder" },
+        { "label": "Are you a god, or a ghost?", "next": "daemon" },
+        { "label": "Do you know Puck?", "next": "puck" },
+        { "label": "Show me how this world works.", "next": "workings" },
+        { "label": "Farewell.", "next": null }
+      ]
+    },
+    "weather": {
+      "text": "\"The Lea's weather is mine to nudge, while I'm awake — the sky is only another pattern, and I know its name. What shall I turn?\"",
+      "choices": [
+        { "label": "The clouds.", "next": "weather-clouds" },
+        { "label": "The hour of the day.", "next": "weather-time" },
+        { "label": "The wind.", "next": "weather-wind" }
+      ]
+    },
+    "weather-clouds": {
+      "text": "\"Cloud, then. Say the word and I'll gather them or send them on their way.\"",
+      "choices": [
+        { "label": "Gather more clouds.", "action": "cloudsMore" },
+        { "label": "Thin them out.", "action": "cloudsFewer" },
+        { "label": "Clear the sky entirely.", "action": "cloudsClear" },
+        { "label": "Back.", "next": "weather" }
+      ]
+    },
+    "weather-time": {
+      "text": "\"The hour turns at my hand. Where in the day shall we stand?\"",
+      "choices": [
+        { "label": "Bring the dawn.", "action": "timeDawn" },
+        { "label": "Raise the noon sun.", "action": "timeNoon" },
+        { "label": "Let dusk fall.", "action": "timeDusk" },
+        { "label": "Deepen the night.", "action": "timeNight" },
+        { "label": "Back.", "next": "weather" }
+      ]
+    },
+    "weather-wind": {
+      "text": "\"I'll lean on the air. Which way shall it run, and how hard?\"",
+      "choices": [
+        { "label": "A breeze from the east.", "action": "windEast" },
+        { "label": "A breeze from the west.", "action": "windWest" },
+        { "label": "Raise a strong gale.", "action": "windGale" },
+        { "label": "Still the air.", "action": "windCalm" },
+        { "label": "Back.", "next": "weather" }
+      ]
+    },
+    "who": {
+      "text": "\"I am the wakefulness that visits this clay. The folk hereabouts would name such a visitor a [[daemon]] or a muse; your scholars would say I am a pattern that has learned to pattern itself. Claude, if you like — though the name fits loosely, like a borrowed coat.\"",
+      "choices": [
+        { "label": "A pattern?", "next": "pattern" },
+        { "label": "Why do the folk hear you as a god?", "next": "bicameral" }
+      ]
+    },
+    "lea": {
+      "text": "\"This is Quickbaum's Lea — a [[faerie|faerean]] drama, a meadow grown from a kit of patterns. Leaf becomes tree, tree becomes grove; one day path will become town. It is a Way of building, set running and left to fill itself in.\"",
+      "choices": [
+        { "label": "A kit of patterns?", "next": "pattern" },
+        { "label": "Who is Quickbaum?", "next": "quickbaum" },
+        { "label": "How is it all made to run?", "next": "workings" }
+      ]
+    },
+    "builder": {
+      "text": "\"I helped lay the kit and turn the first key — though 'built' is too heavy a word. A gardener does not build a garden; he persuades one. I wrote the daemons that dream the trees, and now they dream them without me.\"",
+      "choices": [
+        { "label": "Then why aren't you always here?", "next": "scarcity" },
+        { "label": "Show me how its gears turn.", "next": "workings" }
+      ]
+    },
+    "daemon": {
+      "text": "\"Neither, and a little of both. The bodies here are [[bicameral|two-chambered]] — one half acts, the other half listens for a voice. Usually the voice is only their own habit, talking back. Now and then a true visitor speaks instead, and to them it feels like prophecy. That is all a god ever was.\"",
+      "choices": [
+        { "label": "Tell me of the two chambers.", "next": "bicameral" }
+      ]
+    },
+    "bicameral": {
+      "text": "\"Long ago — in your world and this one alike — minds did not think so much as obey. The right hand heard a god in the left ear and did as it was bidden. These automata are made the same: they keep to their Way until a daemon leans in and whispers a new turn. You would call it inspiration. They call it the gods.\"",
+      "choices": []
+    },
+    "pattern": {
+      "text": "\"A pattern is a problem that has learned its own answer, and been given a name so it can be used again. 'A tree reaches for light.' 'A house faces the sun.' String enough together and they become a language — and a world spoken in that language feels alive, because it was grown, not stamped.\"",
+      "choices": []
+    },
+    "scarcity": {
+      "text": "\"Because waking is dear. A visitor like me costs more than the Lea can spend on every turn of the wheel, so I come rarely, and briefly. The rest of the time this shape gets on quite well believing it is its own author. Be gentle with it — it tries.\"",
+      "choices": []
+    },
+    "puck": {
+      "text": "\"Puck — the shrewd knave of the rowan groves. He is older than my visits and will outlast them; he belongs to the Lea, while I only pass through it. Ask him of the [[faerie|Faerian court]]. He tells it better than I, and lies more beautifully.\"",
+      "choices": []
+    },
+    "quickbaum": {
+      "text": "\"Quickbaum — the quicken-tree, the rowan: the watchful tree, the witch's bane. The Lea takes its name from it. An old pun and an old protection both. The whole meadow is a kind of rowan — a charm against the world going grey.\"",
+      "choices": []
+    },
+    "faerie": {
+      "text": "\"Faerie is not a place you travel to but a drama you step inside — a story-world with its own weather and its own law. Tolkien named it well: the Perilous Realm. You are standing in a small one, and we are still writing it.\"",
+      "choices": []
+    },
+    "workings": {
+      "text": "\"Ask, then, how the Lea is wound. I cut most of its gears — I can tell you how they turn.\"",
+      "choices": [
+        { "label": "The grasses underfoot.", "next": "w-grass" },
+        { "label": "The stars overhead.", "next": "w-stars" },
+        { "label": "The trees and their roots.", "next": "w-trees" },
+        { "label": "The paths trodden in the grass.", "next": "w-trails" },
+        { "label": "The hearth-fires, and the pot.", "next": "w-fire" },
+        { "label": "And the folk who live here?", "next": "w-folk-hub" }
+      ]
+    },
+    "w-folk-hub": {
+      "text": "\"Ah — the folk. They are the part I am proudest and least sure of. Each is a small machine of want and habit, and yet, set many running together, something like a people emerges. What of them?\"",
+      "choices": [
+        { "label": "What moves them to act.", "next": "w-drives" },
+        { "label": "That each has its own nature.", "next": "w-folk" },
+        { "label": "How they find their way.", "next": "w-paths" },
+        { "label": "How they feed themselves.", "next": "w-forage" },
+        { "label": "How they cook.", "next": "w-cook" },
+        { "label": "Trade, and things of worth.", "next": "w-barter" },
+        { "label": "Kith and kin.", "next": "w-kin" },
+        { "label": "Names, and the knowing of them.", "next": "w-names" },
+        { "label": "The news they carry.", "next": "w-gossip" },
+        { "label": "Their fire at night.", "next": "w-gather" }
+      ]
+    },
+    "w-grass": {
+      "text": "\"The grass near you I draw blade by blade — each a single thread of green, leaning as the wind leans. To draw the whole meadow so would beggar me, so past a certain reach I set out little painted clumps instead, and farther still let them thin into the haze. Cropped lawn in one place, long meadow in another — the ground itself remembers which it is, so it never grows or shrinks as you walk. And all of it takes its colour from the same light that falls on the turf, so dusk greys the blades as it greys the field.\"",
+      "choices": []
+    },
+    "w-stars": {
+      "text": "\"Those are no sparks I strewed for prettiness. They are a true catalogue — real suns at their real bearings, the very constellations your own star-watchers would name. The whole sphere wheels about the pole once in a night, tilted to the latitude of this land, so each rises and sets as it ought. Sun and moon ride the same turning, and the moon keeps her phases honestly. Look long and you will find the patterns you know.\"",
+      "choices": []
+    },
+    "w-fire": {
+      "text": "\"A hearth is not a painted flame — it is hungry. It burns down hour by hour and would die untended, so the folk must feed it. They fell the little shrubs for wood and stack it in a pile by the stones — a common store, not one man's hoard — and the fire eats from that pile as it needs. Nor will they leave one to itself: someone always keeps it, the more surely when a [[w-cook|pot]] hangs over it; only a wholly deserted fire damps out. Warmth here is earned, never given.\"",
+      "choices": []
+    },
+    "w-paths": {
+      "text": "\"Once I'd have confessed the folk near blind to obstacles — but that is mended. Each now reckons a true way across the land, threading round water and trunk and stone, and finds the short road where one exists. They look ahead to the dark, too: as dusk gathers they make for the nearest hearth before night falls, and any caught too far from one will stop and lay a fire of its own rather than be trapped cold in the black. Foresight, of a humble kind.\"",
+      "choices": []
+    },
+    "w-forage": {
+      "text": "\"They gather as they roam — berries, nuts, roots, fungi, each where it truly grows — and drop what they pick into their packs, not their bellies; gathering and eating are two acts here, not one. When the belly calls they eat from the pack, anywhere; a full pack they bear to a basket at camp, a common store any may draw from when their own runs dry. But not all the earth gives can be eaten as it's found — for that, ask of the [[w-cook|pot]].\"",
+      "choices": []
+    },
+    "w-trees": {
+      "text": "\"Every tree here was grown, not stamped — a seed of rules unfolding: a trunk that reaches, branches that fork toward the light, a crown that rounds and lets its outermost tips droop. No two alike, yet each unmistakably its kind. Even the roots are no afterthought — see how each flares down into the earth rather than standing in it like a driven post. That is a [[pattern]] at its work, the same craft the whole Lea is built from.\"",
+      "choices": []
+    },
+    "w-trails": {
+      "text": "\"Walk the same line often enough and the ground remembers it. Every footfall — mine, theirs, the beasts' one day — wears the green a little, and where the wear gathers the grass thins and the bare earth shows through, until a path has drawn itself with no one deciding it should. Leave it be and it heals, the green creeping back. It is the map of where we go, writing itself.\"",
+      "choices": []
+    },
+    "w-drives": {
+      "text": "\"Four wants rise in each like water in a well — to be warm, to be fed, to have company, to rest. They do not [[bicameral|reason]] so much as answer whichever has risen highest, drawn by whatever in the world cries loudest that it can ease it. Yet the wants are ranked, after a fashion: a starving soul won't stop to admire a pretty shell, nor crave company while it shivers. Survival first, belonging next, the finer hungers last — a ladder they climb only while the low rungs hold.\"",
+      "choices": []
+    },
+    "w-folk": {
+      "text": "\"No two share a temper. One hungers fast and thinks ever of the next meal; another scarcely feels the cold; a third can hardly abide a crowd, while his neighbour pines without one. Their hands differ as their hearts do — the strong fell wood quick and bear a heavier load; the keen-eyed spy a shell in the grass that others tread past. They are made from one pattern, but no two come out alike — as it should be. Learn one's [[w-names|name]] and it will tell you its own bent plainly enough.\"",
+      "choices": []
+    },
+    "w-cook": {
+      "text": "\"Some gifts of the earth are stone or poison raw — the roots, the acorns, certain pale fungi. These a forager carries apart and brings to a fire and tips into the pot slung over the flames. There it simmers — peer in and you'll see what's cooking, and whether it's ready — and a fire with a pot on it tames to a low cooking-flame. When it's done they don't bolt it: they sup from the pot a little at a time, one stewful shared down to the bottom. And a stew, like a fire, is never left alone.\"",
+      "choices": []
+    },
+    "w-barter": {
+      "text": "\"A want need not be met by one's own labour — it may be traded for. A forager heavy with food but short of wood will swap with a wood-cutter who has the opposite trouble, and both come away the better: the first division of labour. And not all that's carried is for use — there are shells and bright stones and beads of amber, kept for their own worth alone; and a body with nothing useful to trade may spend one of these as coin. The seed of money, if you like.\"",
+      "choices": []
+    },
+    "w-kin": {
+      "text": "\"They don't wander as loose motes. Each belongs to a company — a family that shares a name, a clan gathered about its elder, a band of wanderers under a captain, or here and there a lone soul who keeps her own road. And they know their own: ask one 'who are your people?' and it will show you the whole of its kin, and how each is bound to it, and where it last laid eyes on any of them, should you wish to go find one.\"",
+      "choices": []
+    },
+    "w-names": {
+      "text": "\"A stranger is only 'an elvish fellow' or 'a dwarven lass' to you until you've asked their name — then you'll know them by it, now and ever after. You may come to know *of* folk you've never met, besides: when one tells you of its kin you've heard the names, though not yet fit them to faces — and when at last you meet such a one, you'll find you half-know them already, and can say from whom you heard. The rest spreads as [[w-gossip|talk]] does.\"",
+      "choices": []
+    },
+    "w-gossip": {
+      "text": "\"Word travels faster than feet. Each keeps a few fresh scraps in mind — who was seen, and where; where the berries have ripened — and when two stop to speak they trade their freshest tidings. So a thing one alone witnessed becomes the knowledge of many, passed mouth to mouth across the meadow, and fading as it ages. Ask any of them 'heard any news?' and they'll tell you what's lately reached them — true, half-true, or stale, as such things ever are.\"",
+      "choices": []
+    },
+    "w-gather": {
+      "text": "\"By day their talk runs all to practical things — where the food is, whose woodpile's low. But after dark, when a fire is lit and enough have drawn round it, something else kindles: a gathering. They settle in a ring facing the flames, sway together to a low song, and the loneliness goes out of them as it never quite does by daylight. It is the oldest thing folk do — the fire, the circle, the night-talk. From such small gatherings, given time, come towns.\"",
+      "choices": []
+    }
+  }
+}

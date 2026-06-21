@@ -1,0 +1,299 @@
+{
+  "root": "greeting",
+  "speaker": "Puck",
+  "portrait": "sprites/puck.png",
+  "nodes": {
+    "greeting": {
+      "text": "Through Rowan Groves [[puck]] spies you stroll, from the margin of a scroll.\n\nDon't ask the Chort for Giffy Tea... Rather, you should call for... Me!\n\nSwinging, like the planchette amid [[what-is-rowan|quickened branchette]].",
+      "choices": [
+        {
+          "label": "What are these Rowan Groves through which I stroll?",
+          "next": "what-is-rowan"
+        },
+        {
+          "label": "Just what is a puck, exactly?",
+          "next": "puck"
+        },
+        {
+          "label": "Why shouldn't I ask a Chort for Giffy Tea?",
+          "next": "why-no-giffy-tea"
+        },
+        {
+          "label": "What's the symbol under the title?",
+          "next": "bregalad"
+        },
+        {
+          "label": "Under the symbol I see the letters 'FITI', what's that about?",
+          "next": "fit"
+        },
+        {
+          "label": "Why is the text adorned with red berries?",
+          "next": "why-rowan"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "puck": {
+      "text": "Puck is me and I am Puck, though some calls us brownies, hobgoblins and robins. We are the jesters of the Faerian court, and the bard calls us shrewd knaves.",
+      "choices": [
+        {
+          "label": "Is Puck Rock a genre?",
+          "next": "puck-rock"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "fit": {
+      "text": "A Fitt is what they called a section or chapter of a poem. This faërian drama has three, but only one is included in its entirety. After that, it's all prophecies upon prophecies, and rather dull ones.",
+      "choices": [
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "what-is-rowan": {
+      "text": "The quickbeam — the quickened tree. Small, stubborn, red-berried. It grows even on a cliff's ledges, on thin upland loam, through cracks in granite and limestone where other trees give up.",
+      "choices": [
+        {
+          "label": "What do others call it?",
+          "next": "names-of-rowan"
+        },
+        {
+          "label": "Why is the text thus adorned?",
+          "next": "why-rowan"
+        },
+        {
+          "label": "Tell me about the red berries.",
+          "next": "rowan-berries"
+        },
+        {
+          "label": "What family is it in?",
+          "next": "rowan-family"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "why-rowan": {
+      "text": "You are standing at the threshold, at the liminal space before thought, the portal into the Otherworld. \n\nAmidst the [[rowan berries|red berries]] of the quickened tree, it is safe to view a [[Faerie Rade]].",
+      "choices": [
+        {
+          "label": "What of rowans and the fae?",
+          "next": "rowan-and-black-magic"
+        },
+        {
+          "label": "A portal tree?",
+          "next": "rowan-as-portal"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "bregalad": {
+      "text": "That there is a name, and the name is Breg Galadh. In the Sindarin tongue, it means «quick tree.» Tolkien named it thus based on the tree's name in Old English: cwic-beám. Today, this tree is called Rowan.",
+      "choices": [
+        {
+          "label": "Tell me more about rowan trees.",
+          "next": "what-is-rowan"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "rowan-and-black-magic": {
+      "text": "They say that rowan wards off black magic. With a branch of rowan above the door, one can safely gaze upon a [[faerie rade]]. And of course, most potent for this is a [[flying rowan]].",
+      "choices": [
+        {
+          "label": "What's a faerie rade?",
+          "next": "faerie-rade"
+        },
+        {
+          "label": "What is a flying rowan?",
+          "next": "flying-rowan"
+        },
+        {
+          "label": "A portal tree?",
+          "next": "rowan-as-portal"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "rowan-berries": {
+      "text": "\"Red her cheeks as rowans are, bright her eyes as any star.\"\n\nThese berries ripen in autumn in blood-red clusters. Too bitter for you to eat raw, but sweet enough to make jam and wine.",
+      "choices": [
+        {
+          "label": "What of rowans and the fae?",
+          "next": "rowan-and-black-magic"
+        },
+        {
+          "label": "What family is it in?",
+          "next": "rowan-family"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "rowan-as-portal": {
+      "text": "Neodruids call the rowan \"portal tree\", for it is a portal between this world and the other.",
+      "choices": [
+        {
+          "label": "What's a neodruid?",
+          "next": "neodruidism"
+        },
+        {
+          "label": "What of rowans and the fae?",
+          "next": "rowan-and-black-magic"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "flying-rowan": {
+      "text": "A rowan most potent! It grows not from the ground, but from a seed lodged in the fork of some other tree, carried there by birds in their flight. Its roots are not in this Earth.",
+      "choices": [
+        {
+          "label": "What of rowans and the fae?",
+          "next": "rowan-and-black-magic"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "names-of-rowan": {
+      "text": "In Russia they call it рябина and in Old English cwic-beám. In Tolkien's Elvish: Bregalad, and in today's English Mountain Ash — no relation. Also it's been called Wayfarer's Tree, and Traveller's Tree, for it was said to keep you from losing your way in your travels.",
+      "choices": [
+        {
+          "label": "What did he mean by \"Bregalad\"?",
+          "next": "bregalad"
+        },
+        {
+          "label": "So it's not related to ash?",
+          "next": "rowan-family"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "where-does-rowan-grow": {
+      "text": "All through the northern parts of the green earth you will find rowans growing. They are in Scotland, Scandinavia, the Alps, Siberia, Newfoundland, and in Ontario too. They prefer cool, wet highlands, they go where other trees cannot follow.",
+      "choices": [
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "rowan-family": {
+      "text": "The rowan is a rose. In the Rosaceae family are also hawthorns, apples, pears, cherries, meadowsweet. The ash is something else entirely, and so it is falsely that they are named mountain ash.",
+      "choices": [
+        {
+          "label": "Tell me about the red berries.",
+          "next": "rowan-berries"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell.",
+          "next": null
+        }
+      ]
+    },
+    "faerie-rade": {
+      "text": "\"In the night afore Roodmass I had trysted with a neebor lass a Scots mile frae hame to talk anent buying braws i' the fair. We had nae sutten lang aneath the haw-buss till we heard the loud laugh of fowk riding, wi' the jingling o' bridles, and the clanking o' hoofs. We banged up, thinking they wad ride owre us. We kent nae but it was drunken fowk ridin' to the fair i' the forenight. We glowred roun' and roun', and sune saw it was the Fairie-fowks Rade. We cowred down till they passed by. A beam o' light was dancing owre them mair bonnie than moonshine: they were a' wee wee fowk wi' green scarfs on, but ane that rade foremost, and that ane was a good deal larger than the lave wi' bonnie lang hair, bun' about wi' a strap whilk glinted like stars. They rade on braw wee white naigs, wi' unco lang swooping tails, an' manes hung wi' whustles that the win' played on. This an' their tongue when they sang was like the soun' o' a far awa psalm. Marion an' me was in a brade lea fiel', where they came by us; a high hedge o' haw-trees keepit them frae gaun through Johnnie Corrie's corn, but they lap a' owre it like sparrows, and gallopt into a green know beyont it. We gaed i' the morning to look at the treddit corn; but the fient a hoof mark was there, nor a blade broken.\"",
+      "choices": [
+        {
+          "label": "Do you know much about Faerie?",
+          "next": "faerie"
+        }
+      ]
+    },
+    "why-no-giffy-tea": {
+      "text": "Ask a chort for tea it'll bring you gasoline.",
+      "choices": [
+        {
+          "label": "What's a chort?",
+          "next": "chort"
+        }
+      ]
+    },
+    "chort": {
+      "text": "They lurk where sixes tangle. \n\n\"Like raches set on wylde fee\nthe chorts are ever upon me\ntangled in four sixes swirl\nhiding seeds through our world\nlocked in like automnal squirrels\nset to nest in canopy\nthey've planted this here tree\nand its ruby-red berry\"",
+      "choices": [
+        {
+          "label": "What's a rache?",
+          "next": "rache"
+        }
+      ]
+    },
+    "rache": {
+      "text": "That's a scent hound. In the Middle Ages, lords on their hunts would set packs of raches to track down boar and deer.",
+      "choices": []
+    },
+    "puck-rock": {
+      "text": "Puck rock is not a genre, it's a rock where the [[puck]] like to hang out.",
+      "choices": []
+    },
+    "neodruidism": {
+      "text": "Romanticism was all the rage in your 18th century, and the neodruids are part of that whole trend. They returned to tradition, though much of that tradition was their reconstruction based on the little they knew. But we the [[puck]] gave from time to time hints to steer them, and sometimes even right.",
+      "choices": []
+    },
+    "tolkien": {
+      "text": "The professor",
+      "choices": []
+    },
+    "faerie": {
+      "text": "It's three days travel, wading through rivers of blood and tears. \n\nSome say that there are four island cities there, each with its own prophet poet.",
+      "choices": []
+    }
+  }
+}

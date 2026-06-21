@@ -1,0 +1,434 @@
+[
+  {
+    "slug": "air-elemental",
+    "name": "Air Elemental",
+    "file": "sprites/air-elemental.png",
+    "bytes": 1963128
+  },
+  {
+    "slug": "angel",
+    "name": "Angel",
+    "file": "sprites/angel.png",
+    "bytes": 2440050
+  },
+  {
+    "slug": "archer",
+    "name": "Archer",
+    "file": "sprites/archer.png",
+    "bytes": 2098811
+  },
+  {
+    "slug": "behemoth",
+    "name": "Behemoth",
+    "file": "sprites/behemoth.png",
+    "bytes": 2679824
+  },
+  {
+    "slug": "beholder",
+    "name": "Beholder",
+    "file": "sprites/beholder.png",
+    "bytes": 1925540
+  },
+  {
+    "slug": "black-dragon",
+    "name": "Black Dragon",
+    "file": "sprites/black-dragon.png",
+    "bytes": 3164226
+  },
+  {
+    "slug": "blaster-guy",
+    "name": "Blaster Guy",
+    "file": "sprites/blaster-guy.png",
+    "bytes": 1728654
+  },
+  {
+    "slug": "cat",
+    "name": "Cat",
+    "file": "sprites/cat.png",
+    "bytes": 456086
+  },
+  {
+    "slug": "chicken",
+    "name": "Chicken",
+    "file": "sprites/chicken.png",
+    "bytes": 192177
+  },
+  {
+    "slug": "devil",
+    "name": "Devil",
+    "file": "sprites/devil.png",
+    "bytes": 2650464
+  },
+  {
+    "slug": "dog",
+    "name": "Dog",
+    "file": "sprites/dog.png",
+    "bytes": 420349
+  },
+  {
+    "slug": "dragon",
+    "name": "Dragon",
+    "file": "sprites/dragon.png",
+    "bytes": 2206524
+  },
+  {
+    "slug": "dragonfly",
+    "name": "Dragonfly",
+    "file": "sprites/dragonfly.png",
+    "bytes": 1577039
+  },
+  {
+    "slug": "dwarven-soldier",
+    "name": "Dwarven Soldier",
+    "file": "sprites/dwarven-soldier.png",
+    "bytes": 1708287
+  },
+  {
+    "slug": "earth-elemental",
+    "name": "Earth Elemental",
+    "file": "sprites/earth-elemental.png",
+    "bytes": 2712271
+  },
+  {
+    "slug": "elven-archer",
+    "name": "Elven Archer",
+    "file": "sprites/elven-archer.png",
+    "bytes": 1894959
+  },
+  {
+    "slug": "elven-warrior",
+    "name": "Elven Warrior",
+    "file": "sprites/elven-warrior.png",
+    "bytes": 1571388
+  },
+  {
+    "slug": "female-peasant-dwarf",
+    "name": "Female Peasant Dwarf",
+    "file": "sprites/female-peasant-dwarf.png",
+    "bytes": 1675362
+  },
+  {
+    "slug": "female-peasant-elf",
+    "name": "Female Peasant Elf",
+    "file": "sprites/female-peasant-elf.png",
+    "bytes": 1212309
+  },
+  {
+    "slug": "female-peasant-goblin",
+    "name": "Female Peasant Goblin",
+    "file": "sprites/female-peasant-goblin.png",
+    "bytes": 1232996
+  },
+  {
+    "slug": "female-peasant-human-a",
+    "name": "Female Peasant Human A",
+    "file": "sprites/female-peasant-human-a.png",
+    "bytes": 1207269
+  },
+  {
+    "slug": "female-peasant-human-b",
+    "name": "Female Peasant Human B",
+    "file": "sprites/female-peasant-human-b.png",
+    "bytes": 2069089
+  },
+  {
+    "slug": "fire-elemental",
+    "name": "Fire Elemental",
+    "file": "sprites/fire-elemental.png",
+    "bytes": 1542617
+  },
+  {
+    "slug": "follower-of-the-moon",
+    "name": "Follower of the Moon",
+    "file": "sprites/follower-of-the-moon.png",
+    "bytes": 2115178
+  },
+  {
+    "slug": "follower-of-the-sun",
+    "name": "Follower of the Sun",
+    "file": "sprites/follower-of-the-sun.png",
+    "bytes": 2047263
+  },
+  {
+    "slug": "gargoyle",
+    "name": "Gargoyle",
+    "file": "sprites/gargoyle.png",
+    "bytes": 2446968
+  },
+  {
+    "slug": "genie",
+    "name": "Genie",
+    "file": "sprites/genie.png",
+    "bytes": 1430280
+  },
+  {
+    "slug": "ghost",
+    "name": "Ghost",
+    "file": "sprites/ghost.png",
+    "bytes": 1667511
+  },
+  {
+    "slug": "ghoul",
+    "name": "Ghoul",
+    "file": "sprites/ghoul.png",
+    "bytes": 2196585
+  },
+  {
+    "slug": "giant-bat",
+    "name": "Giant Bat",
+    "file": "sprites/giant-bat.png",
+    "bytes": 1393952
+  },
+  {
+    "slug": "giant-rat",
+    "name": "Giant Rat",
+    "file": "sprites/giant-rat.png",
+    "bytes": 1252276
+  },
+  {
+    "slug": "giant-shark",
+    "name": "Giant Shark",
+    "file": "sprites/giant-shark.png",
+    "bytes": 1984337
+  },
+  {
+    "slug": "giant-spider",
+    "name": "Giant Spider",
+    "file": "sprites/giant-spider.png",
+    "bytes": 1444567
+  },
+  {
+    "slug": "goblin",
+    "name": "Goblin",
+    "file": "sprites/goblin.png",
+    "bytes": 2000999
+  },
+  {
+    "slug": "gog",
+    "name": "Gog",
+    "file": "sprites/gog.png",
+    "bytes": 2777174
+  },
+  {
+    "slug": "golem",
+    "name": "Golem",
+    "file": "sprites/golem.png",
+    "bytes": 2079954
+  },
+  {
+    "slug": "griffin",
+    "name": "Griffin",
+    "file": "sprites/griffin.png",
+    "bytes": 1811731
+  },
+  {
+    "slug": "harpy",
+    "name": "Harpy",
+    "file": "sprites/harpy.png",
+    "bytes": 1821688
+  },
+  {
+    "slug": "hydra",
+    "name": "Hydra",
+    "file": "sprites/hydra.png",
+    "bytes": 3319847
+  },
+  {
+    "slug": "knight",
+    "name": "Knight",
+    "file": "sprites/knight.png",
+    "bytes": 1785632
+  },
+  {
+    "slug": "lich",
+    "name": "Lich",
+    "file": "sprites/lich.png",
+    "bytes": 2289616
+  },
+  {
+    "slug": "light-elemental",
+    "name": "Light Elemental",
+    "file": "sprites/light-elemental.png",
+    "bytes": 462977
+  },
+  {
+    "slug": "mage",
+    "name": "Mage",
+    "file": "sprites/mage.png",
+    "bytes": 2214574
+  },
+  {
+    "slug": "male-peasant-dwarf",
+    "name": "Male Peasant Dwarf",
+    "file": "sprites/male-peasant-dwarf.png",
+    "bytes": 1159133
+  },
+  {
+    "slug": "male-peasant-elf",
+    "name": "Male Peasant Elf",
+    "file": "sprites/male-peasant-elf.png",
+    "bytes": 1200597
+  },
+  {
+    "slug": "male-peasant-goblin",
+    "name": "Male Peasant Goblin",
+    "file": "sprites/male-peasant-goblin.png",
+    "bytes": 1223795
+  },
+  {
+    "slug": "male-peasant-human-a",
+    "name": "Male Peasant Human A",
+    "file": "sprites/male-peasant-human-a.png",
+    "bytes": 1268923
+  },
+  {
+    "slug": "male-peasant-human-b",
+    "name": "Male Peasant Human B",
+    "file": "sprites/male-peasant-human-b.png",
+    "bytes": 1856417
+  },
+  {
+    "slug": "manticore",
+    "name": "Manticore",
+    "file": "sprites/manticore.png",
+    "bytes": 2016149
+  },
+  {
+    "slug": "medusa",
+    "name": "Medusa",
+    "file": "sprites/medusa.png",
+    "bytes": 1884578
+  },
+  {
+    "slug": "minotaur",
+    "name": "Minotaur",
+    "file": "sprites/minotaur.png",
+    "bytes": 2211346
+  },
+  {
+    "slug": "monk",
+    "name": "Monk",
+    "file": "sprites/monk.png",
+    "bytes": 2313883
+  },
+  {
+    "slug": "necromancer",
+    "name": "Necromancer",
+    "file": "sprites/necromancer.png",
+    "bytes": 2034011
+  },
+  {
+    "slug": "ooze",
+    "name": "Ooze",
+    "file": "sprites/ooze.png",
+    "bytes": 1619889
+  },
+  {
+    "slug": "rat",
+    "name": "Rat",
+    "file": "sprites/rat.png",
+    "bytes": 205341
+  },
+  {
+    "slug": "robber",
+    "name": "Robber",
+    "file": "sprites/robber.png",
+    "bytes": 1797779
+  },
+  {
+    "slug": "roc",
+    "name": "Roc",
+    "file": "sprites/roc.png",
+    "bytes": 1710624
+  },
+  {
+    "slug": "security-droid",
+    "name": "Security Droid",
+    "file": "sprites/security-droid.png",
+    "bytes": 2268299
+  },
+  {
+    "slug": "skeleton",
+    "name": "Skeleton",
+    "file": "sprites/skeleton.png",
+    "bytes": 1665367
+  },
+  {
+    "slug": "soldier",
+    "name": "Soldier",
+    "file": "sprites/soldier.png",
+    "bytes": 1736277
+  },
+  {
+    "slug": "swordsman",
+    "name": "Swordsman",
+    "file": "sprites/swordsman.png",
+    "bytes": 1680302
+  },
+  {
+    "slug": "thief",
+    "name": "Thief",
+    "file": "sprites/thief.png",
+    "bytes": 1908758
+  },
+  {
+    "slug": "titan",
+    "name": "Titan",
+    "file": "sprites/titan.png",
+    "bytes": 2008690
+  },
+  {
+    "slug": "tree",
+    "name": "Tree",
+    "file": "sprites/tree.png",
+    "bytes": 965994
+  },
+  {
+    "slug": "troglodyte",
+    "name": "Troglodyte",
+    "file": "sprites/troglodyte.png",
+    "bytes": 1812896
+  },
+  {
+    "slug": "troll",
+    "name": "Troll",
+    "file": "sprites/troll.png",
+    "bytes": 4796656
+  },
+  {
+    "slug": "vampire",
+    "name": "Vampire",
+    "file": "sprites/vampire.png",
+    "bytes": 2634764
+  },
+  {
+    "slug": "warlock",
+    "name": "Warlock",
+    "file": "sprites/warlock.png",
+    "bytes": 1804651
+  },
+  {
+    "slug": "water-elemental",
+    "name": "Water Elemental",
+    "file": "sprites/water-elemental.png",
+    "bytes": 2144245
+  },
+  {
+    "slug": "wight",
+    "name": "Wight",
+    "file": "sprites/wight.png",
+    "bytes": 2485520
+  },
+  {
+    "slug": "wyvern",
+    "name": "Wyvern",
+    "file": "sprites/wyvern.png",
+    "bytes": 1941594
+  },
+  {
+    "slug": "zombie",
+    "name": "Zombie",
+    "file": "sprites/zombie.png",
+    "bytes": 2431390
+  }
+]

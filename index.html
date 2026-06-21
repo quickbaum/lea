@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Quickbaum's Lea</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:monospace;color:#cdb;}
+  #c{display:block;width:100vw;height:100vh;image-rendering:pixelated;cursor:crosshair;}
+  #hud{position:fixed;left:8px;top:8px;font-size:12px;line-height:1.5;
+       text-shadow:1px 1px 0 #000;pointer-events:none;opacity:.85;}
+  #cross{position:fixed;left:50%;top:50%;width:10px;height:10px;margin:-5px 0 0 -5px;
+         pointer-events:none;opacity:.6;}
+  #cross:before,#cross:after{content:"";position:absolute;background:#fff;}
+  #cross:before{left:4px;top:0;width:2px;height:10px;}
+  #cross:after{top:4px;left:0;height:2px;width:10px;}
+  #map{position:fixed;right:10px;bottom:10px;width:160px;height:160px;
+       image-rendering:pixelated;border:2px solid #000;
+       border: 10px solid;
+       border-image: url('thin_dark_frame.png') 10 round;
+       padding: 0px;
+  }
+  #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+         cursor:pointer;text-align:center;overflow:hidden;
+         background:rgb(0 19 11);}     /* semitransparent dark-green tint over the paused world */
+  #start .splash-content{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;}
+  #start .logo{width:min(60vw,640px);height:auto;filter:drop-shadow(0 6px 18px #000c);
+         margin-bottom:22px;animation:logoIn .8s cubic-bezier(.22,1,.36,1) both;}
+  @keyframes logoIn{from{opacity:0;transform:translateY(10px) scale(.97);}to{opacity:1;transform:none;}}
+  #start .tagline{font-family:Georgia,serif;font-style:italic;color:#dccfa0;
+         font-size:32px;letter-spacing:.5px;margin:0 0 18px;text-shadow:0 2px 6px #000,0 0 12px #000;}
+  #start .enter{font-size:24px;letter-spacing:2px;opacity:1;margin:0 0 6px;
+         text-shadow:0 2px 6px #000;animation:pulse 2s ease-in-out infinite; font-weight: bold;}
+  #start .controls{opacity:.7;font-size:12px;margin:0;text-shadow:0 1px 4px #000;}
+  @keyframes pulse{0%,100%{opacity:.85;}50%{opacity:.4;}}
+  .hide{display:none!important;}
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="cross"></div>
+<div id="hud"></div>
+<canvas id="map" width="128" height="128"></canvas>
+<div id="start">
+  <div class="splash-content">
+    <img class="logo" src="qbworld.png" alt="Quickbaum's Lea">
+    <p class="tagline">A FAEREAN DRAMA<br>IN SEVEN FITS</p>
+    <p class="enter">CLICK TO ENTER</p>
+    <p class="controls">WASD move &middot; mouse look &middot; shift run &middot; E talk &middot; esc release</p>
+  </div>
+</div>
+<script>window.LEAVES_CONFIG = { target: '#start', opacity: 0.9, density: 100 };</script>
+<script src="js/leaves.js"></script>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

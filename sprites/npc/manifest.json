@@ -1,0 +1,57 @@
+{
+  "cols": 10,
+  "rows": 5,
+  "standCol": 0,
+  "walkStart": 1,
+  "walkLen": 9,
+  "sprites": [
+    {
+      "slug": "male-peasant-human-a",
+      "file": "sprites/npc/male-peasant-human-a.png",
+      "frameW": 101,
+      "frameH": 197
+    },
+    {
+      "slug": "female-peasant-human-a",
+      "file": "sprites/npc/female-peasant-human-a.png",
+      "frameW": 85,
+      "frameH": 180
+    },
+    {
+      "slug": "male-peasant-human-b",
+      "file": "sprites/npc/male-peasant-human-b.png",
+      "frameW": 144,
+      "frameH": 219
+    },
+    {
+      "slug": "male-peasant-dwarf",
+      "file": "sprites/npc/male-peasant-dwarf.png",
+      "frameW": 124,
+      "frameH": 156
+    },
+    {
+      "slug": "male-peasant-elf",
+      "file": "sprites/npc/male-peasant-elf.png",
+      "frameW": 119,
+      "frameH": 195
+    },
+    {
+      "slug": "female-peasant-elf",
+      "file": "sprites/npc/female-peasant-elf.png",
+      "frameW": 177,
+      "frameH": 191
+    },
+    {
+      "slug": "male-peasant-goblin",
+      "file": "sprites/npc/male-peasant-goblin.png",
+      "frameW": 185,
+      "frameH": 196
+    },
+    {
+      "slug": "female-peasant-goblin",
+      "file": "sprites/npc/female-peasant-goblin.png",
+      "frameW": 145,
+      "frameH": 203
+    }
+  ]
+}
