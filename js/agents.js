@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { height, walkable, terrainType } from './terrain.js';
-import { WORLD_R } from './config.js';
+import { WORLD_R, WATER } from './config.js';
 import { makeName, composeName } from './names.js';
 import { NavGrid } from './nav.js';
 import { makeOmen } from './astrology.js';
@@ -89,6 +89,17 @@ const NIGHT_GATHER   = 0.35; // how dark it must be for the gathering to kindle
 const GATHER_COMPANY = 1.8;  // how much more deeply company is sated at a gathering
 const BUILD_BIAS  = 1.5;     // pull toward laying a new fire when stranded & cold
 const BUILD_TIME  = 6;       // seconds to lay a hearth as a ritual: ring stones, lay wood, kindle
+
+// boats (docs/boats.md): NPCs ferry across the water rather than truly navigating
+// it. When the urge takes an unpressed soul by daylight, they walk to a free boat,
+// glide it in a straight line to a far shore, and step off — a "ferry abstraction"
+// that needs no amphibious pathfinding. The boat is left moored where they land
+// (communal drift). See Brain.maybeFerry / planCrossing / ferryStep.
+const FERRY_SPD      = 2.6;  // boat glide speed while crossing (world units/sec)
+const FERRY_MINCROSS = 14;   // a crossing must span at least this much open water to be worth it
+const FERRY_REACH    = 55;   // how far someone will walk to reach a free boat
+const FERRY_CD       = [25, 60];   // seconds between one person's ferry urges
+const FERRY_CALM     = 0.72; // only ferry when no survival need is past this (not while desperate)
 // curfew: anticipate nightfall — make for the nearest fire as dusk nears (the
 // `evening` signal gives lead time), and if too far from any camp, lay one early.
 const CURFEW_BIAS   = 1.7;   // pull toward camp, scaled by how far into the evening it is
@@ -1003,6 +1014,8 @@ class Brain {
     this._sx = npc.x; this._sz = npc.z; this._stuckSampleT = STUCK_TIME;   // travel-progress sampler
     this._blacklist = new Map();   // Campfire -> seconds left ignored
     this._building = null;         // a hearth we're mid-ritual laying (commit until done)
+    this._ferry = null;            // an active boat crossing (commit until landed) — see ferryStep
+    this._ferryCd = FERRY_CD[0] + Math.random() * (FERRY_CD[1] - FERRY_CD[0]);
   }
 
   step(dt){
@@ -1063,6 +1076,15 @@ class Brain {
       }
     }
 
+    // 2/3. an active ferry owns movement outright (walk to a boat → glide across →
+    // step off the far bank); otherwise maybe begin one, else run the normal loop.
+    this._ferryCd -= dt;
+    if (!this._ferry && !this._building && this._ferryCd <= 0){
+      this._ferryCd = FERRY_CD[0] + Math.random() * (FERRY_CD[1] - FERRY_CD[0]);
+      this.maybeFerry();
+    }
+    if (this._ferry){ this.ferryStep(dt); }
+    else {
     // 2. re-decide periodically (or if we have nothing). But a half-laid hearth is a
     // commitment — we stick with the ritual to the end rather than wandering off it.
     if (this._building && !this._building.done){
@@ -1108,6 +1130,7 @@ class Brain {
         npc.heading = Math.atan2(t.x - npc.x, t.z - npc.z);   // face the thing
         t.satisfy(npc, dt);
       }
+    }
     }
 
     // firelight glow on the sprite (read by AnimNPC), only near a fire at dusk/night
@@ -1482,6 +1505,106 @@ class Brain {
     }
   }
 
+  // Decide whether to set off across the water. Only an unpressed soul by daylight
+  // bothers; they claim the nearest free boat they can walk to and a far-shore
+  // landing across open water, then commit to the crossing (see ferryStep).
+  maybeFerry(){
+    const npc = this.npc, w = this.world, n = npc.needs;
+    if (!w.boats || !w.boats.length) return;
+    if (w.night > 0.45) return;                          // nights are for the fireside
+    const surv = Math.max(n.warmth, n.food, n.rest);
+    if (surv > FERRY_CALM) return;                       // not while hungry / cold / weary
+    let boat = null, bd = FERRY_REACH;
+    for (const b of w.boats){
+      if (b.aboard || b._claimed) continue;
+      const d = Math.hypot(b.x - npc.x, b.z - npc.z);
+      if (d < bd){ bd = d; boat = b; }
+    }
+    if (!boat) return;
+    const plan = this.planCrossing(boat);
+    if (!plan) return;
+    const board = w.clearSpot(boat.x, boat.z);           // nearest dry land to step in from
+    if (!board) return;
+    boat._claimed = npc;
+    this._ferry = { boat, phase: 'toBoat', board: { x: board[0], z: board[1] }, land: plan.land };
+    npc.actionLabel = 'ferry';
+    this.target = null; this.path = null;
+  }
+
+  // Cast rays out from the boat over the water; the first dry shore reached after
+  // crossing enough open water is a landing. Returns { land:{x,z} } or null.
+  planCrossing(boat){
+    const w = this.world;
+    for (let a = 0; a < 12; a++){
+      const ang = Math.random() * Math.PI * 2, c = Math.cos(ang), s = Math.sin(ang);
+      let water = 0, landing = null;
+      for (let r = 2; r <= 90; r += 2){
+        const x = boat.x + c * r, z = boat.z + s * r;
+        if (Math.hypot(x, z) > WORLD_R) break;
+        const h = height(x, z);
+        if (h < WATER){ water = r; continue; }                 // still over open water
+        if (water >= FERRY_MINCROSS && h > WATER + 0.25){ landing = { x, z }; break; }   // far bank
+        if (water === 0 && r > 6) break;                       // this heading runs straight onto land
+      }
+      if (landing){
+        const spot = w.clearSpot(landing.x, landing.z);
+        if (spot) return { land: { x: spot[0], z: spot[1] } };
+      }
+    }
+    return null;
+  }
+
+  // Run the committed crossing. Phase 'toBoat': walk to the launch point, then step
+  // in. Phase 'cross': glide the boat straight to the landing, then step ashore and
+  // leave the boat moored at the far bank.
+  ferryStep(dt){
+    const npc = this.npc, w = this.world, F = this._ferry, boat = F.boat;
+    npc.sitting = false; this.path = null;
+
+    if (F.phase === 'toBoat'){
+      if (boat.aboard){ this.endFerry(); return; }       // the player took it first
+      const d = Math.hypot(F.board.x - npc.x, F.board.z - npc.z);
+      if (d > 1.6){
+        this.followPath(F.board.x, F.board.z, dt);
+        this._stuckSampleT -= dt;                         // give up if we can't reach the launch
+        if (this._stuckSampleT <= 0){
+          if (Math.hypot(npc.x - this._sx, npc.z - this._sz) < 1.2) this.endFerry();
+          this._sx = npc.x; this._sz = npc.z; this._stuckSampleT = STUCK_TIME;
+        }
+      } else {                                            // step into the canoe
+        npc.x = boat.x; npc.z = boat.z;
+        boat.aboard = true;
+        // sit waist-deep: drop the sprite so its centre is about the waterline, and
+        // the opaque water hides the legs — reads as sitting low in the hull.
+        npc.rideY = WATER - (npc.h || 2.4) * 0.45;
+        F.phase = 'cross';
+      }
+    } else {                                              // cross
+      let dx = F.land.x - boat.x, dz = F.land.z - boat.z;
+      const dd = Math.hypot(dx, dz) || 1; dx /= dd; dz /= dd;
+      const step = FERRY_SPD * dt;
+      const nx = boat.x + dx * step, nz = boat.z + dz * step;
+      npc.heading = Math.atan2(dx, dz);
+      if (dd < 1.6 || height(nx, nz) > WATER + 0.1){      // nosed up to the far bank → disembark
+        const spot = w.clearSpot(F.land.x, F.land.z) || [F.land.x, F.land.z];
+        npc.x = spot[0]; npc.z = spot[1]; npc.rideY = null;
+        boat.aboard = false; boat._claimed = null;
+        boat.placeAt(boat.x, boat.z, npc.heading);        // left moored where it grounded (communal drift)
+        this.endFerry();
+      } else {
+        boat.placeAt(nx, nz, npc.heading);
+        npc.x = nx; npc.z = nz;                            // ride along (not "walking": no wake of footsteps)
+      }
+    }
+  }
+
+  endFerry(){
+    const F = this._ferry;
+    if (F && F.boat){ if (F.boat._claimed === this.npc) F.boat._claimed = null; F.boat.aboard = false; }
+    this.npc.rideY = null;
+    this._ferry = null; this.target = null; this.path = null;
+  }
+
   wanderStep(dt){
     const npc = this.npc;
     this.wanderT -= dt;
@@ -1515,6 +1638,7 @@ export class AgentWorld {
     this.valuables = [];  // rare finds people gather & trade (shells/stones/amber/quartz)
     this.npcs = [];       // NPCs that have brains (for pairwise company)
     this.fauna = [];      // rabbits (quarry) — roam, flee, hunted for meat
+    this.boats = [];      // communal canoes NPCs ferry across the water (docs/boats.md)
     this.threat = null;   // a {x,z} the fauna flee from too (the player), set per frame
     this.day = 1; this.night = 0; this.evening = 0;
     this.time = 0;        // in-game day counter (fractional), for sighting memory
@@ -1626,6 +1750,9 @@ export class AgentWorld {
   }
 
   setTrees(trees){ this.trees = trees || []; }
+
+  // the communal boats (a Boats manager, or a raw list). NPCs find/claim/ride them.
+  setBoats(boats){ this.boats = boats && boats.list ? boats.list : (boats || []); }
 
   // the choppable shrubs (firewood). Records carry .alive and .chop() (flora.js).
   setShrubs(shrubs){ this.shrubs = shrubs || []; }
@@ -1776,7 +1903,11 @@ export class AgentWorld {
     const list = this.npcs, n = list.length;
     for (let i = 0; i < n; i++){
       const a = list[i];
-      if (a.talking) continue;
+      // Seated folk hold their assigned ring seat — don't shove them around (they
+      // still repel others below, as `b`). Otherwise the brain pulls them back to
+      // the seat while this pass pushes them out, so they micro-slide in place —
+      // invisible when seated read as standing, but obvious with a sitting sprite.
+      if (a.talking || a.sitting) continue;
       const aSpace = (a.personalSpace || 1.3) * (a.sitting ? INTIMATE : 1);
       let px = 0, pz = 0;
       for (let j = 0; j < n; j++){

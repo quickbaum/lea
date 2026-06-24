@@ -18,7 +18,7 @@ const SLUGS = {
   dwarf:  ['male-peasant-dwarf'],
   goblin: ['male-peasant-goblin', 'female-peasant-goblin'],
 };
-const FAMILY_RACES = ['human', 'human', 'human', 'elf', 'goblin', 'dwarf'];   // weighted to human
+const FAMILY_RACES = ['human', 'human', 'elf', 'goblin', 'goblin', 'dwarf'];   // weighted to human, goblins boosted
 const ALL_RACES = Object.keys(SLUGS);
 const BAND_ADJ  = ['Grey', 'Iron', 'Wandering', 'Golden', 'Silent', 'Red', 'Free', 'Bramble', 'North', 'Ember', 'Stone', 'Wild'];
 const BAND_NOUN = ['Company', 'Wolves', 'Wardens', 'Banners', 'Striders', 'Foxes', 'Vagabonds', 'Kindred', 'Company', 'Hands'];

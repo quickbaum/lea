@@ -86,8 +86,12 @@ function tintSprite(img, pal, m, roles){
 
 class AnimNPC {
   constructor(base, x, z, label = null){
-    this.x = x; this.z = z; this.m = base.m; this.h = PERSON_H * raceScale(base.slug); this.label = label;
+    this.x = x; this.z = z; this.m = base.m; this.h = PERSON_H * raceScale(base.slug) * (base.heightScale || 1); this.label = label;
     this.tex = base.tex.clone(); this.tex.needsUpdate = true;
+    this._baseTex = this.tex; this._baseM = base.m;        // base (walk) atlas, for restoring after a pose
+    this._baseAspect = base.m.frameW/base.m.frameH;
+    this.poses = base.poses || null;                       // optional sitting/reclining idle atlases
+    this._poseTex = {}; this._curPose = null;              // lazily-cloned pose textures + current pose
     this.mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(this.h*(this.m.frameW/this.m.frameH), this.h),
       new THREE.MeshBasicMaterial({map:this.tex, alphaTest:0.5, transparent:true, fog:true})
@@ -109,6 +113,23 @@ class AnimNPC {
     t.repeat.set((flip?-1:1)/C, 1/R);
     t.offset.set((flip ? col+1 : col)/C, 1 - (row+1)/R);
   }
+  // Swap the active atlas to a pose variant (sitting/reclining) or back to the
+  // base walk atlas. Pose textures are cloned lazily and cached. No-op if the
+  // pose is already active. Dormant when this NPC has no pose atlases.
+  _usePose(pose){
+    if (pose === this._curPose) return;
+    this._curPose = pose;
+    if (!pose){ this.tex = this._baseTex; this.m = this._baseM; }
+    else {
+      const p = this.poses[pose];
+      if (!this._poseTex[pose]){
+        const t = p.tex.clone(); t.needsUpdate = true; this._poseTex[pose] = t;
+      }
+      this.tex = this._poseTex[pose]; this.m = p.m;
+    }
+    this.mesh.material.map = this.tex; this.mesh.material.needsUpdate = true;
+    this.frame = 0; this.frameT = 0;
+  }
   // swap this NPC's atlas for one tinted to `palette`, and move idle/chop onto a
   // tintable frame if the stand frame is a pre-coloured variant. Keeps the current
   // frame's UV; old texture is freed.
@@ -120,6 +141,7 @@ class AnimNPC {
     tex.repeat.copy(this.tex.repeat); tex.offset.copy(this.tex.offset);
     this.tex.dispose?.();
     this.tex = tex; this.idleCol = idleCol;
+    this._baseTex = tex; this._curPose = null;   // base atlas changed; re-sync on next pose check
     this.mesh.material.map = tex; this.mesh.material.needsUpdate = true;
   }
   update(cam, dt, tint){
@@ -180,11 +202,29 @@ class AnimNPC {
       swayBob = (Math.cos(ph * 2) * 0.5 + 0.5) * this.h * 0.03;
     }
 
-    // seated NPCs render as standing for now (no shrink/lower — that sank their feet
-    // into the ground, worse on a slope). Better seated sprites will come later.
+    // Seated/reclining NPCs use a baked pose atlas when one exists for their slug
+    // (<slug>-sitting / <slug>-reclining in the manifest); otherwise they keep
+    // standing (the earlier behaviour — shrinking sank feet into sloped ground).
+    // Gate on *actual* stillness, not just the sitting flag: an NPC can carry a
+    // "sit" intent (e.g. tending a fire) while the brain walks it off to fetch wood,
+    // so we measure real translation this frame — any movement → walk sprite, only a
+    // planted NPC shows the seated pose. Covers brain locomotion, drift and boats alike.
+    const speed = (this._lastX != null)
+      ? Math.hypot(this.x - this._lastX, this.z - this._lastZ) / Math.max(dt, 1e-4) : 0;
+    this._lastX = this.x; this._lastZ = this.z;
+    const planted = speed < 0.15;                  // u/s; walk ≈1.6, seated ≈0
+    const wantPose = (this.poses && planted && this.sitting && this.poses.sitting)
+      ? 'sitting' : null;
+    this._usePose(wantPose);
     const sy = 1;
     this.mesh.scale.y = sy;
-    const gy = height(this.x, this.z), halfH = this.h * sy / 2;
+    // Pose atlases may have a different frame aspect than the walk atlas; the plane
+    // encodes the base aspect, so compensate on x. (Pose bakes share the walk's
+    // world scale + bottom-anchoring, so height/grounding stay unchanged.)
+    this.mesh.scale.x = this._curPose ? (this.m.frameW/this.m.frameH)/this._baseAspect : 1;
+    // rideY overrides the ground height when seated in a boat (over water), so the
+    // rider sits on the gunwale instead of sinking to the lakebed.
+    const gy = this.rideY != null ? this.rideY : height(this.x, this.z), halfH = this.h * sy / 2;
     this.mesh.position.set(this.x, gy + halfH - chopDip + hopOff + swayBob, this.z);
     if (this.label) this.label.position.set(this.x, gy + this.h * sy + 0.5 + hopOff, this.z);
 
@@ -203,6 +243,11 @@ class AnimNPC {
       if (this.frameT > 0.11){ this.frameT = 0; this.frame = (this.frame+1) % this.m.walkLen; }
       col = this.m.walkStart + this.frame;
     } else this.frame = 0;
+    if (this._curPose){                                // seated/reclining idle loop from the pose atlas
+      this.frameT += dt;
+      if (this.frameT > 0.13){ this.frameT = 0; this.frame = (this.frame+1) % this.m.walkLen; }
+      col = this.m.walkStart + this.frame;
+    }
     if (this.hopGait) col = this.idleCol;              // legs-together frame reads as a bound
     this.setCell(row, col, flip);
 
@@ -223,8 +268,9 @@ class AnimNPC {
       this.packMesh.material.needsUpdate = true;
     }
     const back = 0.18, fx = Math.sin(this.heading), fz = Math.cos(this.heading);
+    const gy = this.rideY != null ? this.rideY : height(this.x, this.z);   // ride the gunwale over water
     this.packMesh.position.set(
-      this.x - fx*back, height(this.x,this.z) + this.h*0.6*sy + hopOff, this.z - fz*back);
+      this.x - fx*back, gy + this.h*0.6*sy + hopOff, this.z - fz*back);
     this.packMesh.rotation.set(0, toCam, 0, 'YXZ');
     this.packMesh.material.color.copy(tint || WHITE);
     this.packMesh.visible = true;
@@ -259,6 +305,14 @@ export async function spawnPeasants(scene, rng, groups = []){
           frameW:s.frameW, frameH:s.frameH}
     })));
     const bySlug = new Map(bases.map(b => [b.slug, b]));
+    // Attach optional pose atlases (sitting/reclining idle bakes) by the
+    // convention <slug>-<pose>. Dormant until such atlases exist in the manifest;
+    // pose entries are loaded but never spawned on their own (only group members
+    // spawn, and members reference base slugs).
+    for (const b of bases){
+      const pb = bySlug.get(b.slug + '-sitting');
+      if (pb) b.poses = { sitting: { tex: pb.tex, m: pb.m } };
+    }
     const landSet = new Set(['grass','mud','sand']);
     for (const g of groups){
       g.npcs = [];
@@ -270,9 +324,12 @@ export async function spawnPeasants(scene, rng, groups = []){
           if (walkable(x, z) && Math.hypot(x, z) < WORLD_R){ p = [x, z]; break; }
         }
         if (!p) p = randomLand(rng, WORLD_R, landSet);
-        const b = bySlug.get(m.slug) || bases[0];
+        const b = (m.heightScale && m.heightScale !== 1)
+          ? {...(bySlug.get(m.slug) || bases[0]), heightScale: m.heightScale}
+          : (bySlug.get(m.slug) || bases[0]);
         const npc = new AnimNPC(b, p[0], p[1]);
         npc.slug = m.slug; npc.group = g; npc.role = m.role;   // naming + group/kin awareness
+        if (m.skin) npc.skinTone = m.skin;                     // baked body skin → matching wojak portrait
         m.npc = npc; g.npcs.push(npc);
         scene.add(npc.mesh); scene.add(npc.packMesh); npcs.push(npc);
       }
@@ -285,7 +342,7 @@ export async function spawnPeasants(scene, rng, groups = []){
 // Spawn a single named, wandering NPC (e.g. the Claude character) with a name
 // tag that follows him. Same wander logic as the peasants, for now.
 // Returns the AnimNPC (has .x/.z and .update(cam, dt)), or null on failure.
-export async function spawnNamedNPC(scene, { slug = 'male-peasant-elf', x = 0, z = 0, name = '', labelColor = '#fff' } = {}){
+export async function spawnNamedNPC(scene, { slug = 'male-peasant-elf', x = 0, z = 0, name = '', labelColor = '#fff', recolor = { primary: [70, 90, 150], secondary: [42, 55, 100], accent: [205, 180, 120] } } = {}){
   const loader = new THREE.TextureLoader();
   try {
     const meta = await (await fetch('sprites/npc/manifest.json')).json();
@@ -302,7 +359,7 @@ export async function spawnNamedNPC(scene, { slug = 'male-peasant-elf', x = 0, z
     const label = name ? makeLabel(name, { color: labelColor }) : null;
     const npc = new AnimNPC(base, x, z, label);
     npc.slug = s.slug;
-    npc.recolor({ primary: [70, 90, 150], secondary: [42, 55, 100], accent: [205, 180, 120] });  // a calm blue robe, not raw magenta
+    if (recolor) npc.recolor(recolor);   // tint robe colours; pass recolor:null to keep the baked sprite as-is (e.g. Lea's skin)
     scene.add(npc.mesh); scene.add(npc.packMesh); if (label) scene.add(label);
     return npc;
   } catch (e){ console.warn('spawnNamedNPC failed:', e); return null; }

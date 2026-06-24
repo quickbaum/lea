@@ -75,55 +75,48 @@ function drawMoon(g, illum, waxing){
   g.restore();
 }
 
-// A cloud is a baked normal+coverage map: a lumpy cumulus height field turned
-// into per-texel surface normals (RGB) + coverage (A). The cloud shader lights
-// it from the *actual* sun direction, so painterly highlights/shadows fall on
-// the right side and backlit clouds get a silver lining. Not orbs — a unifying
-// base mass plus multi-scale cauliflower bumps gives an organic, painterly form.
-const CLOUD_W = 200, CLOUD_H = 132;
-function makeCloudTexture(){
-  const W = CLOUD_W, H = CLOUD_H, h = new Float32Array(W * H), baseY = H * 0.66;
-  const lump = (cx, cy, rx, ry, amp, p = 1.2) => {
-    const x0 = Math.max(0, (cx-rx)|0), x1 = Math.min(W, (cx+rx+1)|0);
-    const y0 = Math.max(0, (cy-ry)|0), y1 = Math.min(H, (cy+ry+1)|0);
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++){
-      const nd = ((x-cx)/rx)**2 + ((y-cy)/ry)**2;
-      if (nd < 1) h[y*W+x] += amp * Math.pow(1 - nd, p);
-    }
+// A seamless, tiling cloud-coverage field for the GZDoom-style scrolling sky
+// layer (doublesky in spirit): instead of 16 billboard masses in the world, the
+// dome shader projects this one tile onto an infinite ceiling and scrolls it with
+// the wind. Periodic value-noise fBm (every octave's grid wraps, so the whole
+// tile is seamless) → coverage in the red channel. One texture, zero objects.
+function makeCloudFieldTexture(){
+  const N = 256;                                     // tile resolution
+  // periodic value noise with integer period P (in cells) → tiles seamlessly
+  const makeNoise = P => {
+    const g = new Float32Array(P * P);
+    for (let i = 0; i < g.length; i++) g[i] = Math.random();
+    const s = t => t * t * (3 - 2 * t);              // smoothstep fade
+    return (x, y) => {
+      const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+      const x0 = ((xi % P) + P) % P, y0 = ((yi % P) + P) % P, x1 = (x0 + 1) % P, y1 = (y0 + 1) % P;
+      const u = s(fx), v = s(fy);
+      const a = g[y0*P+x0], b = g[y0*P+x1], c = g[y1*P+x0], d = g[y1*P+x1];
+      return a*(1-u)*(1-v) + b*u*(1-v) + c*(1-u)*v + d*u*v;
+    };
   };
-  lump(W*0.5, baseY - H*0.15, W*0.34, H*0.20, 1.0, 1.0);                 // unifying base mass
-  const big = 3 + (Math.random()*3|0);
-  for (let i=0;i<big;i++)
-    lump(W*0.5 + (Math.random()-0.5)*W*0.5, baseY - H*0.18 - Math.random()*H*0.16,
-         H*(0.16+Math.random()*0.1), H*(0.15+Math.random()*0.1), 0.85);  // billows
-  const small = 16 + (Math.random()*12|0);
-  for (let i=0;i<small;i++)
-    lump(W*0.5 + (Math.random()-0.5)*W*0.62, baseY - H*0.1 - Math.random()*H*0.34,
-         H*(0.05+Math.random()*0.06), H*(0.05+Math.random()*0.06), 0.5, 1.6);  // cauliflower
-  for (let y=0;y<H;y++){                                                 // flat base
-    const f = y > baseY ? Math.max(0, 1 - (y-baseY)/(H*0.06)) : 1;
-    if (f < 1) for (let x=0;x<W;x++) h[y*W+x] *= f;
+  const oct = [[4, 0.55], [8, 0.28], [16, 0.13], [32, 0.07]];   // [period, amplitude]
+  const noises = oct.map(([P]) => makeNoise(P));
+  const h = new Float32Array(N * N);
+  let mn = Infinity, mx = -Infinity;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++){
+    let v = 0;
+    for (let k = 0; k < oct.length; k++){ const P = oct[k][0];
+      v += noises[k](x / N * P, y / N * P) * oct[k][1]; }
+    h[y*N+x] = v; if (v < mn) mn = v; if (v > mx) mx = v;
   }
-  let mx = 0; for (let i=0;i<h.length;i++) mx = Math.max(mx, h[i]); mx = mx || 1;
-  for (let i=0;i<h.length;i++) h[i] /= mx;
-
-  const img = new ImageData(W, H), BUMP = 2.6;
-  const at = (x,y) => h[Math.min(H-1,Math.max(0,y))*W + Math.min(W-1,Math.max(0,x))];
-  for (let y=0;y<H;y++) for (let x=0;x<W;x++){
-    const i = (y*W+x)*4, a = h[y*W+x];
-    const nx = -(at(x+1,y) - at(x-1,y)) * BUMP;
-    const ny =  (at(x,y+1) - at(x,y-1)) * BUMP;     // +Y = up (texture top)
-    const il = 1 / Math.hypot(nx, ny, 1);
-    img.data[i]   = (nx*il*0.5+0.5)*255;
-    img.data[i+1] = (ny*il*0.5+0.5)*255;
-    img.data[i+2] = (il*0.5+0.5)*255;               // nz
-    img.data[i+3] = a <= 0.001 ? 0 : clamp((a - 0.06) / 0.10, 0, 1) * 255;
+  const img = new ImageData(N, N), span = (mx - mn) || 1;
+  for (let i = 0; i < h.length; i++){
+    const c = ((h[i] - mn) / span) * 255;
+    img.data[i*4] = img.data[i*4+1] = img.data[i*4+2] = c; img.data[i*4+3] = 255;
   }
-  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const c = document.createElement('canvas'); c.width = N; c.height = N;
   c.getContext('2d').putImageData(img, 0, 0);
   const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.NoColorSpace;                 // it's a normal map, not colour
-  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  t.colorSpace = THREE.NoColorSpace;                 // coverage, not colour
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = true;                          // mip away shimmer near the horizon
   return t;
 }
 // A panoramic mountain silhouette baked into one texture: several ridgelines
@@ -182,26 +175,6 @@ function makeMountainTexture(){
   return t;
 }
 
-const CLOUD_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`;
-const CLOUD_FRAG = `
-  uniform sampler2D uTex; uniform vec3 uSun, uLight, uShadow; uniform float uOpacity;
-  varying vec2 vUv;
-  void main(){
-    vec4 t = texture2D(uTex, vUv);
-    if (t.a < 0.5) discard;                         // crisp silhouette
-    vec3 N = normalize(t.xyz * 2.0 - 1.0);
-    vec3 L = normalize(uSun);
-    float lit = dot(N, L);
-    vec3 col = mix(uShadow, uLight, smoothstep(-0.2, 0.55, lit));   // painterly key
-    col += uLight * smoothstep(0.6, 0.96, lit) * 0.30;             // highlight
-    float back = smoothstep(0.0, -0.5, L.z);                       // sun behind cloud
-    float edge = smoothstep(0.6, 0.05, N.z);                       // toward silhouette
-    col += uLight * back * edge;                                   // silver lining
-    float n = fract(sin(dot(vUv, vec2(127.1, 311.7))) * 43758.5453);
-    col *= 0.96 + 0.08 * n;                                        // painterly grain
-    gl_FragColor = vec4(col, uOpacity);
-  }`;
-
 export class Sky {
   constructor(scene, { latitude = 42, dayLength = 600, time = 0.35, sunLon = 35, yearDays = 360 } = {}){
     this.scene = scene;
@@ -229,10 +202,9 @@ export class Sky {
 
     this._buildDome();
     this._buildMountains();
-    this._buildClouds();
     this._buildSunMoon();
     this._buildLights();
-    this.cloudCover = 0.55; this._applyCloudCover();
+    this.setCloudCover(0.55);
   }
 
   // ── sky dome (gradient + sun glow) ──
@@ -245,6 +217,14 @@ export class Sky {
       uHorizon:    { value: new THREE.Color(0xbfd8 ) },
       uNightZenith:{ value: new THREE.Color(0x05060f) },
       uNightHoriz: { value: new THREE.Color(0x121a2e) },
+      // GZDoom-style scrolling cloud layer (projected onto an infinite ceiling)
+      uCloudTex:    { value: makeCloudFieldTexture() },
+      uCloudScroll: { value: new THREE.Vector2(0, 0) },
+      uCloudScale:  { value: 0.65 },                 // tiling density of the ceiling
+      uCloudThresh: { value: 0.6 },                  // coverage cutoff (driven by cloudCover)
+      uCloudOpacity:{ value: 0.9 },
+      uCloudLight:  { value: new THREE.Color(1, 1, 1) },
+      uCloudShadow: { value: new THREE.Color(0.55, 0.6, 0.72) },
     };
     this.domeU.uHorizon.value.setHex(0xbcd6ee);
     const mat = new THREE.ShaderMaterial({
@@ -252,6 +232,8 @@ export class Sky {
       vertexShader: `varying vec3 vDir; void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
       fragmentShader: `
         varying vec3 vDir; uniform float uDay; uniform vec3 uSunDir,uSunColor,uZenith,uHorizon,uNightZenith,uNightHoriz;
+        uniform sampler2D uCloudTex; uniform vec2 uCloudScroll;
+        uniform float uCloudScale, uCloudThresh, uCloudOpacity; uniform vec3 uCloudLight, uCloudShadow;
         void main(){
           vec3 d = normalize(vDir);
           float t = pow(clamp(d.y,0.0,1.0), 0.5);
@@ -265,6 +247,20 @@ export class Sky {
           // warm band along the horizon near sunrise/sunset
           float band = pow(1.0 - clamp(d.y,0.0,1.0), 4.0) * pow(max(sd,0.0),1.5);
           col += uSunColor * band * (1.0 - abs(uSunDir.y)) * sunUp * 0.8;
+
+          // ── scrolling cloud ceiling: project the view dir onto a flat plane at
+          // infinity (d.xz / d.y), sample the tiling coverage field, composite over
+          // the sky. View-direction based, so it drifts but never parallaxes on walk.
+          float hf = smoothstep(0.02, 0.17, d.y);                   // fade out at the horizon
+          if (hf > 0.0){
+            vec2 cuv = (d.xz / d.y) * uCloudScale + uCloudScroll;
+            float cov = texture2D(uCloudTex, cuv).r * 0.65
+                      + texture2D(uCloudTex, cuv * 0.4 + uCloudScroll * 0.5).r * 0.35;  // layered
+            float thick = smoothstep(uCloudThresh, uCloudThresh + 0.22, cov);
+            vec3 ccol = mix(uCloudShadow, uCloudLight, smoothstep(0.2, 0.9, thick));    // white cores
+            ccol += uSunColor * pow(sd, 8.0) * (1.0 - thick) * 0.9;                     // silver lining
+            col = mix(col, ccol, thick * hf * uCloudOpacity);
+          }
           gl_FragColor = vec4(col, 1.0);
         }`,
     });
@@ -317,32 +313,6 @@ export class Sky {
   }
 
   // ── clouds: billboard masses lit by the real sun, drifting & wrapping around you ──
-  _buildClouds(){
-    this.cloudMats = [];
-    for (let i = 0; i < 5; i++) this.cloudMats.push(new THREE.ShaderMaterial({
-      uniforms: {
-        uTex: { value: makeCloudTexture() },
-        uSun: { value: new THREE.Vector3(0, 1, 0) },
-        uLight: { value: new THREE.Color(1, 1, 1) },
-        uShadow: { value: new THREE.Color(0.5, 0.58, 0.72) },
-        uOpacity: { value: 0.95 },
-      },
-      vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG, transparent: true, depthWrite: false,
-    }));
-    this.cloudR = 320;                         // clouds live within this radius of the player
-    this.clouds = [];
-    this.cloudGroup = new THREE.Group(); this.scene.add(this.cloudGroup);
-    const geo = new THREE.PlaneGeometry(1, 1);
-    for (let i = 0; i < 16; i++){
-      const m = new THREE.Mesh(geo, this.cloudMats[(Math.random()*this.cloudMats.length)|0]);
-      const w = 55 + Math.random() * 95;
-      m.scale.set(w, w * (CLOUD_H / CLOUD_W), 1);
-      m.position.set((Math.random()*2-1)*this.cloudR, 55 + Math.random()*60, (Math.random()*2-1)*this.cloudR);
-      m.renderOrder = -4;
-      this.cloudGroup.add(m); this.clouds.push(m);
-    }
-  }
-
   _buildSunMoon(){
     this.sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: sunTexture(), blending: THREE.AdditiveBlending, depthWrite: false, depthTest: true, fog: false }));
@@ -438,11 +408,9 @@ export class Sky {
   getSunAltitude(){ return Math.asin(clamp(this.sunDir.y, -1, 1)); }
 
   // ── weather controls (Claude the daemon can drive these from dialogue) ──
-  _applyCloudCover(){
-    const n = Math.round(this.cloudCover * this.clouds.length);
-    this.clouds.forEach((c, i) => { c.visible = i < n; });
-  }
-  setCloudCover(v){ this.cloudCover = clamp(v, 0, 1); this._applyCloudCover(); }
+  // more cover → lower coverage threshold → more of the sky fills with cloud
+  setCloudCover(v){ this.cloudCover = clamp(v, 0, 1);
+    if (this.domeU) this.domeU.uCloudThresh.value = 1.0 - 0.72 * this.cloudCover; }
   addCloudCover(d){ this.setCloudCover((this.cloudCover ?? 0.55) + d); }
   setDayFraction(f){ this.time = Math.floor(this.time) + ((f % 1) + 1) % 1; }
 
@@ -543,26 +511,15 @@ export class Sky {
       .lerp(this._spriteNight ||= new THREE.Color(0.45, 0.55, 0.80), (1 - day) * 0.5)
       .multiplyScalar(b);
 
-    // clouds: light from the actual sun direction (in billboard-local space)
-    const sunLocal = new THREE.Vector3().copy(this.sunDir).applyQuaternion(camera.quaternion.clone().invert());
-    const lightCol = new THREE.Color(1, 1, 1).lerp(this.domeU.uSunColor.value, sunset * 0.7)
+    // clouds (the scrolling dome layer): relight from the sun/day, drift with wind.
+    // Replaces the 16 billboards — colours feed the dome shader's cloud uniforms.
+    this.domeU.uCloudLight.value.setRGB(1, 1, 1).lerp(this.domeU.uSunColor.value, sunset * 0.7)
       .multiplyScalar(0.22 + 0.78 * day);
-    const shadowCol = new THREE.Color(0.50, 0.58, 0.74).multiplyScalar(0.28 + 0.55 * day);
-    const cop = 0.45 + 0.5 * day;
-    for (const mat of this.cloudMats){
-      mat.uniforms.uSun.value.copy(sunLocal);
-      mat.uniforms.uLight.value.copy(lightCol);
-      mat.uniforms.uShadow.value.copy(shadowCol);
-      mat.uniforms.uOpacity.value = cop;
-    }
-    const dx = this.wind.x * dt * 3, dz = this.wind.y * dt * 3, R = this.cloudR;
-    const cx = camera.position.x, cz = camera.position.z;
-    for (const c of this.clouds){
-      c.position.x += dx; c.position.z += dz;
-      if (c.position.x - cx >  R) c.position.x -= 2*R; else if (c.position.x - cx < -R) c.position.x += 2*R;
-      if (c.position.z - cz >  R) c.position.z -= 2*R; else if (c.position.z - cz < -R) c.position.z += 2*R;
-      c.quaternion.copy(camera.quaternion);          // billboard toward camera
-    }
+    this.domeU.uCloudShadow.value.setRGB(0.50, 0.58, 0.74).multiplyScalar(0.28 + 0.55 * day);
+    this.domeU.uCloudOpacity.value = 0.45 + 0.5 * day;
+    // scroll the ceiling UV with the wind (small rate — this is the infinite layer)
+    this.domeU.uCloudScroll.value.x += this.wind.x * dt * 0.004;
+    this.domeU.uCloudScroll.value.y += this.wind.y * dt * 0.004;
 
     // moon phase texture (redraw only when it shifts noticeably)
     if (Math.abs(moonIllum - this._moonIllum) > 0.02){
