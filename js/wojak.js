@@ -54,7 +54,7 @@ function hairShift(){
 
 // compose a face and return a data-URL. gender selects the male/female layer set;
 // elves get procedural pointed ears (the asset set has none) tinted to the skin.
-export function face(gender = 'male', race = 'human', skin = null){
+export function face(gender = 'male', race = 'human'){
   const female = gender === 'female';
   const cv = document.createElement('canvas'); cv.width = cv.height = 100;
   const ctx = cv.getContext('2d');
@@ -62,16 +62,14 @@ export function face(gender = 'male', race = 'human', skin = null){
   const tctx = tcv.getContext('2d');
 
   const goblin = race === 'goblin';
-  // a layer onto the temp canvas (optionally HSL-shifted, skin->green for goblins,
-  // or skin->`tint` so the portrait matches a baked body's skin tone), then onto the
-  // face
-  const draw = (img, shift, green, tint) => {
+  // a layer onto the temp canvas (optionally HSL-shifted, or skin->green for
+  // goblins), then onto the face
+  const draw = (img, shift, green) => {
     if (!img) return;
     tctx.clearRect(0, 0, 100, 100);
     tctx.drawImage(img, 0, 0);
     if (shift) recolor(tctx, shift);
     if (green) greenSkin(tctx);
-    else if (tint) tintSkin(tctx, tint);
     ctx.drawImage(tcv, 0, 0);
   };
 
@@ -81,11 +79,11 @@ export function face(gender = 'male', race = 'human', skin = null){
   const eyeShift   = { h: rnd(-.7, -.15), s: rnd(-1, 0), l: rnd(-.5, .2) };
   const mouthShift = { h: rnd(-1, 1), s: rnd(-1, .5), l: rnd(-.5, .2) };
 
-  draw(pick(female ? G.base : L.base), null, goblin, skin);  // skin (green=goblin, tint=match body)
-  // sample the (possibly tinted) skin tone at a cheek for elf ears
-  let earSkin = null;
-  if (race === 'elf'){ const c = ctx.getImageData(34, 54, 1, 1).data; earSkin = [c[0], c[1], c[2]]; }
-  draw(pick(L.nose), null, goblin, skin);                // nose shares the skin tone
+  draw(pick(female ? G.base : L.base), null, goblin);    // skin (green for goblins)
+  // sample the skin tone at a cheek for elf ears (before features cover it)
+  let skin = null;
+  if (race === 'elf'){ const c = ctx.getImageData(34, 54, 1, 1).data; skin = [c[0], c[1], c[2]]; }
+  draw(pick(L.nose), null, goblin);                      // nose shares the skin tone
   draw(female ? pick(G.mouth) : pick(L.mouth), female ? mouthShift : undefined);
   if (female) draw(G.detail[0]);
   else if (Math.random() < 0.5) draw(pick(L.detail));
@@ -95,7 +93,7 @@ export function face(gender = 'male', race = 'human', skin = null){
   // hair: indices 0..25/26 are styles (27+ are headwear we skip); males 30% bald
   if (female) draw(L.hair[Math.floor(rnd(0, 26))], hs);
   else if (Math.random() < 0.7) draw(L.hair[Math.floor(rnd(0, 27))], hs);
-  if (earSkin) drawEar(ctx, 33, -1, earSkin);   // elf ear (only the near one — the face is in 3/4 turn)
+  if (skin) drawEar(ctx, 33, -1, skin);   // elf ear (only the near one — the face is in 3/4 turn)
   if (!female){                                          // facial hair (always for dwarves)
     const dwarf = race === 'dwarf';
     if (dwarf || Math.random() < 0.3) draw(pick(L.beard), hs);
@@ -105,7 +103,7 @@ export function face(gender = 'male', race = 'human', skin = null){
   // a palette read off the finished portrait, so the in-world sprite can be tinted
   // to match (its magenta/green/yellow zones -> primary/secondary/accent).
   const samp = (x, y) => { const d = ctx.getImageData(x, y, 1, 1).data; return [d[0], d[1], d[2]]; };
-  const bg = samp(2, 2), cheek = earSkin || samp(40, 55);
+  const bg = samp(2, 2), cheek = skin || samp(40, 55);
   const shirtPx = samp(50, 96), hairPx = samp(50, 11);
   const isFace = c => dist(c, bg) > 45;
   const primary = (isFace(shirtPx) && dist(shirtPx, cheek) > 55) ? shirtPx : pick(CLOTH);
@@ -129,21 +127,6 @@ function drawEar(ctx, x0, dir, skin){
   ctx.closePath(); ctx.fill(); ctx.stroke();
   ctx.strokeStyle = `rgb(${skin[0] * 0.8 | 0},${skin[1] * 0.8 | 0},${skin[2] * 0.8 | 0})`;
   ctx.beginPath(); ctx.moveTo(x0 + dir * 2, 50); ctx.lineTo(x0 + dir * 8, 35); ctx.stroke();   // inner crease
-}
-
-// cast a skin layer onto a target tone [r,g,b] (sRGB), keeping its shading — so a
-// portrait's face matches a baked body's skin colour. Brightness relative to a mid
-// skin reference scales the target (shadows darker, highlights lighter).
-function tintSkin(ctx, [tr, tg, tb]){
-  const im = ctx.getImageData(0, 0, 100, 100), d = im.data;
-  const cl = v => v < 0 ? 0 : v > 255 ? 255 : v | 0;
-  for (let i = 0; i < d.length; i += 4){
-    if (d[i + 3] === 0) continue;
-    const l = (d[i] * 0.3 + d[i + 1] * 0.59 + d[i + 2] * 0.11) / 255;
-    const k = l / 0.62;                        // 0.62 ≈ mean brightness of the skin layers
-    d[i] = cl(tr * k); d[i + 1] = cl(tg * k); d[i + 2] = cl(tb * k);
-  }
-  ctx.putImageData(im, 0, 0);
 }
 
 // remap a skin layer to goblin green: each pixel keeps its brightness but is cast
