@@ -91,9 +91,19 @@ export function buildTerrain(scene){
   for (let i = 0; i < pos.count; i++){
     const x = pos.getX(i), z = pos.getZ(i), h = height(x, z);
     pos.setY(i, h);
-    const c = biome(x, z, h);
-    const j = 0.92 + hash(x*3.3, z*3.3) * 0.16;
-    col[i*3] = c[0]*j; col[i*3+1] = c[1]*j; col[i*3+2] = c[2]*j;
+    const base = biome(x, z, h);
+    // Steep slopes expose bedrock regardless of altitude.
+    // Finite-difference slope over ±1 unit; grade in rock colour above 0.35 slope.
+    const e = 1.0;
+    const dhx = (height(x+e,z) - height(x-e,z)) * 0.5;
+    const dhz = (height(x,z+e) - height(x,z-e)) * 0.5;
+    const sl  = Math.hypot(dhx, dhz);
+    const rb  = h > WATER ? Math.max(0, Math.min(1, (sl - 0.35) * 3.5)) : 0;
+    const r   = base[0] + (C.rock[0] - base[0]) * rb;
+    const g   = base[1] + (C.rock[1] - base[1]) * rb;
+    const b   = base[2] + (C.rock[2] - base[2]) * rb;
+    const j   = 0.92 + hash(x*3.3, z*3.3) * 0.16;
+    col[i*3] = r*j; col[i*3+1] = g*j; col[i*3+2] = b*j;
   }
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   geo.computeVertexNormals();
@@ -117,3 +127,7 @@ export function buildTerrain(scene){
 
   return { ground, water, waterTex };
 }
+
+// buildCliffs removed — steep terrain is now expressed through slope-aware vertex
+// colours in buildTerrain, and loam accumulation is a separate mesh layer built
+// by buildLoamLayer() in js/gen/geology.js.

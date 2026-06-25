@@ -117,6 +117,43 @@ function leafQuad(pos, size, rng, atlas){
   return geo;
 }
 
+// A large flat horizontal foliage disc — used for conifers where the foliage reads
+// as broad horizontal tiers rather than scattered individual leaves. The disc is
+// mostly horizontal with a slight random tilt; the blob texture + alphaTest give
+// it an irregular feathery silhouette. Standard UV (no atlas remapping needed).
+function leafFlat(pos, size, rng){
+  const geo = new THREE.PlaneGeometry(size, size);
+  geo.applyQuaternion(new THREE.Quaternion().setFromEuler(new THREE.Euler(
+    -Math.PI / 2 + rand(rng, -0.28, 0.28),   // mostly horizontal, slight tilt
+    rand(rng, 0, Math.PI * 2),                // random rotation around Y
+    rand(rng, -0.12, 0.12)
+  )));
+  geo.translate(pos.x, pos.y, pos.z);
+  return geo;
+}
+
+// A foliage bunch: N individual leaf quads (same size as a normal leaf) packed
+// tightly in a small sphere around the branch tip. Reads as a mass of foliage
+// rather than one big card — the leaves are real, just clustered. Slightly
+// flattened vertically so the bunch reads as a horizontal spray from below.
+function leafBunch(pos, size, count, rng, atlas){
+  const n  = count + (rng() * (count * 0.5) | 0);   // count ± 50%
+  const r  = size * 0.85;                            // cluster radius
+  const geos = [];
+  for (let i = 0; i < n; i++){
+    const theta  = rng() * Math.PI * 2;
+    const phi    = Math.acos(2 * rng() - 1);
+    const radius = Math.pow(rng(), 0.4) * r;         // bias toward the centre
+    const p = new THREE.Vector3(
+      pos.x + radius * Math.sin(phi) * Math.cos(theta),
+      pos.y + radius * Math.cos(phi) * 0.5,          // flatten vertically
+      pos.z + radius * Math.sin(phi) * Math.sin(theta),
+    );
+    geos.push(leafQuad(p, size, rng, atlas));
+  }
+  return mergeGeometries(geos, false);
+}
+
 // crossed quads for a hanging fruit/acorn (an "X", so it reads from any angle)
 function acornQuad(pos, size){
   const a = new THREE.PlaneGeometry(size, size * 1.3);    // a touch taller than wide
@@ -161,8 +198,13 @@ export function generateTree(rng, params, atlas){
   const s = P.targetHeight / H;
   const leafNat = P.leafFinal / s;
 
+  const leafFn = P.leafStyle === 'flat'
+    ? p => leafFlat(p, leafNat, rng)
+    : P.leafBunch
+      ? p => leafBunch(p, leafNat, P.leafBunch, rng, atlas)
+      : p => leafQuad(p, leafNat, rng, atlas);
   const leafGeo = leaves.length
-    ? mergeGeometries(leaves.map(p => leafQuad(p, leafNat, rng, atlas)), false)
+    ? mergeGeometries(leaves.map(leafFn), false)
     : null;
 
   // acorns: a scattering of small nuts tucked among the leaves (oaks only)
@@ -207,25 +249,48 @@ export const SHRUB_SPECIES = [
   { ...SHRUB, name: 'shrub-b', targetHeight: 2.2, outwardPull: 0.8 },
 ];
 
-// Redwood: an excurrent giant — one tall straight leader (high continuity), with
-// short branches that barely spread (low outwardPull) and reach steeply upward
-// (high elevation), so the silhouette is a narrow towering spire rather than the
-// maples' broad dome. Far taller than anything else in the world.
+// Redwood: an excurrent giant with a strong vertical leader and a conical crown.
+// Real coast redwoods (Sequoia sempervirens) have horizontal to slightly drooping
+// outer branches — NOT upward-reaching like a fir. The conical silhouette comes
+// from branches being longest near mid-height and shorter near the top, with the
+// outer tips drooping gracefully. Lower trunk is bare (natural branch shedding).
+// Bark is deep reddish-brown with thick vertical furrows.
 const REDWOOD = {
-  trunkLen: 4.2, baseRad: 0.62, depth: 5, childMin: 2, childMax: 3,
-  continuity: 0.62,           // keep a strong vertical leader
-  elevBase: 54, elevTip: 40,  // branches stay near-upright → narrow crown
-  arch: 9,                    // a gentle droop at the branch tips
-  outwardPull: 0.12,          // hardly spreads — columnar
-  azJitter: 0.5,
-  lenFalloff: 0.74, radFalloff: 0.7, taper: 0.82, radial: 6,
-  leavesPerTip: 15, leavesMid: 6, leafDepth: 3, leafSpread: 0.7, leafOut: 0.2,
-  leafFinal: 0.6, targetHeight: 34,
-  rootCount: 6,               // big buttress roots at the base of the giant
+  trunkLen: 4.2, baseRad: 0.62, depth: 5, childMin: 2, childMax: 4,
+  continuity: 0.66,
+  elevBase: 56, elevTip: 20,
+  arch: 20,
+  outwardPull: 0.30,          // spread branches outward so they don't crowd the trunk
+  azJitter: 0.65,             // irregular spacing stops branches from looking regimented
+  lenFalloff: 0.79, radFalloff: 0.70, taper: 0.82, radial: 6,
+  leavesPerTip: 2, leavesMid: 1, leafDepth: 3, leafSpread: 0.5, leafOut: 0.1,
+  leafStyle: 'flat',   // large horizontal disc per branch tier, not individual leaf quads
+  leafFinal: 5.5, targetHeight: 34,
+  rootCount: 6,
 };
 export const REDWOOD_SPECIES = [
   { ...REDWOOD, name: 'redwood' },
-  { ...REDWOOD, name: 'redwood-tall', targetHeight: 42, baseRad: 0.7, continuity: 0.66 },
+  { ...REDWOOD, name: 'redwood-tall', targetHeight: 44, baseRad: 0.74, continuity: 0.68, arch: 22 },
+];
+
+// Rowan (mountain ash): a small, slender tree of forest edges and upland clearings.
+// Open airy crown, grey bark, relatively upright with moderate outward spread.
+// Shade-intolerant — grows where canopy is partial, not under heavy oak/maple.
+const ROWAN = {
+  trunkLen: 1.6, baseRad: 0.15, depth: 4, childMin: 2, childMax: 3,
+  continuity: 0.44,
+  elevBase: 62, elevTip: 28,
+  arch: 14,
+  outwardPull: 0.40,
+  azJitter: 0.60,
+  lenFalloff: 0.75, radFalloff: 0.58, taper: 0.74, radial: 4,
+  leavesPerTip: 6, leavesMid: 3, leafDepth: 2, leafSpread: 0.58, leafOut: 0.24,
+  leafFinal: 0.30, targetHeight: 9,
+  rootCount: 0,
+};
+export const ROWAN_SPECIES = [
+  { ...ROWAN, name: 'rowan' },
+  { ...ROWAN, name: 'rowan-tall', targetHeight: 11, baseRad: 0.17, leavesPerTip: 7 },
 ];
 
 // Oak: a sturdy, gnarled, wide-spreading tree. A thick trunk and heavy, low,
@@ -248,6 +313,27 @@ export const OAK_SPECIES = [
   { ...OAK, name: 'oak' },
   { ...OAK, name: 'oak-broad', targetHeight: 13, outwardPull: 0.85, elevTip: 9,  baseRad: 0.58 },
   { ...OAK, name: 'oak-young', targetHeight: 9,  outwardPull: 0.6,  leavesPerTip: 12 },
+];
+
+// Birch: a slender, upright tree with a thin trunk, high branching scaffold, and
+// characteristic drooping outer tips. Small delicate leaves, pale bark. Often grows
+// in clusters; shorter and more elegant than a maple, narrower than a redwood.
+const BIRCH = {
+  trunkLen: 2.2, baseRad: 0.17, depth: 5, childMin: 2, childMax: 3,
+  continuity: 0.54,         // upright scaffold — keeps the slender silhouette
+  elevBase: 70, elevTip: 36,
+  arch: 24,                 // drooping outer tips — the elegant birch curve
+  outwardPull: 0.40,        // moderate — birch is upright, not spreading
+  azJitter: 0.52,
+  lenFalloff: 0.79, radFalloff: 0.62, taper: 0.76, radial: 5,
+  leavesPerTip: 8, leavesMid: 3, leafDepth: 2, leafSpread: 0.65, leafOut: 0.30,
+  leafFinal: 0.36, targetHeight: 12,
+  rootCount: 2,
+};
+export const BIRCH_SPECIES = [
+  { ...BIRCH, name: 'birch' },
+  { ...BIRCH, name: 'birch-tall', targetHeight: 15, continuity: 0.58, baseRad: 0.20 },
+  { ...BIRCH, name: 'birch-sapling', targetHeight: 7, baseRad: 0.12, depth: 4, rootCount: 0 },
 ];
 
 definePattern({

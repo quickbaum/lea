@@ -29,10 +29,13 @@ const AUTUMN  = ['#b5642a','#c98a2e','#9c4422','#caa23a'];
 // oaks read a touch deeper/duller green, and turn russet-brown in autumn
 const OAK_GREENS = ['#3a6b2c','#46792f','#2f5a24','#527f34','#39682a'];
 const OAK_AUTUMN = ['#8a5a2a','#7a4420','#9c6a2e','#6e3c1c'];
+// conifers: deep blue-green, evergreen (no autumn)
+const CONIFER_GREENS = ['#1a4226','#1e4a2a','#224e2e','#183c22','#265830'];
 
 const SHAPES = {
-  maple: { R: MAPLE_R, tips: MAPLE_TIPS, greens: GREENS,     autumn: AUTUMN,     vein: 'rgba(20,50,15,0.5)' },
-  oak:   { R: OAK_R,   tips: OAK_TIPS,   greens: OAK_GREENS, autumn: OAK_AUTUMN, vein: 'rgba(30,48,16,0.55)' },
+  maple:   { R: MAPLE_R, tips: MAPLE_TIPS, greens: GREENS,        autumn: AUTUMN,     vein: 'rgba(20,50,15,0.5)' },
+  oak:     { R: OAK_R,   tips: OAK_TIPS,   greens: OAK_GREENS,    autumn: OAK_AUTUMN, vein: 'rgba(30,48,16,0.55)' },
+  conifer: { greens: CONIFER_GREENS },
 };
 
 function leafPath(g, x0, y0, s, R){
@@ -74,15 +77,40 @@ function drawLeaf(g, x0, y0, s, rng, shape){
   g.beginPath(); g.moveTo(X(0), Y(0)); g.lineTo(X(0), y0 + s); g.stroke();
 }
 
-// Build an atlas of varied leaves. `kind` is 'maple' or 'oak'.
+// A conifer sprig: 5–8 needle lines radiating from a centre point, like a short
+// branch end. No leaf silhouette — just painted lines on a transparent background.
+// alphaTest on the material discards the transparent areas, leaving only the needles.
+function drawConifer(g, x0, y0, s, rng, shape){
+  const cx = x0 + s * 0.5, cy = y0 + s * 0.52;
+  const nNeedles = 5 + (rng() * 4 | 0);
+  const lw = Math.max(2, s * 0.055);
+  for (let i = 0; i < nNeedles; i++){
+    const angle = rng() * Math.PI * 2;
+    const len = s * (0.28 + rng() * 0.18);
+    g.strokeStyle = pick(rng, shape.greens);
+    g.lineWidth = lw * (0.7 + rng() * 0.5);
+    g.globalAlpha = 0.88 + rng() * 0.12;
+    g.beginPath();
+    g.moveTo(cx, cy);
+    g.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+    g.stroke();
+  }
+  // centre knot
+  g.fillStyle = pick(rng, shape.greens);
+  g.globalAlpha = 1;
+  g.beginPath(); g.arc(cx, cy, lw * 0.8, 0, Math.PI * 2); g.fill();
+}
+
+// Build an atlas of varied leaves/sprigs. `kind` is 'maple', 'oak', or 'conifer'.
 // Returns { texture, cols, rows, count }.
 export function makeLeafAtlas(rng, { cols = 4, rows = 2, cell = 64, kind = 'maple' } = {}){
   const shape = SHAPES[kind] || SHAPES.maple;
+  const draw = kind === 'conifer' ? drawConifer : drawLeaf;
   const texture = makeTexture(cols*cell, rows*cell, (g) => {
     g.clearRect(0, 0, cols*cell, rows*cell);
     for (let r = 0; r < rows; r++)
       for (let c = 0; c < cols; c++)
-        drawLeaf(g, c*cell, r*cell, cell, rng, shape);
+        draw(g, c*cell, r*cell, cell, rng, shape);
   });
   return { texture, cols, rows, count: cols*rows };
 }

@@ -14,6 +14,9 @@ import { height } from './terrain.js';
 const HULL = 0x6b4a2b;     // bark-brown
 const TRIM = 0x4f3318;     // darker gunwale / thwarts
 const PADDLE = 0x8a6a3f;
+// how high the hull rides: gunwales sit FLOAT above the waterline, the keel a
+// little below — so the canoe floats *on* the water, not submerged in it.
+const FLOAT = 0.42;
 
 // A canoe pointed along -Z (the camera's forward at yaw 0), so setting the
 // group's rotation.y to a heading aims the bow where you paddle.
@@ -64,6 +67,31 @@ function buildCanoe(){
     g.add(tw);
   }
 
+  // --- interior floor: tapered strip above the waterline so the water surface
+  // doesn't show through the open hull when viewed from above ---
+  // FLOAT = 0.42, so water is at boat-local y = −FLOAT = −0.42; floor at −0.25
+  // is 17 cm above it. Half-width at each station is 85 % of the hull width
+  // at that y level (linear interpolation from keel to rail).
+  const FLOOR_Y = -0.25;
+  const fp = [], fi = [];
+  for (let i = 0; i <= N; i++){
+    const s = i / N * 2 - 1;
+    const taper = Math.sqrt(Math.max(0, 1 - s * s));
+    const z = s * HALF_L;
+    const keelDepth = DEPTH * (taper + 1e-6);      // avoids div-by-0 at the tips
+    const fhw = Math.max(0, 0.85 * BEAM * (FLOOR_Y / keelDepth + 1));
+    fp.push(-fhw, FLOOR_Y, z, fhw, FLOOR_Y, z);
+  }
+  for (let i = 0; i < N; i++){
+    const a = i * 2, b = a + 2;
+    fi.push(a, b, a + 1, b, b + 1, a + 1);
+  }
+  const floorGeo = new THREE.BufferGeometry();
+  floorGeo.setAttribute('position', new THREE.Float32BufferAttribute(fp, 3));
+  floorGeo.setIndex(fi);
+  floorGeo.computeVertexNormals();
+  g.add(new THREE.Mesh(floorGeo, new THREE.MeshLambertMaterial({ color: HULL, flatShading: true })));
+
   // --- a paddle laid across the gunwales ---
   const paddle = new THREE.Group();
   const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 1.4),
@@ -83,21 +111,23 @@ class Boat {
   constructor(x, z, yaw){
     this.x = x; this.z = z; this.yaw = yaw;
     this.aboard = false;
+    this._claimed = null;          // an NPC that has reserved this boat for a crossing
+    this.deckY = WATER + FLOAT;     // world Y of the gunwale — where a rider sits
     this.group = buildCanoe();
-    this.group.position.set(x, WATER, z);
+    this.group.position.set(x, WATER + FLOAT, z);
     this.group.rotation.y = yaw;
     this._ph = Math.random() * Math.PI * 2;   // bob phase, so boats don't bob in lockstep
   }
   placeAt(x, z, yaw){ this.x = x; this.z = z; this.yaw = yaw; }
   update(dt, t){
-    this.group.position.set(this.x, WATER, this.z);
+    this.group.position.set(this.x, WATER + FLOAT, this.z);
     this.group.rotation.y = this.yaw;
     if (this.aboard){
-      this.group.position.y = WATER;            // glued steady under the rider
+      this.group.position.y = WATER + FLOAT;    // glued steady under the rider
       this.group.rotation.z = 0;
     } else {
-      this.group.position.y = WATER + Math.sin(t * 1.3 + this._ph) * 0.05;   // gentle bob
-      this.group.rotation.z = Math.sin(t * 0.9 + this._ph) * 0.04;           // slow roll
+      this.group.position.y = WATER + FLOAT + Math.sin(t * 1.3 + this._ph) * 0.05;   // gentle bob
+      this.group.rotation.z = Math.sin(t * 0.9 + this._ph) * 0.04;                   // slow roll
     }
   }
 }
@@ -128,11 +158,16 @@ export class Boats {
         if (height(x + c * 4, z + s * 4) < WATER){ wx += c; wz += s; found++; }
       }
       if (!found) continue;
-      wx /= found; wz /= found;
+      const len = Math.hypot(wx, wz) || 1; wx /= len; wz /= len;   // unit dir toward water
+      // march out from the bank to the first spot deep enough for the hull to float clear
+      let bx = null, bz = null;
+      for (let step = 1.5; step <= 7; step += 0.6){
+        const px = x + wx * step, pz = z + wz * step;
+        if (height(px, pz) < WATER - 0.3){ bx = px; bz = pz; break; }
+      }
+      if (bx === null) continue;                                   // too shallow/flat here — try elsewhere
       // bow points toward the water (forward is -Z at yaw 0, so heading = atan2(-wx,-wz))
-      const yaw = Math.atan2(-wx, -wz);
-      // nudge the hull a touch out onto the water so it floats, not sits on sand
-      this.add(x + wx * 1.4, z + wz * 1.4, yaw);
+      this.add(bx, bz, Math.atan2(-wx, -wz));
       placed++;
     }
     return placed;

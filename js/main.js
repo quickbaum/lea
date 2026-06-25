@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { SIZE, WATER, WORLD_SEED } from './config.js';
+import { SIZE, WATER, WORLD_SEED, WORLD_R } from './config.js';
 import { mulberry32, fork } from './rng.js';
 import { height, biome, walkable, buildTerrain, terrainType } from './terrain.js';
 import { spawnPeasants, spawnNamedNPC } from './npc.js';
@@ -11,6 +11,7 @@ import { Footsteps } from './footsteps.js';
 import { Boats } from './boats.js';
 import { Ambience } from './ambience.js';
 import { Sky } from './sky.js';
+import { SkyPicker } from './skypicker.js';
 import { AgentWorld } from './agents.js';
 import { TrailField } from './trails.js';
 import { GrassDetail, GrassClumps } from './grass.js';
@@ -18,6 +19,7 @@ import * as wojak from './wojak.js';
 import { makeSociety } from './society.js';
 import { makeOmen } from './astrology.js';
 import { talk, talkTree } from './dialog.js';
+import { createHands } from './hands.js';
 
 // ---------- renderer (low internal res, upscaled for the retro look) ----------
 const canvas = document.getElementById('c');
@@ -41,7 +43,7 @@ scene.fog = new THREE.Fog(SKY, 35, 170);   // farther haze so the bigger world r
 
 const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
 const EYE = 1.7;
-const EYE_BOAT = 1.15;     // seated low in the canoe
+const EYE_BOAT = 1.32;     // seated in the canoe (above the floating gunwale)
 
 // Lighting + sky (sun/moon/stars/clouds) are owned by Sky — see js/sky.js.
 
@@ -61,6 +63,7 @@ agents.buildNav();                                        // A* walkability grid
 agents.setShrubs(forage.shrubs);                           // choppable firewood for the fires
 // no pre-placed fire — the folk raise their own organically (curfew/stranded
 // logic in agents.js), so hearths emerge where people actually gather.
+agents.setBoats(boats);                                    // communal canoes NPCs ferry across the water
 agents.setFood(forage.plants);                             // bushes/trees double as food sources
 agents.setValuables(forage.valuables);                     // rare finds people gather & trade
 agents.spawnFauna();                                       // rabbits — quarry that roam, flee & are hunted (docs/hunting.md)
@@ -72,6 +75,7 @@ new Warren(scene, agents.fauna).load().then(w => { warren = w; });   // draws th
 const trail = new TrailField(ground);
 trail.addGrass(forage.grass);
 trail.addGrass(forage.reeds);   // tall swamp grass also thins off trodden paths
+trail.addGrass(forage.ferns);   // woodland ferns also thin off trodden paths
 
 // decorative single-pixel grass blades that carpet the ground near the camera
 // and sway in the wind (cosmetic only; not tracked). See js/grass.js. Concentric
@@ -82,7 +86,7 @@ trail.addGrass(forage.reeds);   // tall swamp grass also thins off trodden paths
 // grass never grows/shrinks or thickens as you approach it (no proximity effects,
 // no density ring). Only a gentle alpha dissolve at the far edge, where the clumps
 // take over.
-const grassDetail = new GrassDetail(scene, { trail, radius: 22, count: 120000, fade: 'alpha' });
+const grassDetail = new GrassDetail(scene, { trail, radius: 22, count: 60000, fade: 'alpha' });
 // beyond the blade field, cheap STATIC clump cards carry grass deep into the
 // distance (scene-lit, so they match the terrain). They overlap the blade edge so
 // the handoff is hidden. See js/grass.js.
@@ -94,15 +98,35 @@ let npcApi = { npcs: [], update(){} };
 // the folk form legible social groups (families, clans, bands, lone wanderers),
 // each spawning as a cluster on the land — see society.js / docs/texts patterns
 const society = makeSociety(fork(rng), 32);
-spawnPeasants(scene, fork(rng), society)
+// Clan Lea — the procedural ANNY avatars baked by tools/bake_leas.py (varying skin,
+// gender, body). Injected as a kin group so they get human names sharing the 'Lea'
+// surname, wojak portraits, and the assembled peasant dialogue for free. The roster
+// (slugs + each body's sampled face skin tone) is written by the baker.
+fetch('sprites/npc/lea_clan.json').then(r => r.ok ? r.json() : []).catch(() => [])
+  .then(clan => {
+    if (clan.length){
+      const r = fork(rng);
+      let leaSpot = [8, 8];
+      for (let i = 0; i < 300; i++){ const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * WORLD_R * 0.55;
+        const x = Math.cos(a) * rr, z = Math.sin(a) * rr; if (walkable(x, z)){ leaSpot = [x, z]; break; } }
+      society.push({ id: society.length, kind: 'clan', surname: 'Lea', race: 'human', name: 'Clan Lea',
+        cx: leaSpot[0], cz: leaSpot[1], spread: 8, npcs: [],
+        members: clan.map((e, i) => ({ slug: e.slug, role: i === 0 ? 'elder' : 'kin', skin: e.skin })) });
+    }
+    return spawnPeasants(scene, fork(rng), society);
+  })
   .then(api => {
     npcApi = api;
     for (const n of api.npcs) agents.attach(n);
     warmTrails(120);
     // give each peasant a procedural wojak portrait for its dialog, and tint its
-    // in-world sprite (magenta/green/yellow zones) to match (once assets load)
+    // in-world sprite (magenta/green/yellow zones) to match (once assets load). Lea
+    // bodies pass their sampled skin tone so the portrait matches the rendered body.
     wojak.ready().then(() => {
-      for (const n of api.npcs){ const f = wojak.face(n.gender, n.race); n.portrait = f.url; n.recolor(f.palette); }
+      for (const n of api.npcs){ const f = wojak.face(n.gender, n.race, n.skinTone);
+        n.portrait = f.url;
+        if (!n.slug?.includes('-lea-')) n.recolor(f.palette); // Leas have baked wagara colors
+      }
     });
   });
 
@@ -321,6 +345,7 @@ const sky = new Sky(scene, {
   sunLon:    +(params.get('sunlon') ?? 35),    // sun's ecliptic longitude (season)
 });
 sky.load();
+new SkyPicker(sky);   // \ to open, [ ] to cycle, M to toggle mode
 
 // the weather is Claude's to command, through dialogue (see dialogs/claude.json)
 const weatherActions = {
@@ -785,7 +810,7 @@ function board(b){
 // step ashore: find the nearest walkable shore around the boat and stand there;
 // refuse if there's only open water within reach (you'd have to wade/swim).
 function disembark(){
-  for (let r = 1.5; r <= 4.5; r += 0.5){
+  for (let r = 1.5; r <= 8; r += 0.5){
     for (let k = 0; k < 16; k++){
       const a = k / 16 * Math.PI * 2, x = pos.x + Math.cos(a) * r, z = pos.z + Math.sin(a) * r;
       if (walkable(x, z)){
@@ -870,6 +895,12 @@ addEventListener('keydown', e => {
   }
 });
 
+const hands = createHands();              // Doom-style first-person hands viewmodel
+
+const _handsTint = new THREE.Color();
+const _fireWarm  = new THREE.Color(1.0, 0.58, 0.20);   // warm amber fire light
+const FIRE_LIGHT_RANGE = 10;
+
 let last = performance.now();
 function loop(now){
   const dt = Math.min(0.05, (now - last)/1000); last = now;
@@ -945,7 +976,20 @@ function loop(now){
   grassDetail.update(pos.x, pos.z, now * 0.001, sky.groundTint);   // blades follow the viewer, sway, lit like the turf
   grassClumps.update(pos.x, pos.z);                  // far static clumps (rebuilt only when moving)
   updateFocus();                                     // cursor-aimed: sets nearTalker / nearFruit + the box
+  // hands tint: base sky tint darkened at night, then warmed by nearby lit fires
+  let fireGlow = 0;
+  for (const f of agents.fires){
+    if (!f.lit) continue;
+    const fd = Math.hypot(pos.x - f.x, pos.z - f.z);
+    const s = Math.max(0, 1 - fd / FIRE_LIGHT_RANGE);
+    if (s * s > fireGlow) fireGlow = s * s;
+  }
+  _handsTint.copy(sky.spriteTint).lerp(_fireWarm, fireGlow * 0.88);
+  hands.update(dt, { moving: !!(dx || dz) && !fly, running: !!(keys.ShiftLeft || keys.ShiftRight),
+                     visible: playing && !fly, tint: _handsTint });
+  forage.billboardFruits(camera, sky.spriteTint);
   renderer.render(scene, camera);
+  hands.render(renderer);                            // overlay pass, on top of the world
   drawMinimap(pos.x, pos.z, yaw);
   if (showNpcDbg) npcDbg.textContent = agents.debugText(pos.x, pos.z);
   hud.textContent =

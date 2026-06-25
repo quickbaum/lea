@@ -28,115 +28,124 @@ function grassLength(x, z){
   return GRASS_SHORT + (GRASS_TALL - GRASS_SHORT) * Math.pow(t, 1.5);
 }
 
+// Half-width of a blade quad in world units. At PIXEL=3 upscale, ~0.05 reads as
+// 2–3 pixels wide up close, thinning naturally with distance.
+const BLADE_HALF_W = 0.05;
+
 export class GrassDetail {
   constructor(scene, { count = 14000, radius = 12, trail = null, fade = 'alpha' } = {}){
     this.R = radius;
     this.n = count;
     this.trail = trail;
-    // how the field dissolves at its radius edge. 'alpha' = a soft transparency
-    // fade at the far edge (where clumps take over); false = a hard edge. Blade
-    // HEIGHT is never touched by distance — height comes only from world location
-    // (grassLength), so a patch of grass never grows/shrinks as you walk toward it.
     this.fadeMode = fade;
-    this._lcx = Infinity; this._lcz = Infinity;   // last camera cell (to detect movement)
-    // per-blade state (world base position, blade shape, animation phase)
-    this.bx = new Float32Array(count);   // base world x
-    this.bz = new Float32Array(count);   // base world z
-    this.by = new Float32Array(count);   // base world y (ground + tiny lift)
-    this.bh = new Float32Array(count);   // blade height (region length × per-blade jitter)
-    this.hj = new Float32Array(count);   // per-blade height multiplier (blade-to-blade variance)
-    this.lx = new Float32Array(count);   // static lean direction x
-    this.lz = new Float32Array(count);   // static lean direction z
-    this.ph = new Float32Array(count);   // wind phase
-    this.br = new Float32Array(count);   // per-blade brightness jitter
-    this.on = new Uint8Array(count);     // 1 if its spot is grass (else hidden)
+    this._lcx = Infinity; this._lcz = Infinity;
+    this._frame = 0;
+    // per-blade state
+    this.bx = new Float32Array(count);
+    this.bz = new Float32Array(count);
+    this.by = new Float32Array(count);
+    this.bh = new Float32Array(count);
+    this.hj = new Float32Array(count);
+    this.lx = new Float32Array(count);
+    this.lz = new Float32Array(count);
+    this.ph = new Float32Array(count);
+    this.br = new Float32Array(count);
+    this.on = new Uint8Array(count);
+    // perpendicular half-offset for quad width (computed once in _sample)
+    this.pw = new Float32Array(count * 2);   // [px, pz] per blade
 
-    this.pos = new Float32Array(count * 2 * 3);   // 2 verts (base, tip) per blade
-    this.col = new Float32Array(count * 2 * 4);   // rgba per vert (alpha fades blades at the edge)
+    // 3 verts per blade (base-left, base-right, tip) — one triangle
+    this.pos = new Float32Array(count * 3 * 3);
+    this.col = new Float32Array(count * 3 * 4);
+
+    // static index buffer: 1 triangle per blade
+    const idx = new Uint32Array(count * 3);
+    for (let i = 0; i < count; i++){
+      const v = i * 3, t = i * 3;
+      idx[t] = v; idx[t+1] = v+1; idx[t+2] = v+2;
+    }
 
     for (let i = 0; i < count; i++){
-      // scatter across a square around the origin; first update() wraps the patch
-      // onto the camera and resamples the ground beneath each blade.
       this.bx[i] = (Math.random() * 2 - 1) * radius;
       this.bz[i] = (Math.random() * 2 - 1) * radius;
-      this.hj[i] = 0.5 + Math.random() * 0.95;        // blade-to-blade height variance (~0.5..1.45×)
+      this.hj[i] = 0.5 + Math.random() * 0.95;
       const lean = 0.02 + Math.random() * 0.05, a = Math.random() * Math.PI * 2;
       this.lx[i] = Math.cos(a) * lean; this.lz[i] = Math.sin(a) * lean;
       this.ph[i] = Math.random() * Math.PI * 2;
-      this.br[i] = 0.9 + Math.random() * 0.2;       // subtle, so the sward reads as one colour
+      this.br[i] = 0.9 + Math.random() * 0.2;
       this._sample(i);
     }
 
     const geo = new THREE.BufferGeometry();
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(this.col, 4));   // 4 comps -> per-vertex alpha
+    geo.setAttribute('color',    new THREE.BufferAttribute(this.col, 4));
     this.geo = geo;
-    const mat = new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, depthWrite: false, fog: true });
-    this.mesh = new THREE.LineSegments(geo, mat);
-    this.mesh.frustumCulled = false;     // we move verts around the camera each frame
+    const mat = new THREE.MeshBasicMaterial({
+      vertexColors: true, transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide });
+    this.mesh = new THREE.Mesh(geo, mat);
+    this.mesh.frustumCulled = false;
     scene.add(this.mesh);
   }
 
-  // resample the ground under blade i (called when it (re)lands on a new spot):
-  // its height, whether it's grass, and the grass colour to take from the terrain.
   _sample(i){
     const x = this.bx[i], z = this.bz[i];
     this.by[i] = height(x, z) + 0.02;
-    this.bh[i] = grassLength(x, z) * this.hj[i];   // regional length × this blade's variance
+    this.bh[i] = grassLength(x, z) * this.hj[i];
     const grass = terrainType(x, z) === 'grass';
     this.on[i] = grass ? 1 : 0;
-    // tint to the terrain's grass colour, root darker than the tip. The factors
-    // bake in the ~0.83 darkening the ground gets from its grain map (which the
-    // blades don't have), so the blades sit at/just below the turf, never brighter.
-    const c = biome(x, z), br = this.br[i] / 2, o = i * 8;
-    this.col[o]   = c[0] * 0.56 * br; this.col[o+1] = c[1] * 0.56 * br; this.col[o+2] = c[2] * 0.56 * br;
-    this.col[o+4] = c[0] * 0.76 * br; this.col[o+5] = c[1] * 0.76 * br; this.col[o+6] = c[2] * 0.76 * br;
+    // perpendicular to the lean direction (in XZ) for the quad width
+    const lx = this.lx[i], lz = this.lz[i];
+    const len = Math.hypot(lx, lz) || 1;
+    this.pw[i*2]   = (-lz / len) * BLADE_HALF_W;
+    this.pw[i*2+1] = ( lx / len) * BLADE_HALF_W;
+    const c = biome(x, z), br = this.br[i] / 2, o = i * 12;
+    const bR = c[0]*0.56*br, bG = c[1]*0.56*br, bB = c[2]*0.56*br;
+    const tR = c[0]*0.76*br, tG = c[1]*0.76*br, tB = c[2]*0.76*br;
+    // base-left, base-right (dark); tip (light, single point)
+    this.col[o]   = bR; this.col[o+1] = bG; this.col[o+2] = bB;
+    this.col[o+4] = bR; this.col[o+5] = bG; this.col[o+6] = bB;
+    this.col[o+8] = tR; this.col[o+9] = tG; this.col[o+10] = tB;
   }
 
-  // Call each frame. (camX,camZ) is the viewer, t is elapsed seconds, tint is the
-  // ground illumination (sky.groundTint) — the same hemi+sun+moon light the Lambert
-  // terrain receives on flat ground, so the blades stay the colour of the turf
-  // around them through the whole day/night cycle (not just dimmed by a sprite tint).
   update(camX, camZ, t, tint){
-    if (tint) this.mesh.material.color.copy(tint);   // multiplies the per-blade vertex colours
+    if (tint) this.mesh.material.color.copy(tint);
+    const swayFrame = (this._frame++ % 2) === 0;   // recompute sway every other frame
     const R = this.R, R2 = R * 2, pos = this.pos, col = this.col, trail = this.trail;
-    // alpha only changes when the viewer moves (the only time blades wrap to new
-    // ground / change distance); wind moves positions every frame.
     const camMoved = camX !== this._lcx || camZ !== this._lcz;
     this._lcx = camX; this._lcz = camZ;
-    // a slow global wind direction, plus a gust that breathes in and out
+    if (!swayFrame && !camMoved) return;            // nothing to do this frame
     const wAng = t * 0.13, wx = Math.cos(wAng), wz = Math.sin(wAng);
     const gust = 0.6 + 0.4 * Math.sin(t * 0.7);
-    const fadeIn = 1 / (R * 0.35);            // 1 / width of the edge fade band
+    const fadeIn = 1 / (R * 0.35);
     for (let i = 0; i < this.n; i++){
-      // keep the blade within ±R of the camera (toroidal wrap); resample on move
       let x = this.bx[i], z = this.bz[i], moved = false;
       if (x - camX >  R){ x -= R2; moved = true; } else if (x - camX < -R){ x += R2; moved = true; }
       if (z - camZ >  R){ z -= R2; moved = true; } else if (z - camZ < -R){ z += R2; moved = true; }
       if (moved){ this.bx[i] = x; this.bz[i] = z; this._sample(i); }
 
-      const o6 = i * 6, by = this.by[i], h = this.bh[i];
-      // blade height is fixed by world location (never by distance) — full sway
+      const by = this.by[i], h = this.bh[i];
       const flutter = Math.sin(t * 1.9 + this.ph[i]);
       const bend = (gust * 0.03 + flutter * 0.013) * h * 4;
-      pos[o6]   = x;                pos[o6+1] = by;     pos[o6+2] = z;                // base
-      pos[o6+3] = x + this.lx[i] + wx * bend;
-      pos[o6+4] = by + h;
-      pos[o6+5] = z + this.lz[i] + wz * bend;                                        // tip
+      const tipX = x + this.lx[i] + wx * bend;
+      const tipZ = z + this.lz[i] + wz * bend;
+      const pw = this.pw, px = pw[i*2], pz = pw[i*2+1];
+      const o9 = i * 9;
+      // base-left, base-right, tip (single point)
+      pos[o9]   = x    - px; pos[o9+1] = by;   pos[o9+2] = z    - pz;
+      pos[o9+3] = x    + px; pos[o9+4] = by;   pos[o9+5] = z    + pz;
+      pos[o9+6] = tipX;      pos[o9+7] = by+h; pos[o9+8] = tipZ;
 
       if (camMoved){
-        // alpha: nil off-grass, thinned on trodden paths, and (if this field fades)
-        // a soft dissolve only at the far radius edge where clumps take over.
         let a = this.on[i] ? 1 : 0;
         if (a && this.fadeMode){ const d = Math.hypot(x - camX, z - camZ); let df = (R - d) * fadeIn; a = df < 0 ? 0 : df > 1 ? 1 : df; }
         if (a && trail){ const w = trail.wearAt(x, z); if (w > 0.05){ const tf = 1 - (w - 0.05) / 0.18; a *= tf < 0 ? 0 : tf; } }
-        const o8 = i * 8;
-        col[o8+3] = a; col[o8+7] = a;
+        const o12 = i * 12;
+        col[o12+3] = col[o12+7] = col[o12+11] = a;
       }
     }
-    this.geo.attributes.position.needsUpdate = true;
-    if (camMoved) this.geo.attributes.color.needsUpdate = true;
+    if (swayFrame) this.geo.attributes.position.needsUpdate = true;
+    if (camMoved)  this.geo.attributes.color.needsUpdate = true;
   }
 }
 

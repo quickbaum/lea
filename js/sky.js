@@ -75,55 +75,48 @@ function drawMoon(g, illum, waxing){
   g.restore();
 }
 
-// A cloud is a baked normal+coverage map: a lumpy cumulus height field turned
-// into per-texel surface normals (RGB) + coverage (A). The cloud shader lights
-// it from the *actual* sun direction, so painterly highlights/shadows fall on
-// the right side and backlit clouds get a silver lining. Not orbs — a unifying
-// base mass plus multi-scale cauliflower bumps gives an organic, painterly form.
-const CLOUD_W = 200, CLOUD_H = 132;
-function makeCloudTexture(){
-  const W = CLOUD_W, H = CLOUD_H, h = new Float32Array(W * H), baseY = H * 0.66;
-  const lump = (cx, cy, rx, ry, amp, p = 1.2) => {
-    const x0 = Math.max(0, (cx-rx)|0), x1 = Math.min(W, (cx+rx+1)|0);
-    const y0 = Math.max(0, (cy-ry)|0), y1 = Math.min(H, (cy+ry+1)|0);
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++){
-      const nd = ((x-cx)/rx)**2 + ((y-cy)/ry)**2;
-      if (nd < 1) h[y*W+x] += amp * Math.pow(1 - nd, p);
-    }
+// A seamless, tiling cloud-coverage field for the GZDoom-style scrolling sky
+// layer (doublesky in spirit): instead of 16 billboard masses in the world, the
+// dome shader projects this one tile onto an infinite ceiling and scrolls it with
+// the wind. Periodic value-noise fBm (every octave's grid wraps, so the whole
+// tile is seamless) → coverage in the red channel. One texture, zero objects.
+function makeCloudFieldTexture(){
+  const N = 256;                                     // tile resolution
+  // periodic value noise with integer period P (in cells) → tiles seamlessly
+  const makeNoise = P => {
+    const g = new Float32Array(P * P);
+    for (let i = 0; i < g.length; i++) g[i] = Math.random();
+    const s = t => t * t * (3 - 2 * t);              // smoothstep fade
+    return (x, y) => {
+      const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+      const x0 = ((xi % P) + P) % P, y0 = ((yi % P) + P) % P, x1 = (x0 + 1) % P, y1 = (y0 + 1) % P;
+      const u = s(fx), v = s(fy);
+      const a = g[y0*P+x0], b = g[y0*P+x1], c = g[y1*P+x0], d = g[y1*P+x1];
+      return a*(1-u)*(1-v) + b*u*(1-v) + c*(1-u)*v + d*u*v;
+    };
   };
-  lump(W*0.5, baseY - H*0.15, W*0.34, H*0.20, 1.0, 1.0);                 // unifying base mass
-  const big = 3 + (Math.random()*3|0);
-  for (let i=0;i<big;i++)
-    lump(W*0.5 + (Math.random()-0.5)*W*0.5, baseY - H*0.18 - Math.random()*H*0.16,
-         H*(0.16+Math.random()*0.1), H*(0.15+Math.random()*0.1), 0.85);  // billows
-  const small = 16 + (Math.random()*12|0);
-  for (let i=0;i<small;i++)
-    lump(W*0.5 + (Math.random()-0.5)*W*0.62, baseY - H*0.1 - Math.random()*H*0.34,
-         H*(0.05+Math.random()*0.06), H*(0.05+Math.random()*0.06), 0.5, 1.6);  // cauliflower
-  for (let y=0;y<H;y++){                                                 // flat base
-    const f = y > baseY ? Math.max(0, 1 - (y-baseY)/(H*0.06)) : 1;
-    if (f < 1) for (let x=0;x<W;x++) h[y*W+x] *= f;
+  const oct = [[4, 0.55], [8, 0.28], [16, 0.13], [32, 0.07]];   // [period, amplitude]
+  const noises = oct.map(([P]) => makeNoise(P));
+  const h = new Float32Array(N * N);
+  let mn = Infinity, mx = -Infinity;
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++){
+    let v = 0;
+    for (let k = 0; k < oct.length; k++){ const P = oct[k][0];
+      v += noises[k](x / N * P, y / N * P) * oct[k][1]; }
+    h[y*N+x] = v; if (v < mn) mn = v; if (v > mx) mx = v;
   }
-  let mx = 0; for (let i=0;i<h.length;i++) mx = Math.max(mx, h[i]); mx = mx || 1;
-  for (let i=0;i<h.length;i++) h[i] /= mx;
-
-  const img = new ImageData(W, H), BUMP = 2.6;
-  const at = (x,y) => h[Math.min(H-1,Math.max(0,y))*W + Math.min(W-1,Math.max(0,x))];
-  for (let y=0;y<H;y++) for (let x=0;x<W;x++){
-    const i = (y*W+x)*4, a = h[y*W+x];
-    const nx = -(at(x+1,y) - at(x-1,y)) * BUMP;
-    const ny =  (at(x,y+1) - at(x,y-1)) * BUMP;     // +Y = up (texture top)
-    const il = 1 / Math.hypot(nx, ny, 1);
-    img.data[i]   = (nx*il*0.5+0.5)*255;
-    img.data[i+1] = (ny*il*0.5+0.5)*255;
-    img.data[i+2] = (il*0.5+0.5)*255;               // nz
-    img.data[i+3] = a <= 0.001 ? 0 : clamp((a - 0.06) / 0.10, 0, 1) * 255;
+  const img = new ImageData(N, N), span = (mx - mn) || 1;
+  for (let i = 0; i < h.length; i++){
+    const c = ((h[i] - mn) / span) * 255;
+    img.data[i*4] = img.data[i*4+1] = img.data[i*4+2] = c; img.data[i*4+3] = 255;
   }
-  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const c = document.createElement('canvas'); c.width = N; c.height = N;
   c.getContext('2d').putImageData(img, 0, 0);
   const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.NoColorSpace;                 // it's a normal map, not colour
-  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  t.colorSpace = THREE.NoColorSpace;                 // coverage, not colour
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter;
+  t.generateMipmaps = true;                          // mip away shimmer near the horizon
   return t;
 }
 // A panoramic mountain silhouette baked into one texture: several ridgelines
@@ -182,26 +175,6 @@ function makeMountainTexture(){
   return t;
 }
 
-const CLOUD_VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`;
-const CLOUD_FRAG = `
-  uniform sampler2D uTex; uniform vec3 uSun, uLight, uShadow; uniform float uOpacity;
-  varying vec2 vUv;
-  void main(){
-    vec4 t = texture2D(uTex, vUv);
-    if (t.a < 0.5) discard;                         // crisp silhouette
-    vec3 N = normalize(t.xyz * 2.0 - 1.0);
-    vec3 L = normalize(uSun);
-    float lit = dot(N, L);
-    vec3 col = mix(uShadow, uLight, smoothstep(-0.2, 0.55, lit));   // painterly key
-    col += uLight * smoothstep(0.6, 0.96, lit) * 0.30;             // highlight
-    float back = smoothstep(0.0, -0.5, L.z);                       // sun behind cloud
-    float edge = smoothstep(0.6, 0.05, N.z);                       // toward silhouette
-    col += uLight * back * edge;                                   // silver lining
-    float n = fract(sin(dot(vUv, vec2(127.1, 311.7))) * 43758.5453);
-    col *= 0.96 + 0.08 * n;                                        // painterly grain
-    gl_FragColor = vec4(col, uOpacity);
-  }`;
-
 export class Sky {
   constructor(scene, { latitude = 42, dayLength = 600, time = 0.35, sunLon = 35, yearDays = 360 } = {}){
     this.scene = scene;
@@ -223,16 +196,16 @@ export class Sky {
     this.spriteTint = new THREE.Color(1, 1, 1);   // illumination for unlit billboards
     this.groundTint = new THREE.Color(1, 1, 1);   // light on flat ground (matches the Lambert terrain)
     this.evening = 0;                             // 0 by day, rises through the afternoon to dusk
+    this._starTime = 0;
 
     this.root = new THREE.Group(); scene.add(this.root);
     this.celestial = new THREE.Group(); this.root.add(this.celestial);   // stars + lines
 
     this._buildDome();
     this._buildMountains();
-    this._buildClouds();
     this._buildSunMoon();
     this._buildLights();
-    this.cloudCover = 0.55; this._applyCloudCover();
+    this.setCloudCover(0.55);
   }
 
   // ── sky dome (gradient + sun glow) ──
@@ -245,6 +218,18 @@ export class Sky {
       uHorizon:    { value: new THREE.Color(0xbfd8 ) },
       uNightZenith:{ value: new THREE.Color(0x05060f) },
       uNightHoriz: { value: new THREE.Color(0x121a2e) },
+      // GZDoom-style scrolling cloud layer (projected onto an infinite ceiling)
+      uCloudTex:    { value: makeCloudFieldTexture() },
+      uCloudScroll: { value: new THREE.Vector2(0, 0) },
+      uCloudScale:  { value: 0.65 },                 // tiling density of the ceiling
+      uCloudThresh: { value: 0.6 },                  // coverage cutoff (driven by cloudCover)
+      uCloudOpacity:{ value: 0.9 },
+      uCloudLight:  { value: new THREE.Color(1, 1, 1) },
+      uCloudShadow: { value: new THREE.Color(0.55, 0.6, 0.72) },
+      // doom sky (inactive until setDoomSky/setDoomMode are called)
+      uDoomTex:    { value: null },
+      uDoomMode:   { value: 0.0 },   // 0=off  1=band (A)  2=full (B)
+      uDoomRepeat: { value: 1.0 },   // tex.repeat.x applied in shader (ShaderMaterial ignores texture.repeat)
     };
     this.domeU.uHorizon.value.setHex(0xbcd6ee);
     const mat = new THREE.ShaderMaterial({
@@ -252,6 +237,9 @@ export class Sky {
       vertexShader: `varying vec3 vDir; void main(){ vDir = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
       fragmentShader: `
         varying vec3 vDir; uniform float uDay; uniform vec3 uSunDir,uSunColor,uZenith,uHorizon,uNightZenith,uNightHoriz;
+        uniform sampler2D uCloudTex; uniform vec2 uCloudScroll;
+        uniform float uCloudScale, uCloudThresh, uCloudOpacity; uniform vec3 uCloudLight, uCloudShadow;
+        uniform sampler2D uDoomTex; uniform float uDoomMode, uDoomRepeat;
         void main(){
           vec3 d = normalize(vDir);
           float t = pow(clamp(d.y,0.0,1.0), 0.5);
@@ -265,6 +253,31 @@ export class Sky {
           // warm band along the horizon near sunrise/sunset
           float band = pow(1.0 - clamp(d.y,0.0,1.0), 4.0) * pow(max(sd,0.0),1.5);
           col += uSunColor * band * (1.0 - abs(uSunDir.y)) * sunUp * 0.8;
+
+          // doom sky: panoramic texture blended over the gradient.
+          // d.y=0 (horizon) → dv=0 (terrain/buildings); d.y=1 (zenith) → dv=1 (open sky).
+          // atan(d.x,d.z) gives a full-circle panoramic U (0..1) matching the cylinder's UV.
+          if (uDoomMode > 0.5) {
+            float dv = clamp(d.y, 0.0, 1.0);
+            float du = fract(atan(d.x, d.z) * 0.15915 + 0.5);
+            vec3 doom = texture2D(uDoomTex, vec2(du * uDoomRepeat, dv)).rgb * max(uDay, 0.06);
+            float doomBlend = (uDoomMode < 1.5)
+              ? 1.0 - smoothstep(0.0, 0.40, d.y)   // band: full at horizon, fades over ~23°
+              : 1.0;                                  // full: replaces gradient everywhere
+            col = mix(col, doom, doomBlend);
+          }
+
+          // ── scrolling cloud ceiling ──
+          float hf = smoothstep(0.02, 0.17, d.y);
+          if (hf > 0.0){
+            vec2 cuv = (d.xz / d.y) * uCloudScale + uCloudScroll;
+            float cov = texture2D(uCloudTex, cuv).r * 0.65
+                      + texture2D(uCloudTex, cuv * 0.4 + uCloudScroll * 0.5).r * 0.35;
+            float thick = smoothstep(uCloudThresh, uCloudThresh + 0.22, cov);
+            vec3 ccol = mix(uCloudShadow, uCloudLight, smoothstep(0.2, 0.9, thick));
+            ccol += uSunColor * pow(sd, 8.0) * (1.0 - thick) * 0.9;
+            col = mix(col, ccol, thick * hf * uCloudOpacity);
+          }
           gl_FragColor = vec4(col, 1.0);
         }`,
     });
@@ -277,12 +290,11 @@ export class Sky {
   _buildMountains(){
     this.mtnU = {
       uTex:      { value: makeMountainTexture() },
-      uSkyHoriz: { value: new THREE.Color(0xbcd6ee) },   // sky at the horizon (bright haze)
-      uSkyZen:   { value: new THREE.Color(0x2a6bc4) },   // sky higher up
+      uSkyHoriz: { value: new THREE.Color(0xbcd6ee) },
+      uSkyZen:   { value: new THREE.Color(0x2a6bc4) },
+      uDoomMode: { value: 0.0 },   // mirrors domeU — cylinder just discards when >0
     };
     const mat = new THREE.ShaderMaterial({
-      // depthWrite:true so the solid ridges occlude the sun/moon/stars behind them
-      // (sky pixels are discarded, so they don't write depth and stay see-through)
       uniforms: this.mtnU, transparent: true, depthWrite: true, depthTest: true,
       fog: false, side: THREE.BackSide,
       vertexShader: `
@@ -290,59 +302,31 @@ export class Sky {
         void main(){
           vUv = uv;
           vec4 wp = modelMatrix * vec4(position, 1.0);
-          vDir = wp.xyz - cameraPosition;            // view direction, so we can read the sky behind
+          vDir = wp.xyz - cameraPosition;
           gl_Position = projectionMatrix * viewMatrix * wp;
         }`,
       fragmentShader: `
         uniform sampler2D uTex; uniform vec3 uSkyHoriz, uSkyZen;
+        uniform float uDoomMode;
         varying vec2 vUv; varying vec3 vDir;
         void main(){
+          if (uDoomMode > 0.5) discard;  // dome handles doom sky
           vec4 t = texture2D(uTex, vUv);
-          if (t.a < 0.5) discard;                    // crisp ridge outline
-          // the sky colour directly behind this point (same gradient as the dome)
+          if (t.a < 0.5) discard;
           vec3 d = normalize(vDir);
           vec3 sky = mix(uSkyHoriz, uSkyZen, pow(clamp(d.y, 0.0, 1.0), 0.5));
-          // aerial perspective: each ridge is the local sky, darkened by depth —
-          // crests (t.r high) keep real definition, valley haze (t.r low) ~= sky,
-          // so layers always lighten with distance and never out-dark the sky.
           gl_FragColor = vec4(sky * mix(0.97, 0.40, t.r), 1.0);
         }`,
     });
     const R = 330, Hgt = 230;
     this.mountains = new THREE.Mesh(new THREE.CylinderGeometry(R, R, Hgt, 128, 1, true), mat);
-    this.mountains.position.y = Hgt * 0.5 - 24;       // sink the base just under the horizon
-    this.mountains.renderOrder = -9;                  // after the dome, before the world
+    this.mountains.position.y = Hgt * 0.5 - 24;
+    this.mountains.renderOrder = -9;
     this.mountains.frustumCulled = false;
     this.root.add(this.mountains);
   }
 
   // ── clouds: billboard masses lit by the real sun, drifting & wrapping around you ──
-  _buildClouds(){
-    this.cloudMats = [];
-    for (let i = 0; i < 5; i++) this.cloudMats.push(new THREE.ShaderMaterial({
-      uniforms: {
-        uTex: { value: makeCloudTexture() },
-        uSun: { value: new THREE.Vector3(0, 1, 0) },
-        uLight: { value: new THREE.Color(1, 1, 1) },
-        uShadow: { value: new THREE.Color(0.5, 0.58, 0.72) },
-        uOpacity: { value: 0.95 },
-      },
-      vertexShader: CLOUD_VERT, fragmentShader: CLOUD_FRAG, transparent: true, depthWrite: false,
-    }));
-    this.cloudR = 320;                         // clouds live within this radius of the player
-    this.clouds = [];
-    this.cloudGroup = new THREE.Group(); this.scene.add(this.cloudGroup);
-    const geo = new THREE.PlaneGeometry(1, 1);
-    for (let i = 0; i < 16; i++){
-      const m = new THREE.Mesh(geo, this.cloudMats[(Math.random()*this.cloudMats.length)|0]);
-      const w = 55 + Math.random() * 95;
-      m.scale.set(w, w * (CLOUD_H / CLOUD_W), 1);
-      m.position.set((Math.random()*2-1)*this.cloudR, 55 + Math.random()*60, (Math.random()*2-1)*this.cloudR);
-      m.renderOrder = -4;
-      this.cloudGroup.add(m); this.clouds.push(m);
-    }
-  }
-
   _buildSunMoon(){
     this.sunSprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: sunTexture(), blending: THREE.AdditiveBlending, depthWrite: false, depthTest: true, fog: false }));
@@ -371,20 +355,24 @@ export class Sky {
       this._buildStars(sd.stars);
       this._buildConstellations(cd.lines);
     } catch (e){ console.warn('sky: no star data', e); }
+    this._buildBackgroundStars(2000);
   }
 
+  // Only catalogue stars bright enough to be meaningful (mag ≤ 4.5 → ~920 stars).
+  // Fainter stars are represented by the random twinkling background field instead.
   _buildStars(stars){
-    const n = stars.length, R = this.R - 6;
+    const bright = stars.filter(s => s[2] <= 4.5);
+    const n = bright.length, R = this.R - 6;
     const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), siz = new Float32Array(n);
     const v = new THREE.Vector3();
     for (let i = 0; i < n; i++){
-      const [raDeg, decDeg, mag, bv] = stars[i];
+      const [raDeg, decDeg, mag, bv] = bright[i];
       eqUnit(raDeg * DEG, decDeg * DEG, v).multiplyScalar(R);
       pos[i*3] = v.x; pos[i*3+1] = v.y; pos[i*3+2] = v.z;
       const [r, g, b] = bv2rgb(bv);
-      const bright = clamp((6.6 - mag) / 6.6, 0.25, 1.0);
-      col[i*3] = r*bright; col[i*3+1] = g*bright; col[i*3+2] = b*bright;
-      siz[i] = clamp((6.6 - mag) * 0.9, 0.7, 6.0);
+      const brightness = clamp((5.1 - mag) / 5.1, 0.25, 1.0);
+      col[i*3] = r*brightness; col[i*3+1] = g*brightness; col[i*3+2] = b*brightness;
+      siz[i] = clamp((5.1 - mag) * 1.4, 0.8, 10.0);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
@@ -401,12 +389,53 @@ export class Sky {
       fragmentShader: `
         uniform float uNight; varying vec3 vCol; varying float vY;
         void main(){ if (vY < 0.0 || uNight <= 0.001) discard;
-          vec2 d = gl_PointCoord - 0.5; float r = length(d); if (r > 0.5) discard;
-          gl_FragColor = vec4(vCol, smoothstep(0.5, 0.05, r) * uNight); }`,
+          vec2 d = gl_PointCoord - 0.5;
+          float core   = exp(-dot(d,d) * 80.0);
+          float hspike = exp(-d.y*d.y * 300.0) * exp(-d.x*d.x * 6.0);
+          float vspike = exp(-d.x*d.x * 300.0) * exp(-d.y*d.y * 6.0);
+          float s = clamp(core + (hspike + vspike) * 0.65, 0.0, 1.0);
+          if (s < 0.01) discard;
+          gl_FragColor = vec4(vCol, s * uNight); }`,
     });
     this.stars = new THREE.Points(geo, mat);
     this.stars.frustumCulled = false;
     this.celestial.add(this.stars);
+  }
+
+  // 2,000 randomly-placed tiny specks on the celestial sphere — they rotate with the
+  // real stars (attached to this.celestial) but have no catalogue positions. A per-star
+  // phase drives a subtle sine twinkle so the sky shimmers without the GPU tracking
+  // thousands of real coordinates.
+  _buildBackgroundStars(n = 200){
+    const R = this.R - 4;
+    const pos = new Float32Array(n * 3), phase = new Float32Array(n);
+    for (let i = 0; i < n; i++){
+      const u = Math.random() * 2 - 1;
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.sqrt(1 - u * u);
+      pos[i*3] = r * Math.cos(a) * R; pos[i*3+1] = u * R; pos[i*3+2] = r * Math.sin(a) * R;
+      phase[i] = Math.random();
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+    this.starBgU = { uNight: { value: 0 }, uTime: { value: 0 }, uScale: { value: 1.3 } };
+    const mat = new THREE.ShaderMaterial({
+      uniforms: this.starBgU, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: `
+        attribute float aPhase; uniform float uScale; varying float vPhase; varying float vY;
+        void main(){ vPhase = aPhase; vec4 wp = modelMatrix * vec4(position,1.0); vY = wp.y;
+          gl_Position = projectionMatrix * viewMatrix * wp; gl_PointSize = 1.2 * uScale; }`,
+      fragmentShader: `
+        uniform float uNight; uniform float uTime; varying float vPhase; varying float vY;
+        void main(){ if (vY < 0.0 || uNight <= 0.001) discard;
+          vec2 d = gl_PointCoord - 0.5; if (length(d) > 0.5) discard;
+          float tw = 0.50 + 0.50 * sin(uTime * 0.3 + vPhase * 6.2832);
+          gl_FragColor = vec4(0.82, 0.88, 1.0, smoothstep(0.5, 0.1, length(d)) * uNight * tw * 0.4); }`,
+    });
+    this.starBg = new THREE.Points(geo, mat);
+    this.starBg.frustumCulled = false;
+    this.celestial.add(this.starBg);
   }
 
   _buildConstellations(lines){
@@ -437,12 +466,52 @@ export class Sky {
   setWind(x, z){ this.wind.set(x, z); }
   getSunAltitude(){ return Math.asin(clamp(this.sunDir.y, -1, 1)); }
 
-  // ── weather controls (Claude the daemon can drive these from dialogue) ──
-  _applyCloudCover(){
-    const n = Math.round(this.cloudCover * this.clouds.length);
-    this.clouds.forEach((c, i) => { c.visible = i < n; });
+  // ── doom sky picker API ──────────────────────────────────────────────────
+  async loadDoomManifest(){
+    try {
+      const r = await fetch('sky/doom/manifest.json');
+      this._doomManifest = await r.json();
+      this._doomIndex = 0;
+    } catch(e){ console.warn('sky: no doom manifest', e); this._doomManifest = []; }
+    return this._doomManifest;
   }
-  setCloudCover(v){ this.cloudCover = clamp(v, 0, 1); this._applyCloudCover(); }
+
+  // Load the sky at manifest index and activate it (keeps current mode).
+  setDoomSky(index){
+    const n = this._doomManifest?.length ?? 0;
+    if (!n) return null;
+    this._doomIndex = ((index % n) + n) % n;
+    const entry = this._doomManifest[this._doomIndex];
+    new THREE.TextureLoader().load(`sky/doom/${entry.file}`, tex => {
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.ClampToEdgeWrapping;
+      tex.magFilter = THREE.LinearFilter;
+      tex.minFilter = THREE.LinearFilter;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      const old = this.domeU.uDoomTex.value;
+      // repeat is applied manually in the dome shader (ShaderMaterial ignores texture.repeat)
+      this.domeU.uDoomRepeat.value = Math.max(1, Math.round(1024 / entry.w));
+      this.domeU.uDoomTex.value = tex;
+      old?.dispose();
+    });
+    return entry;
+  }
+
+  // 0 = off (procedural mountains)  1 = band (A)  2 = full (B)
+  setDoomMode(mode){
+    this._doomMode = mode;
+    if (this.domeU) this.domeU.uDoomMode.value = mode;
+    if (this.mtnU)  this.mtnU.uDoomMode.value  = mode;
+  }
+
+  get doomManifest(){ return this._doomManifest ?? []; }
+  get doomIndex(){ return this._doomIndex ?? 0; }
+  get doomMode(){ return this._doomMode ?? 0; }
+
+  // ── weather controls (Claude the daemon can drive these from dialogue) ──
+  // more cover → lower coverage threshold → more of the sky fills with cloud
+  setCloudCover(v){ this.cloudCover = clamp(v, 0, 1);
+    if (this.domeU) this.domeU.uCloudThresh.value = 1.0 - 0.72 * this.cloudCover; }
   addCloudCover(d){ this.setCloudCover((this.cloudCover ?? 0.55) + d); }
   setDayFraction(f){ this.time = Math.floor(this.time) + ((f % 1) + 1) % 1; }
 
@@ -486,8 +555,11 @@ export class Sky {
     this.domeU.uSunColor.value.setRGB(1.0, 0.85 - 0.25 * warm, 0.6 - 0.45 * warm);
     this.domeU.uDay.value = day;
     this.domeU.uSunDir.value.copy(this.sunDir);
-    if (this.starU) this.starU.uNight.value = night;
-    if (this.lineU) this.lineU.uNight.value = night;
+    const starsOn = night > 0.01;
+    this._starTime += dt;
+    if (this.stars)   { this.stars.visible   = starsOn; if (starsOn) this.starU.uNight.value = night; }
+    if (this.conLines){ this.conLines.visible = starsOn; if (starsOn) this.lineU.uNight.value = night; }
+    if (this.starBg)  { this.starBg.visible   = starsOn; if (starsOn){ this.starBgU.uNight.value = night; this.starBgU.uTime.value = this._starTime; } }
 
     // lights
     this.sunLight.position.copy(this.sunDir).multiplyScalar(100);
@@ -497,8 +569,8 @@ export class Sky {
     const moonIllum = (1 - Math.cos(this.moonLon - this.sunLon)) / 2;
     this.moonIllum = moonIllum;                            // exposed for astrology (read by agents/dialogue)
     this.moonLight.intensity = clamp(this.moonDir.y, 0, 1) * 0.22 * moonIllum * night;
-    this.hemi.intensity = 0.3 + 1.05 * day;
-    this.hemi.color.setRGB(0.6 + 0.4 * day, 0.65 + 0.35 * day, 0.7 + 0.3 * day);
+    this.hemi.intensity = 0.10 + 1.25 * day;
+    this.hemi.color.setRGB(0.22 + 0.78 * day, 0.26 + 0.74 * day, 0.36 + 0.64 * day);
 
     // Light reaching flat (up-facing) ground: the hemisphere sky term in full plus
     // the sun/moon weighted by how high they sit — i.e. exactly what the Lambert
@@ -527,7 +599,6 @@ export class Sky {
     const fogCol = skyHoriz.clone().multiplyScalar(0.63);
     if (this.scene.fog) this.scene.fog.color.copy(fogCol);
 
-    // mountains read the local sky behind them and just darken it — see shader
     if (this.mtnU){
       this.mtnU.uSkyHoriz.value.copy(skyHoriz);
       this.mtnU.uSkyZen.value.copy(skyZen);
@@ -537,32 +608,21 @@ export class Sky {
     // and cool by night (lifted a little on bright-moon nights), warm at sunset —
     // so the sprites read as lit, matching the Lambert-shaded trees and terrain.
     const moonAdd = this.moonLight.intensity * 0.8;
-    const b = clamp(0.30 + 0.72 * day + moonAdd, 0, 1);
+    const b = clamp(0.11 + 0.91 * day + moonAdd, 0, 1);
     this.spriteTint.setRGB(1, 1, 1)
       .lerp(this.domeU.uSunColor.value, sunset * 0.5)
-      .lerp(this._spriteNight ||= new THREE.Color(0.45, 0.55, 0.80), (1 - day) * 0.5)
+      .lerp(this._spriteNight ||= new THREE.Color(0.30, 0.40, 0.68), (1 - day) * 0.5)
       .multiplyScalar(b);
 
-    // clouds: light from the actual sun direction (in billboard-local space)
-    const sunLocal = new THREE.Vector3().copy(this.sunDir).applyQuaternion(camera.quaternion.clone().invert());
-    const lightCol = new THREE.Color(1, 1, 1).lerp(this.domeU.uSunColor.value, sunset * 0.7)
+    // clouds (the scrolling dome layer): relight from the sun/day, drift with wind.
+    // Replaces the 16 billboards — colours feed the dome shader's cloud uniforms.
+    this.domeU.uCloudLight.value.setRGB(1, 1, 1).lerp(this.domeU.uSunColor.value, sunset * 0.7)
       .multiplyScalar(0.22 + 0.78 * day);
-    const shadowCol = new THREE.Color(0.50, 0.58, 0.74).multiplyScalar(0.28 + 0.55 * day);
-    const cop = 0.45 + 0.5 * day;
-    for (const mat of this.cloudMats){
-      mat.uniforms.uSun.value.copy(sunLocal);
-      mat.uniforms.uLight.value.copy(lightCol);
-      mat.uniforms.uShadow.value.copy(shadowCol);
-      mat.uniforms.uOpacity.value = cop;
-    }
-    const dx = this.wind.x * dt * 3, dz = this.wind.y * dt * 3, R = this.cloudR;
-    const cx = camera.position.x, cz = camera.position.z;
-    for (const c of this.clouds){
-      c.position.x += dx; c.position.z += dz;
-      if (c.position.x - cx >  R) c.position.x -= 2*R; else if (c.position.x - cx < -R) c.position.x += 2*R;
-      if (c.position.z - cz >  R) c.position.z -= 2*R; else if (c.position.z - cz < -R) c.position.z += 2*R;
-      c.quaternion.copy(camera.quaternion);          // billboard toward camera
-    }
+    this.domeU.uCloudShadow.value.setRGB(0.50, 0.58, 0.74).multiplyScalar(0.28 + 0.55 * day);
+    this.domeU.uCloudOpacity.value = 0.45 + 0.5 * day;
+    // scroll the ceiling UV with the wind (small rate — this is the infinite layer)
+    this.domeU.uCloudScroll.value.x += this.wind.x * dt * 0.004;
+    this.domeU.uCloudScroll.value.y += this.wind.y * dt * 0.004;
 
     // moon phase texture (redraw only when it shifts noticeably)
     if (Math.abs(moonIllum - this._moonIllum) > 0.02){

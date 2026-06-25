@@ -1,0 +1,62 @@
+[
+  {
+    "slug": "female-lea-1",
+    "gender": "female",
+    "skin": [
+      176,
+      162,
+      157
+    ],
+    "bodyH": 1.6656
+  },
+  {
+    "slug": "female-lea-2",
+    "gender": "female",
+    "skin": [
+      196,
+      152,
+      42
+    ],
+    "bodyH": 1.8196
+  },
+  {
+    "slug": "female-lea-3",
+    "gender": "female",
+    "skin": [
+      124,
+      97,
+      84
+    ],
+    "bodyH": 1.6963
+  },
+  {
+    "slug": "male-lea-1",
+    "gender": "male",
+    "skin": [
+      202,
+      76,
+      35
+    ],
+    "bodyH": 1.6484
+  },
+  {
+    "slug": "male-lea-2",
+    "gender": "male",
+    "skin": [
+      196,
+      152,
+      42
+    ],
+    "bodyH": 1.7238
+  },
+  {
+    "slug": "male-lea-3",
+    "gender": "male",
+    "skin": [
+      126,
+      91,
+      70
+    ],
+    "bodyH": 1.6388
+  }
+]
