@@ -5,7 +5,7 @@
 // sprite floating over a pixelated scene).
 import * as THREE from 'three';
 
-export function createHands(src = '/hands1.png'){
+export function createHands(src = 'hands1.png'){
   const scene = new THREE.Scene();
   const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);   // normalised device coords
   let imgA = 317 / 103;                                           // hands1.png aspect (w/h)

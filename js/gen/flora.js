@@ -550,7 +550,7 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   // Sprites from fruit.png atlas: 38 cols × 6 rows, each 16×16 px.
   // UV: repeat=(1/38, 1/6), offset=(col/38, (5-row)/6)  [row 0 = top of image]
   const _fruitAtlasTex = (() => {
-    const t = new THREE.TextureLoader().load('/fruit.png');
+    const t = new THREE.TextureLoader().load('fruit.png');
     t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter;
     t.colorSpace = THREE.SRGBColorSpace;
     return t;
@@ -611,8 +611,8 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
       fruitMat: hazelMat, fruitSpots, fruitSize: 0.18, kind: 'hazelnuts', yieldRange: [2, 4], regrow: 60 }));
   }
   {                                                           // chamomile daisies (flowers 41 + 13) — gatherable
-    const daisyTex41 = (() => { const t = new THREE.TextureLoader().load('/flowers/flowers41.png'); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace; return t; })();
-    const daisyTex13 = (() => { const t = new THREE.TextureLoader().load('/flowers/flowers13.png'); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace; return t; })();
+    const daisyTex41 = (() => { const t = new THREE.TextureLoader().load('flowers/flowers41.png'); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace; return t; })();
+    const daisyTex13 = (() => { const t = new THREE.TextureLoader().load('flowers/flowers13.png'); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace; return t; })();
     const daisyMats = [
       new THREE.MeshBasicMaterial({ map: daisyTex41, alphaTest: 0.1, side: THREE.DoubleSide }),
       new THREE.MeshBasicMaterial({ map: daisyTex13, alphaTest: 0.1, side: THREE.DoubleSide }),
@@ -713,7 +713,7 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
 
     const loader = new THREE.TextureLoader();
     const loadTex = (id) => {
-      const t = loader.load(`/flowers/flowers${id}.png`);
+      const t = loader.load(`flowers/flowers${id}.png`);
       t.magFilter = THREE.NearestFilter;
       t.minFilter = THREE.NearestFilter;
       t.colorSpace = THREE.SRGBColorSpace;
