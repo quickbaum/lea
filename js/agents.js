@@ -75,7 +75,7 @@ const STACK_BIAS  = 1.6;     // pull toward stacking wood we already carry
 const TEND_RADIUS = 5;       // a fire counts as attended if anyone is within this
 const FIRE_SHY_R  = 1.15;    // the no-step core of a lit fire — nobody walks through the blaze
 const FIRE_SHY_REACH = 1.8;  // distance at which a walker starts steering around the flame
-const FIRE_CLEAR  = 3.2;     // min clearance a hearth keeps from a trunk (trees are flammable)
+const FIRE_CLEAR  = 5.0;     // min clearance a hearth keeps from a trunk (trees are flammable; 5 clears redwood canopies)
 const MAX_FIRE_SPREAD = 1.1; // max height range over a 2.5m ring before ground's too steep to lay a hearth
 const UNATTENDED_GRACE = 12; // seconds a lit fire may burn with nobody near before it's damped out
 const FIRE_RECLAIM = 30;     // seconds a cold, empty, unminded hearth lingers before it crumbles away
@@ -88,6 +88,9 @@ const GATHER_MIN     = 3;    // seated folk that make a fire-circle a "gathering
 const NIGHT_GATHER   = 0.35; // how dark it must be for the gathering to kindle
 const GATHER_COMPANY = 1.8;  // how much more deeply company is sated at a gathering
 const BUILD_BIAS  = 1.5;     // pull toward laying a new fire when stranded & cold
+const FIRE_WARMTH_RATE  = 0.30; // warmth need drained per second while seated at fire
+const FIRE_COMPANY_RATE = 0.24; // company need drained per second (scaled by crowd + gathering)
+const FIRE_REST_RATE    = 0.18; // rest need drained per second while seated
 const BUILD_TIME  = 6;       // seconds to lay a hearth as a ritual: ring stones, lay wood, kindle
 
 // boats (docs/boats.md): NPCs ferry across the water rather than truly navigating
@@ -223,6 +226,9 @@ const MEAT_YIELD   = 5;         // raw meat from one rabbit (cooked into a share
 const COLLECT_BIAS  = 0.5;   // mild curiosity pull toward a nearby valuable
 const COLLECT_RANGE = 14;    // we won't trek far out of our way for a trinket
 const TRINKET_MAX   = 8;     // how many a person will carry
+const FLOWER_RANGE  = 35;    // how far an elf will walk to pick a flower
+const FLOWER_BIAS   = 1.4;   // strong enough to win from ~35 units at avg beauty
+const FLOWER_MAX    = 7;     // flowers needed to complete a crown
 
 const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
 const cap1 = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
@@ -356,7 +362,7 @@ const ringSpread = (x, z, r) => {            // height range over an 8-point rin
 function siteScore(x, z, cx, cz, trees){
   if (!walkable(x, z)) return -1;
   const ty = terrainType(x, z);
-  if (ty !== 'grass' && ty !== 'mud') return -1;          // no water/sand/rock hearths
+  if (ty !== 'grass') return -1;                           // grass only — no swamp, water, sand or rock hearths
   const ls = ringSpread(x, z, 2.5);
   if (ls > MAX_FIRE_SPREAD) return -1;                     // too steep — a hillside
   let count = 0, nearest = Infinity;                       // actual trees nearby
@@ -368,9 +374,8 @@ function siteScore(x, z, cx, cz, trees){
   const flat = clamp01(1 - ls / MAX_FIRE_SPREAD);
   const open = clamp01(1 - count / 8);                     // few trees within 9u => clearing
   const windbreak = clamp01(maxRise / 4);
-  const mud = ty === 'mud' ? 0.15 : 0;                     // keep it off soggy ground
   const dist = Math.hypot(x - cx, z - cz);
-  return 0.40 * flat + 0.35 * open + 0.25 * windbreak - 0.004 * dist - mud;
+  return 0.40 * flat + 0.35 * open + 0.25 * windbreak - 0.004 * dist;
 }
 // best hearth site on a grid within R of (cx,cz); null if nothing suitable
 function findCampfireSite(cx, cz, trees, R = 30, S = 3){
@@ -818,9 +823,9 @@ export class Campfire {
     const social = 0.5 + 0.5 * Math.min(1, (this.slots.size - 1) / 3);
     const gather = this.gathering ? GATHER_COMPANY : 1;
     npc.atGathering = !!this.gathering;          // read by AnimNPC (sway) & dialogue
-    npc.needs.warmth  = clamp01(npc.needs.warmth  - 0.30 * dt);
-    npc.needs.company = clamp01(npc.needs.company - 0.24 * dt * social * gather);
-    npc.needs.rest    = clamp01(npc.needs.rest    - 0.18 * dt);
+    npc.needs.warmth  = clamp01(npc.needs.warmth  - FIRE_WARMTH_RATE  * dt);
+    npc.needs.company = clamp01(npc.needs.company - FIRE_COMPANY_RATE * dt * social * gather);
+    npc.needs.rest    = clamp01(npc.needs.rest    - FIRE_REST_RATE    * dt);
   }
 
   update(dt){
@@ -866,8 +871,10 @@ export class Campfire {
     this.flame.visible = this.lit;
     this.light.intensity = (1.8 + 1.4 * f) * sz;
     this.light.distance = 11 + 8 * L;                     // a big fire throws light further
-    const potBurn = this.pot.raw > 0 ? 0.5 : 1;           // a pot tames the blaze to a low cooking flame
-    this.flame.scale.set(sz, sz * potBurn, sz);           // overall size; the dance is per-part below
+    // cap flame height to just below the pot base when cooking (pot visible = potted);
+    // 1.30 is the outer billboard layer height. This keeps flame under the cauldron.
+    const flameH = potted ? this._potClear / 1.30 : sz;
+    this.flame.scale.set(sz, flameH, sz);                 // overall size; the dance is per-part below
 
     if (this.lit){
       this._ft = (this._ft || 0) + dt;
@@ -1008,6 +1015,8 @@ class Brain {
     npc.pack = 2; npc.eatCd = 0;   // a couple of rations to start; gather/eat are decoupled
     npc.raw = 0; npc.rawKind = null;   // raw, must-be-cooked ingredients (separate from edible rations)
     npc.trinkets = 0;              // valuables carried (shells/stones/amber/quartz) — see choose()
+    npc.flowerInventory = [];      // flower species IDs gathered toward a crown (female elves only)
+    npc.hasCrown = false;          // crown made this session — stops further gathering
     // pathfinding: A* waypoints toward the goal (see followPath); reachability is
     // judged by actual progress, and goals we truly can't reach get blacklisted.
     this.path = null; this.pathI = 0; this.pgx = 0; this.pgz = 0; this.repathT = 0;
@@ -1208,6 +1217,8 @@ class Brain {
       if (f.needsWood() && d < dd){ dd = d; lowFire = f; }
     }
     const haveReachableFire = !!homeFire;
+    // any fire (including half-built) within this radius counts as "a hearth is forming here"
+    const anyFireClose = w.fires.some(f => Math.hypot(f.x - npc.x, f.z - npc.z) < 30);
 
     // curfew: anticipate nightfall. As the evening draws on, make for the nearest
     // fire to settle before dark (a pull that grows with `evening`, independent of
@@ -1223,7 +1234,7 @@ class Brain {
         consider('stack', lowFire.x, lowFire.z, {}, lowFire, { tol: 1.2, bias: STACK_BIAS * urgency,
           satisfy: (a) => { lowFire.addWood((a.firewood || 0) - STACK_KEEP); a.firewood = STACK_KEEP; this.target = null; } });
       else goChop(CHOP_BIAS * urgency);
-    } else if ((n.warmth > 0.45 && !haveReachableFire) || (ev > 0.35 && farFromCamp)){
+    } else if (!anyFireClose && ((n.warmth > 0.45 && !haveReachableFire) || (ev > 0.35 && farFromCamp))){
       // Stranded & cold, OR dusk is closing in and there's no camp within reach:
       // make our own. Gather an armful, then lay a hearth here and stack the wood.
       const want = Math.max(n.warmth, ev);
@@ -1284,7 +1295,7 @@ class Brain {
     // raw food and no fire to cook on → lay a hearth. But only if there's no hearth
     // near at all: a cold one nearby will be relit by the firewood economy, so we
     // don't pepper the meadow with one-off cook-fires (see the behaviour report).
-    if (n.food > 0.55 && pack === 0 && !storeFire && raw > 0 && !cookFire && (!campFire || cd > FAR_FROM_CAMP)){
+    if (n.food > 0.55 && pack === 0 && !storeFire && raw > 0 && !anyFireClose && !cookFire && (!campFire || cd > FAR_FROM_CAMP)){
       if ((npc.firewood || 0) >= BUILD_LOGS)
         consider('build', npc.x, npc.z, {}, null, { tol: 2.0, bias: BUILD_BIAS * n.food,
           satisfy: (a, dt) => this.buildRite(a, dt) });   // laid as a ritual over several seconds
@@ -1402,6 +1413,29 @@ class Brain {
       for (const o of w.valuables){ if (!o.ripe) continue; const d = Math.hypot(o.x - npc.x, o.z - npc.z); if (d < vd){ vd = d; v = o; } }
       if (v) consider('collect', v.x, v.z, {}, v, { tol: 1.3, bias: COLLECT_BIAS * p.beauty * beautyGate,
         satisfy: (a) => { if (v.ripe){ const y = v.collect(); if (y > 0){ a.trinkets = (a.trinkets || 0) + y; a.trinketKind = v.kind; } } this.target = null; } });
+    }
+
+    // flower crown: female elves gather wildflowers toward a custom crown.
+    // Gated by beautyGate so survival needs come first, scaled by the beauty trait.
+    if (npc.gender === 'female' && npc.race === 'elf' && !npc.hasCrown &&
+        (npc.flowerInventory?.length || 0) < FLOWER_MAX){
+      let fl = null, fld = FLOWER_RANGE;
+      for (const o of (w.flowers || [])){ if (!o.alive) continue; const d = Math.hypot(o.x - npc.x, o.z - npc.z); if (d < fld){ fld = d; fl = o; } }
+      if (fl) consider('gather-flower', fl.x, fl.z, {}, fl, { tol: 1.3, bias: FLOWER_BIAS * p.beauty * clamp01(1 - 0.5 * surv),
+        satisfy: (a) => {
+          if (fl.alive){
+            fl.remove();
+            a.flowerInventory = a.flowerInventory || [];
+            a.flowerInventory.push(fl.speciesId);
+            if (a.flowerInventory.length >= FLOWER_MAX){
+              if (w._onCrownMade) w._onCrownMade(a, [...a.flowerInventory]);
+              a.flowerInventory = [];
+              a.hasCrown = true;
+            }
+          }
+          this.target = null;
+        }
+      });
     }
 
     for (const o of w.npcs){     // other people advertise company — kinfolk more so
@@ -1585,7 +1619,7 @@ class Brain {
       const step = FERRY_SPD * dt;
       const nx = boat.x + dx * step, nz = boat.z + dz * step;
       npc.heading = Math.atan2(dx, dz);
-      if (dd < 1.6 || height(nx, nz) > WATER + 0.1){      // nosed up to the far bank → disembark
+      if (dd < 1.6){                                         // nosed up to the far bank → disembark
         const spot = w.clearSpot(F.land.x, F.land.z) || [F.land.x, F.land.z];
         npc.x = spot[0]; npc.z = spot[1]; npc.rideY = null; npc._inBoat = false;
         boat.aboard = false; boat._claimed = null;
@@ -1636,6 +1670,8 @@ export class AgentWorld {
     this.shrubs = [];     // choppable shrubs (firewood)
     this.food = [];       // forage plants (visited, not depleted, by NPCs)
     this.valuables = [];  // rare finds people gather & trade (shells/stones/amber/quartz)
+    this.flowers = [];    // wildflowers elves pick for crown-making
+    this._onCrownMade = null;  // callback(npc, flowerIds[]) when elf finishes gathering
     this.npcs = [];       // NPCs that have brains (for pairwise company)
     this.fauna = [];      // rabbits (quarry) — roam, flee, hunted for meat
     this.boats = [];      // communal canoes NPCs ferry across the water (docs/boats.md)
@@ -1719,6 +1755,7 @@ export class AgentWorld {
   safeFireSpot(x, z){
     const ok = (px, pz, needClear) => {
       if (Math.hypot(px, pz) >= WORLD_R || !walkable(px, pz)) return false;
+      if (terrainType(px, pz) !== 'grass') return false;                    // no swamp/water-edge fires
       if (ringSpread(px, pz, 2.5) > MAX_FIRE_SPREAD) return false;          // never on a slope
       if (needClear) for (const t of this.trees) if (Math.hypot(px - t[0], pz - t[1]) < FIRE_CLEAR) return false;
       return true;
@@ -1772,6 +1809,10 @@ export class AgentWorld {
   // here, just nudged clear of trunks — for an NPC building one where it stands,
   // so the new fire is guaranteed reachable (no jumping across the water it's stuck at).
   addCampfire(x, z, { refine = true, built = true } = {}){
+    // Don't create a second fire too close to an existing one; return the nearest instead.
+    let nearest = null, nd = 28;
+    for (const f of this.fires){ const d = Math.hypot(f.x - x, f.z - z); if (d < nd){ nd = d; nearest = f; } }
+    if (nearest) return nearest;
     if (refine){
       const site = findCampfireSite(x, z, this.trees);
       if (site){ [x, z] = site; }
@@ -1797,6 +1838,8 @@ export class AgentWorld {
 
   setFood(plants){ this.food = plants || []; }
   setValuables(list){ this.valuables = list || []; }
+  setFlowers(list){ this.flowers = list || []; }
+  setOnCrownMade(cb){ this._onCrownMade = cb || null; }
 
   // scatter `n` rabbits across walkable land (the quarry; drawn by js/fauna.js)
   spawnFauna(n = FAUNA_N){

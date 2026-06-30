@@ -11,12 +11,12 @@ const COLS = 4, ROWS = 8;
 const ROW_AWAY = 0, ROW_SIDE = 1, ROW_TOWARD = 2;   // the three views we use
 
 function loadTex(src){
-  return new Promise(res => new THREE.TextureLoader().load(src, t => {
+  return new Promise((res, rej) => new THREE.TextureLoader().load(src, t => {
     t.colorSpace = THREE.SRGBColorSpace;
     t.magFilter = t.minFilter = THREE.NearestFilter;
     t.generateMipmaps = false;
     res(t);
-  }));
+  }, undefined, rej));
 }
 const WHITE = new THREE.Color(1, 1, 1);
 const _right = new THREE.Vector3();

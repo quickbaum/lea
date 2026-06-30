@@ -54,7 +54,9 @@ function hairShift(){
 
 // compose a face and return a data-URL. gender selects the male/female layer set;
 // elves get procedural pointed ears (the asset set has none) tinted to the skin.
-export function face(gender = 'male', race = 'human', skin = null){
+// overlayOpts is optional: { img, scale, anchorX, bottomY } — composited on top
+// after palette sampling so the crown pixels don't skew tint-colour detection.
+export function face(gender = 'male', race = 'human', skin = null, overlayOpts = null){
   const female = gender === 'female';
   const cv = document.createElement('canvas'); cv.width = cv.height = 100;
   const ctx = cv.getContext('2d');
@@ -111,6 +113,21 @@ export function face(gender = 'male', race = 'human', skin = null){
   const primary = (isFace(shirtPx) && dist(shirtPx, cheek) > 55) ? shirtPx : pick(CLOTH);
   const accent  = (isFace(hairPx) && dist(hairPx, cheek) > 40) ? hairPx : darken(cheek, 0.7);
   const palette = { primary, secondary: darken(primary, 0.6), accent };
+
+  // draw wearable overlay after palette sampling so crown pixels don't affect tints
+  if (overlayOpts?.img) {
+    const { img, scale = 65, anchorX = 0.5, bottomY = 28 } = overlayOpts;
+    const ovW = scale;
+    const srcW = img.naturalWidth  || img.width  || 1;
+    const srcH = img.naturalHeight || img.height || 1;
+    // _nominalH is the layout height (CROWN_H); anchor bottomY against it so the
+    // overflow portion (flowers dipping below the canvas edge) lands on the face,
+    // matching how wearCrown positions the crown on the in-world sprite.
+    const nominalH = img._nominalH || srcH;
+    const nominalOvH = Math.round(nominalH * (ovW / srcW));
+    const ovH       = Math.round(srcH     * (ovW / srcW));
+    ctx.drawImage(img, Math.round(100 * anchorX - ovW / 2), bottomY - nominalOvH, ovW, ovH);
+  }
 
   return { url: cv.toDataURL(), palette };
 }

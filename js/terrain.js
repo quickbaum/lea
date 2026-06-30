@@ -3,18 +3,25 @@ import { SIZE, SEG, WATER } from './config.js';
 import { makeTexture, makeGrain } from './textures.js';
 
 // ---- heightfield (pure functions; safe to call from any generator) ----------
+// Octave frequencies (x, z intentionally differ to break grid alignment):
+//   REGIONAL  (~25u wavelength): main land/sea contours
+//   CONTINENTAL (~80u): slow swell that tilts the regional base
+//   RIDGE (~11u): diagonal corrugation across the terrain
+//   DETAIL (~5u): fine surface grain
+//   ZONE (~1100u): world-scale plains-vs-uplands mask
+//   HILL_MID (~13u) / HILL_DIAG (~20u): steep terrain inside hilly zones
 export function height(x, z){
-  const base = Math.sin(x*0.040)*3.0 + Math.cos(z*0.038)*3.0
-       + Math.sin(x*0.013)*4.2 * Math.cos(z*0.011)*1.0
-       + Math.sin((x+z)*0.09)*1.3
-       + Math.sin(x*0.21)*0.35 + Math.cos(z*0.24)*0.35;
+  const base = Math.sin(x*0.040)*3.0 + Math.cos(z*0.038)*3.0   // REGIONAL
+       + Math.sin(x*0.013)*4.2 * Math.cos(z*0.011)*1.0          // CONTINENTAL
+       + Math.sin((x+z)*0.09)*1.3                                // RIDGE
+       + Math.sin(x*0.21)*0.35 + Math.cos(z*0.24)*0.35;         // DETAIL
   // Some broad regions are far hillier than others. A slow-varying mask gates an
   // extra band of ridged relief, so the world has calm plains AND rugged uplands
   // (squared so plains stay flat and the hilly zones rise sharply into rock).
-  const m = 0.5 + 0.5 * Math.sin(x*0.0055 + 1.7) * Math.cos(z*0.0061 - 0.5);
+  const m = 0.5 + 0.5 * Math.sin(x*0.0055 + 1.7) * Math.cos(z*0.0061 - 0.5); // ZONE
   const hilly = m * m;
-  const hills = Math.sin(x*0.075) * Math.cos(z*0.082) * 5.0
-              + Math.sin((x*0.9 - z*0.6) * 0.05) * 3.5;
+  const hills = Math.sin(x*0.075) * Math.cos(z*0.082) * 5.0   // HILL_MID
+              + Math.sin((x*0.9 - z*0.6) * 0.05) * 3.5;        // HILL_DIAG
   return base + hilly * hills;
 }
 function hash(x, z){
@@ -22,27 +29,27 @@ function hash(x, z){
   return n - Math.floor(n);
 }
 
+// Biome palette: key → [r, g, b] texture colour
 const C = {
   deep:  [0.30,0.26,0.18], sand: [0.79,0.69,0.47], mud: [0.43,0.31,0.20],
   grass: [0.36,0.48,0.23], rock: [0.49,0.47,0.44],
 };
-export function biome(x, z, h = height(x, z)){
+// Shared classification — returns one of: 'deep' | 'sand' | 'mud' | 'grass' | 'rock'
+function _biomeKey(x, z, h = height(x, z)){
   const hb = h + (hash(Math.floor(x), Math.floor(z)) - 0.5) * 1.1;
-  if (hb < WATER)       return C.deep;
-  if (hb < WATER + 0.9) return C.sand;
-  if (hb < WATER + 2.6) return C.mud;
-  if (hb < 4.8)         return C.grass;
-  return C.rock;
-}
-export function terrainType(x, z){
-  const hb = height(x,z) + (hash(Math.floor(x), Math.floor(z)) - 0.5) * 1.1;
-  if (hb < WATER)       return 'water';
+  if (hb < WATER)       return 'deep';
   if (hb < WATER + 0.9) return 'sand';
   if (hb < WATER + 2.6) return 'mud';
   if (hb < 4.8)         return 'grass';
   return 'rock';
 }
-export const walkable = (x, z) => height(x, z) > WATER + 0.25;
+export function biome(x, z, h = height(x, z)){ return C[_biomeKey(x, z, h)]; }
+// Returns the music/gameplay terrain name ('water' instead of 'deep' for callers).
+export function terrainType(x, z){
+  const k = _biomeKey(x, z);
+  return k === 'deep' ? 'water' : k;
+}
+export const walkable = (x, z) => height(x, z) > WATER - 0.1;
 
 // How far to lower an object's base so a flat footprint of radius r doesn't float
 // on a slope: the drop from the centre down to the lowest ground under that

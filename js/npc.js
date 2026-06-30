@@ -4,6 +4,8 @@ import { height, walkable, randomLand } from './terrain.js';
 import { makeLabel } from './label.js';
 import { makePackTexture } from './textures.js';
 
+const WHITE = new THREE.Color(1, 1, 1);
+
 // Cache pack textures by their contents so identical packs share one texture.
 const PACK_CACHE = new Map();
 function packTexture(food, wood, kind, trinkets){
@@ -22,8 +24,10 @@ const FIRE_GLOW = new THREE.Color(1.0, 0.72, 0.42);   // warm cast when near a f
 
 // height scale by folk — goblins are little, dwarves short & stout (1 = human/elf)
 const RACE_SCALE = { dwarf: 0.72, goblin: 0.62 };
+// Match on slug segments (e.g. 'male-peasant-goblin') to avoid substring collisions.
 function raceScale(slug = ''){
-  for (const r in RACE_SCALE) if (slug.includes(r)) return RACE_SCALE[r];
+  const parts = new Set(slug.split('-'));
+  for (const r in RACE_SCALE) if (parts.has(r)) return RACE_SCALE[r];
   return 1;
 }
 
@@ -92,12 +96,17 @@ class AnimNPC {
     this._baseAspect = base.m.frameW/base.m.frameH;
     this.poses = base.poses || null;                       // optional sitting/reclining idle atlases
     this._poseTex = {}; this._curPose = null;              // lazily-cloned pose textures + current pose
+    // billboardH > h when the atlas has top padding for a wearable (crown etc.) that
+    // extends above the character's head. The plane is taller but the character's
+    // world height (this.h, feet→head) stays unchanged.
+    const _topPad = base.m.topPad || 0;
+    this._billboardH = _topPad ? this.h * base.m.frameH / (base.m.frameH - _topPad) : this.h;
     this.mesh = new THREE.Mesh(
-      new THREE.PlaneGeometry(this.h*(this.m.frameW/this.m.frameH), this.h),
+      new THREE.PlaneGeometry(this._billboardH*(this.m.frameW/this.m.frameH), this._billboardH),
       new THREE.MeshBasicMaterial({map:this.tex, alphaTest:0.5, transparent:true, fog:true})
     );
-    this.mesh.position.set(x, height(x,z)+this.h/2, z);
-    if (label) label.position.set(x, height(x,z)+this.h+0.6, z);
+    this.mesh.position.set(x, height(x,z)+this._billboardH/2, z);
+    if (label) label.position.set(x, height(x,z)+this._billboardH+0.6, z);
     this.heading = Math.random()*Math.PI*2;
     this.wander = 0; this.frame = 0; this.frameT = 0; this.moving = false; this.chopAnim = 0;
     this.idleCol = this.m.standCol;   // overridden by recolor() if the stand frame is pre-coloured
@@ -143,6 +152,62 @@ class AnimNPC {
     this.tex = tex; this.idleCol = idleCol;
     this._baseTex = tex; this._curPose = null;   // base atlas changed; re-sync on next pose check
     this.mesh.material.map = tex; this.mesh.material.needsUpdate = true;
+  }
+  // Apply a procedurally-generated crown canvas to this NPC's sprite atlas.
+  // Expands each cell's height by topPad=100px, placing the crown in the headspace
+  // and the original character in the lower portion. Updates the billboard geometry
+  // so the crown appears in-world above the character's head.
+  wearCrown(crownCanvas){
+    this.m = { ...this.m };   // own copy — don't mutate the shared manifest entry
+    const origFH = this.m.frameH, topPad = 100, newFH = origFH + topPad;
+    const { cols, rows } = this.m, fw = this.m.frameW;
+    const srcImg = this._baseTex.image;
+    if (!srcImg?.width) return;
+    // Build expanded atlas: original content pushed down by topPad in each row
+    const cv = document.createElement('canvas');
+    cv.width = fw * cols; cv.height = newFH * rows;
+    const ctx = cv.getContext('2d');
+    for (let row = 0; row < rows; row++){
+      ctx.drawImage(srcImg,
+        0, row * origFH, fw * cols, origFH,
+        0, row * newFH + topPad, fw * cols, origFH);
+    }
+    // Composite crown into the top area of every cell (same pose across all walk frames).
+    // nominalH is the layout height (CROWN_H) used for scale/position; the actual canvas
+    // may be taller (overflow when arc centre sits below the canvas edge), and those extra
+    // pixels are drawn into the sprite area so flowers don't get clipped at the forehead.
+    const crownW = crownCanvas.width;
+    const nominalH = crownCanvas._nominalH || crownCanvas.height;
+    const scale  = Math.min(fw / crownW, topPad / nominalH);
+    const drawW  = crownW * scale, drawH = crownCanvas.height * scale;
+    for (let row = 0; row < rows; row++){
+      for (let col = 0; col < cols; col++){
+        ctx.drawImage(crownCanvas,
+          col * fw + (fw - drawW) / 2,
+          row * newFH + (topPad - nominalH * scale),
+          drawW, drawH);
+      }
+    }
+    // Replace texture
+    const t = new THREE.CanvasTexture(cv);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    t.repeat.copy(this.tex.repeat); t.offset.copy(this.tex.offset);
+    this.tex.dispose?.();
+    this.tex = t; this._baseTex = t; this._curPose = null;
+    this.mesh.material.map = t; this.mesh.material.needsUpdate = true;
+    // Update frame dimensions and billboard height
+    this.m.frameH = newFH; this.m.topPad = topPad;
+    this._billboardH = this.h * newFH / origFH;
+    // Rebuild geometry to show the crown above the character's head
+    const gy = height(this.x, this.z);
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = new THREE.PlaneGeometry(
+      this._billboardH * (fw / newFH), this._billboardH);
+    this.mesh.position.set(this.x, gy + this._billboardH / 2, this.z);
+    if (this.label) this.label.position.set(this.x, gy + this._billboardH + 0.6, this.z);
   }
   update(cam, dt, tint){
     if (tint) this.mesh.material.color.copy(tint);   // brighten/dim with the daylight
@@ -214,9 +279,7 @@ class AnimNPC {
     this._lastX = this.x; this._lastZ = this.z;
     // boat crossing counts as planted for pose selection even though position changes
     const planted = speed < 0.15 || !!this._inBoat;
-    const wantPose = (this.poses && planted && this.sitting && this.poses.sitting)
-      ? 'sitting' : null;
-    this._usePose(wantPose);
+    this._usePose(null); // sit sprites disabled — walk atlas used in all states
     // NPCs in boats with no sitting sprite: show only the top half of the walk sprite
     // so their legs don't appear below the waterline. rideY is set to the gunwale.
     const boatClip = !!this._inBoat && !this._curPose;
@@ -227,9 +290,9 @@ class AnimNPC {
     // world scale + bottom-anchoring, so height/grounding stay unchanged.)
     this.mesh.scale.x = this._curPose ? (this.m.frameW/this.m.frameH)/this._baseAspect : 1;
     // rideY overrides the ground height when seated in a boat (over water).
-    const gy = this.rideY != null ? this.rideY : height(this.x, this.z), halfH = this.h * clipFrac / 2;
+    const gy = this.rideY != null ? this.rideY : height(this.x, this.z), halfH = this._billboardH * clipFrac / 2;
     this.mesh.position.set(this.x, gy + halfH - chopDip + hopOff + swayBob, this.z);
-    if (this.label) this.label.position.set(this.x, gy + this.h * clipFrac + 0.5 + hopOff, this.z);
+    if (this.label) this.label.position.set(this.x, gy + this._billboardH * clipFrac + 0.5 + hopOff, this.z);
 
     const toCam = Math.atan2(cam.position.x - this.x, cam.position.z - this.z);
     this.mesh.rotation.y = toCam;
@@ -285,8 +348,6 @@ class AnimNPC {
   }
 }
 
-const WHITE = new THREE.Color(1, 1, 1);
-
 // Spawn the peasant population from a `society` (see society.js): each group's
 // members are placed clustered around its spawn centre, so families/clans/bands
 // read as legible knots of people on the land. Each NPC is tagged with its group
@@ -310,7 +371,7 @@ export async function spawnPeasants(scene, rng, groups = []){
       slug: s.slug,                                   // race/gender for naming
       m: {cols:meta.cols, rows:meta.rows, standCol:meta.standCol,
           walkStart:meta.walkStart, walkLen:meta.walkLen,
-          frameW:s.frameW, frameH:s.frameH}
+          frameW:s.frameW, frameH:s.frameH, topPad:s.topPad||0}
     })));
     const bySlug = new Map(bases.map(b => [b.slug, b]));
     // Attach optional pose atlases (sitting/reclining idle bakes) by the
@@ -363,7 +424,7 @@ export async function spawnNamedNPC(scene, { slug = 'male-peasant-elf', x = 0, z
       res(t);
     }, undefined, rej));
     const base = { tex, m: { cols:meta.cols, rows:meta.rows, standCol:meta.standCol,
-      walkStart:meta.walkStart, walkLen:meta.walkLen, frameW:s.frameW, frameH:s.frameH } };
+      walkStart:meta.walkStart, walkLen:meta.walkLen, frameW:s.frameW, frameH:s.frameH, topPad:s.topPad||0 } };
     const label = name ? makeLabel(name, { color: labelColor }) : null;
     const npc = new AnimNPC(base, x, z, label);
     npc.slug = s.slug;

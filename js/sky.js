@@ -57,21 +57,33 @@ function sunTexture(){
   });
 }
 function drawMoon(g, illum, waxing){
-  g.clearRect(0, 0, 64, 64);
-  g.fillStyle = '#0c0e16'; g.beginPath(); g.arc(32, 32, 22, 0, 7); g.fill();   // dark disc
-  g.save(); g.beginPath(); g.arc(32, 32, 22, 0, 7); g.clip();
+  const S = 128, cx = S/2, r = S * 0.34;   // 128px texture, disc radius ~43px
+  g.canvas.width = g.canvas.height = S;
+  g.clearRect(0, 0, S, S);
+  // halo — radial glow starting at disc edge, fading to transparent
+  const halo = g.createRadialGradient(cx, cx, r, cx, cx, cx);
+  halo.addColorStop(0,    'rgba(220,235,255,0.65)');
+  halo.addColorStop(0.35, 'rgba(200,220,255,0.25)');
+  halo.addColorStop(0.7,  'rgba(180,210,255,0.08)');
+  halo.addColorStop(1,    'rgba(180,210,255,0)');
+  g.fillStyle = halo; g.fillRect(0, 0, S, S);
+  g.fillStyle = '#0c0e16'; g.beginPath(); g.arc(cx, cx, r, 0, 7); g.fill();   // dark disc
+  g.save(); g.beginPath(); g.arc(cx, cx, r, 0, 7); g.clip();
   g.fillStyle = '#e8ecf4';
   // lit region: half disc + terminator ellipse
   const k = clamp(illum, 0, 1);
-  const term = 22 * (1 - 2 * k);                       // signed terminator half-width
+  const term = r * (1 - 2 * k);                         // signed terminator half-width
   g.beginPath();
-  if (waxing) g.arc(32, 32, 22, -Math.PI/2, Math.PI/2, false);   // right half lit
-  else        g.arc(32, 32, 22, Math.PI/2, -Math.PI/2, false);   // left half lit
-  g.ellipse(32, 32, Math.abs(term), 22, 0, Math.PI/2, -Math.PI/2, (term > 0) === waxing);
+  if (waxing) g.arc(cx, cx, r, -Math.PI/2, Math.PI/2, false);   // right half lit
+  else        g.arc(cx, cx, r, Math.PI/2, -Math.PI/2, false);   // left half lit
+  g.ellipse(cx, cx, Math.abs(term), r, 0, Math.PI/2, -Math.PI/2, (term > 0) === waxing);
   g.fill();
-  // subtle maria
+  // subtle maria (scaled to new disc size)
   g.fillStyle = 'rgba(150,160,180,0.35)';
-  for (const [x, y, r] of [[26,26,4],[38,30,5],[30,40,3]]){ g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+  const ms = r / 22;   // scale factor from original 22px disc
+  for (const [x, y, mr] of [[26,26,4],[38,30,5],[30,40,3]]){
+    g.beginPath(); g.arc(cx + (x-32)*ms, cx + (y-32)*ms, mr*ms, 0, 7); g.fill();
+  }
   g.restore();
 }
 
@@ -334,7 +346,7 @@ export class Sky {
     this.moonTex = discTexture(g => drawMoon(g, 0.5, true));
     this.moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({
       map: this.moonTex, depthWrite: false, depthTest: true, fog: false }));
-    this.moonSprite.scale.setScalar(this.R * 0.07);
+    this.moonSprite.scale.setScalar(this.R * 0.13);
     this.root.add(this.sunSprite); this.root.add(this.moonSprite);
   }
 
@@ -555,11 +567,12 @@ export class Sky {
     this.domeU.uSunColor.value.setRGB(1.0, 0.85 - 0.25 * warm, 0.6 - 0.45 * warm);
     this.domeU.uDay.value = day;
     this.domeU.uSunDir.value.copy(this.sunDir);
-    const starsOn = night > 0.01;
+    const starVis = night * Math.max(0, 1 - this.cloudCover);
+    const starsOn = starVis > 0.01;
     this._starTime += dt;
-    if (this.stars)   { this.stars.visible   = starsOn; if (starsOn) this.starU.uNight.value = night; }
-    if (this.conLines){ this.conLines.visible = starsOn; if (starsOn) this.lineU.uNight.value = night; }
-    if (this.starBg)  { this.starBg.visible   = starsOn; if (starsOn){ this.starBgU.uNight.value = night; this.starBgU.uTime.value = this._starTime; } }
+    if (this.stars)   { this.stars.visible   = starsOn; if (starsOn) this.starU.uNight.value   = starVis; }
+    if (this.conLines){ this.conLines.visible = starsOn; if (starsOn) this.lineU.uNight.value   = starVis; }
+    if (this.starBg)  { this.starBg.visible   = starsOn; if (starsOn){ this.starBgU.uNight.value = starVis; this.starBgU.uTime.value = this._starTime; } }
 
     // lights
     this.sunLight.position.copy(this.sunDir).multiplyScalar(100);
@@ -596,7 +609,10 @@ export class Sky {
     // Distant land settles a bit below the horizon haze (real aerial perspective:
     // it's lighter than the foreground but darker than the open sky), and it sits
     // continuous with the mountains' nearest ridge so the layers read as one haze.
-    const fogCol = skyHoriz.clone().multiplyScalar(0.63);
+    // At night the multiplier collapses toward zero so distant objects fade to black
+    // rather than a visible grey haze.
+    const fogMul = 0.63 * clamp(0.08 + 0.92 * day, 0.08, 1);
+    const fogCol = skyHoriz.clone().multiplyScalar(fogMul);
     if (this.scene.fog) this.scene.fog.color.copy(fogCol);
 
     if (this.mtnU){
@@ -616,9 +632,10 @@ export class Sky {
 
     // clouds (the scrolling dome layer): relight from the sun/day, drift with wind.
     // Replaces the 16 billboards — colours feed the dome shader's cloud uniforms.
+    const moonBright = this.moonLight.intensity;  // 0 by day, up to ~0.22 at full moon overhead
     this.domeU.uCloudLight.value.setRGB(1, 1, 1).lerp(this.domeU.uSunColor.value, sunset * 0.7)
-      .multiplyScalar(0.22 + 0.78 * day);
-    this.domeU.uCloudShadow.value.setRGB(0.50, 0.58, 0.74).multiplyScalar(0.28 + 0.55 * day);
+      .multiplyScalar(0.04 + moonBright + 0.74 * day);
+    this.domeU.uCloudShadow.value.setRGB(0.50, 0.58, 0.74).multiplyScalar(0.02 + moonBright * 0.5 + 0.55 * day);
     this.domeU.uCloudOpacity.value = 0.45 + 0.5 * day;
     // scroll the ceiling UV with the wind (small rate — this is the infinite layer)
     this.domeU.uCloudScroll.value.x += this.wind.x * dt * 0.004;

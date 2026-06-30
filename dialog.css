@@ -1,0 +1,55 @@
+#dlg-overlay {
+  position: fixed; inset: 0; z-index: 99999;
+  display: flex; align-items: flex-end; justify-content: center;
+  background: rgba(0,0,0,.15);
+  font-family: Georgia, 'Times New Roman', serif;
+}
+#dlg-box {
+  display: flex; gap: 18px;
+  max-width: 760px; width: calc(100% - 48px); margin: 0 0 32px;
+  background: #1d1a14; border: 2px solid #c9a23a; border-radius: 10px;
+  padding: 18px 20px; box-shadow: 0 10px 40px #000c; color: #efe6cf;
+}
+#dlg-portrait {
+  width: 120px; flex: 0 0 120px; align-self: flex-end;
+  image-rendering: auto; filter: drop-shadow(0 3px 6px #000a);
+}
+#dlg-main  { flex: 1; min-width: 0; }
+#dlg-speaker {
+  font-weight: bold; color: #e8c75a; font-size: 16px;
+  margin-bottom: 6px; letter-spacing: .02em;
+}
+#dlg-text  { font-size: 18px; line-height: 1.5; white-space: pre-wrap; margin-bottom: 14px; }
+#dlg-roster { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 14px; }
+
+.dlg-kin       { width: 74px; text-align: center; }
+.dlg-kin-face  {
+  width: 66px; height: 66px; object-fit: cover;
+  border: 1px solid #c9a23a; border-radius: 4px;
+  display: block; margin: 0 auto 3px; image-rendering: auto; background: #0c0e16;
+}
+.dlg-kin-name  { font-size: 12px; color: #efe6cf; line-height: 1.15; }
+.dlg-kin-rel   { font-size: 11px; color: #a89c78; font-style: italic; }
+.dlg-kin.clickable              { cursor: pointer; border-radius: 5px; transition: background .12s; }
+.dlg-kin.clickable:hover        { background: #3a3320; }
+.dlg-kin.clickable:hover .dlg-kin-face { border-color: #fff; }
+
+.dlg-link       { color: #e8c75a; border-bottom: 1px dotted #e8c75a; cursor: pointer; }
+.dlg-link:hover { color: #fff; }
+
+#dlg-choices  { display: flex; flex-direction: column; gap: 7px; }
+.dlg-choice {
+  cursor: pointer; padding: 7px 12px;
+  border: 1px solid #5a5238; border-radius: 6px;
+  background: #272318; font-size: 15px;
+  transition: background .12s, border-color .12s;
+}
+.dlg-choice:hover { background: #3a3320; border-color: #c9a23a; }
+
+.dlg-back       { color: #a89c78; cursor: pointer; font-size: 13px; margin-bottom: 8px; }
+.dlg-back:hover { color: #fff; }
+
+@media (max-width: 560px) {
+  #dlg-portrait { display: none; }
+  #dlg-box      { margin-bottom: 0; }
+}

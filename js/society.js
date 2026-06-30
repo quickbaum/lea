@@ -28,7 +28,7 @@ const BAND_NOUN = ['Company', 'Wolves', 'Wardens', 'Banners', 'Striders', 'Foxes
 //     members:[{slug}], npcs:[], cx, cz, spread }
 export function makeSociety(rng, total = 32){
   const ri = (a, b) => a + Math.floor(rng() * (b - a + 1));
-  const pick = a => a[Math.floor(rng() * a.length)];
+  const pick = a => a.length ? a[Math.floor(rng() * a.length)] : undefined;
   const plan = [['family', 0.42], ['band', 0.26], ['clan', 0.14], ['lone', 0.18]];
   const pickKind = () => { let r = rng(); for (const [k, w] of plan){ if ((r -= w) < 0) return k; } return 'family'; };
 

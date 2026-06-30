@@ -19,8 +19,8 @@ import { makeGrassTexture } from './textures.js';
 // zones broken up by smaller patches. Biased toward the short end (t^1.5) so
 // lawn is common and tall meadow rarer. Returns a base blade height in world
 // units, before per-blade variance.
-const GRASS_SHORT = 0.10;   // fresh, cropped lawn
-const GRASS_TALL  = 0.62;   // overgrown meadow
+const GRASS_SHORT = 0.14;   // fresh, cropped lawn
+const GRASS_TALL  = 1.10;   // overgrown meadow
 function grassLength(x, z){
   let v = Math.sin(x * 0.025 + 2.0) * Math.cos(z * 0.022 - 1.0)        // broad regions (~250u)
         + 0.6 * Math.sin(x * 0.07 - 1.3) * Math.cos(z * 0.063 + 0.4);  // smaller patches (~90u)
@@ -61,8 +61,8 @@ export class GrassDetail {
     // static index buffer: 1 triangle per blade
     const idx = new Uint32Array(count * 3);
     for (let i = 0; i < count; i++){
-      const v = i * 3, t = i * 3;
-      idx[t] = v; idx[t+1] = v+1; idx[t+2] = v+2;
+      const base = i * 3;
+      idx[base] = base; idx[base+1] = base+1; idx[base+2] = base+2;
     }
 
     for (let i = 0; i < count; i++){
@@ -126,6 +126,7 @@ export class GrassDetail {
 
       const by = this.by[i], h = this.bh[i];
       const flutter = Math.sin(t * 1.9 + this.ph[i]);
+      // bend = (steady gust fraction + flutter fraction) * blade height * tip-exaggeration
       const bend = (gust * 0.03 + flutter * 0.013) * h * 4;
       const tipX = x + this.lx[i] + wx * bend;
       const tipZ = z + this.lz[i] + wz * bend;

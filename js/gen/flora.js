@@ -491,26 +491,12 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   };
   const ferns = scatterGrass(scene, fork(rng), fernGeo, fernMat, 1400, inShade);
 
-  // --- ground cover: meadow grass on open land, reeds in the swampy mud ---
-  const grassMat = new THREE.MeshLambertMaterial({
-    map: makeGrassTexture({ seed: rng }), alphaTest: 0.5, side: THREE.DoubleSide,
-  });
+  // --- ground cover: reeds in the swampy mud (meadow grass is drawn by GrassDetail in grass.js) ---
   const reedMat = new THREE.MeshLambertMaterial({
     map: makeGrassTexture({ seed: rng, tall: true, blades: 6 }), alphaTest: 0.5, side: THREE.DoubleSide,
   });
-  const meadowGeo = grassCard(1.3, 1.0);
-  const reedGeo   = grassCard(1.1, 2.2);
+  const reedGeo = grassCard(1.1, 2.2);
 
-  const onLand = (rng) => {                       // open grass, never under a tree
-    for (let t = 0; t < 8; t++){
-      const x = (rng()-0.5)*WORLD_R*2, z = (rng()-0.5)*WORLD_R*2;
-      if (Math.hypot(x, z) > WORLD_R) continue;
-      if (terrainType(x, z) !== 'grass') continue;
-      if (underTree(x, z) > 0.15) continue;
-      return [x, z, 0.8 + rng()*0.7];
-    }
-    return null;
-  };
   const inSwamp = (rng) => {                       // reedy wet mud near the water
     for (let t = 0; t < 8; t++){
       const x = (rng()-0.5)*WORLD_R*2, z = (rng()-0.5)*WORLD_R*2;
@@ -521,7 +507,6 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
     return null;
   };
 
-  const meadow = scatterGrass(scene, fork(rng), meadowGeo, grassMat, grass, onLand);
   const reedGrass = scatterGrass(scene, fork(rng), reedGeo, reedMat, reeds, inSwamp);
 
   // --- waterside plants: pussywillows & cattails right along the shoreline ---
@@ -701,11 +686,13 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   // Each flower ID gets PATCHES_PER dedicated patch centres drawn from a shared pool.
   // Flowers only scatter around their own centres, so you see tight same-species clumps.
   const _flowerBillboards = [];
+  const flowers = [];   // individual pickable flowers for NPC agents
   {
     const fwrng = fork(rng);
     const PATCHES_PER = 2;    // patch centres per species
     const PER_SPECIES = 60;   // flowers per species
     const PATCH_R     = 4.0;  // patch radius (world units)
+    const FLOWER_REGROW = 120; // seconds until a picked flower regrows
 
     // Curated species list — familiar European/North American wildflowers only
     const SUN_IDS    = [5,7,10,14,27,45,46];  // open meadow
@@ -733,7 +720,9 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
       return out;
     };
 
-    // One InstancedMesh for one species scattered around its own patch centres
+    // One InstancedMesh for one species scattered around its own patch centres.
+    // Each placed flower is also registered in `flowers` as an individually
+    // pickable record with alive/remove/tick for the agent system.
     const scatterFlower = (id, count, centers) => {
       if (!centers.length) return;
       const mat  = new THREE.MeshBasicMaterial({ map: loadTex(id), alphaTest: 0.1, side: THREE.DoubleSide });
@@ -749,6 +738,13 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
         if (Math.hypot(x, z) > WORLD_R || terrainType(x, z) !== 'grass') continue;
         const sc = 0.7 + fwrng() * 0.5;
         const pos = new THREE.Vector3(x, height(x, z), z);
+        // register as individually-pickable — remove() zeroes the billboard scale
+        const idx = n, origSc = sc;
+        flowers.push({
+          x, z, speciesId: id, alive: true, _timer: 0,
+          remove(){ if (!this.alive) return; this.alive = false; positions[idx].sc = 0; this._timer = FLOWER_REGROW; },
+          tick(dt){ if (this.alive) return; this._timer -= dt; if (this._timer <= 0){ this.alive = true; positions[idx].sc = origSc; } },
+        });
         positions.push({ pos, sc });
         _s.setScalar(sc); _m.compose(pos, _q, _s);
         inst.setMatrixAt(n++, _m);
@@ -776,8 +772,9 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   return {
     plants,
     valuables,                                        // rare finds: shells, stones, amber, quartz
+    flowers,                                          // individually-pickable wildflowers (for elf crown agents)
     trees: [...treePos, ...redwoodPos, ...oakPos, ...birchPos, ...rowanPos],
-    grass: meadow,                                    // { inst, items } — meadow tufts, hidden along trails
+    grass: null,
     reeds: reedGrass,                                 // { inst, items } — tall swamp grass, also hidden along trails
     ferns,                                            // { inst, items } — woodland ferns, hidden along trails
     shrubs: shrubRecs,                                // choppable shrubs (firewood) — see agents.js
@@ -791,7 +788,7 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
       ...rowanPos.map(([x, z])   => ({ x, z, r: 0.5 })),
       ...shrubRecs,
     ],
-    update(dt){ for (const p of plants) p.tick(dt); for (const v of valuables) v.tick(dt); },
+    update(dt){ for (const p of plants) p.tick(dt); for (const v of valuables) v.tick(dt); for (const f of flowers) f.tick(dt); },
     billboardFruits(cam, flowerTint){
       const q = cam.quaternion;
       for (const p of plants){

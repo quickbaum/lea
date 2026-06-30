@@ -14,12 +14,20 @@ import { Sky } from './sky.js';
 import { SkyPicker } from './skypicker.js';
 import { AgentWorld } from './agents.js';
 import { TrailField } from './trails.js';
-import { GrassDetail, GrassClumps } from './grass.js';
+import { GrassDetail } from './grass.js';
 import * as wojak from './wojak.js';
+import { generateCrown, PORTRAIT_SCALE, PORTRAIT_ANCHOR_X, PORTRAIT_BOTTOM_Y } from './crown.js';
 import { makeSociety } from './society.js';
 import { makeOmen } from './astrology.js';
 import { talk, talkTree } from './dialog.js';
 import { createHands } from './hands.js';
+import { bakeMissing } from './spritebaker.js';
+import { Rain } from './rain.js';
+
+// Bake any sprites that are in tools/bakes.json but not yet on disk.
+// Runs in the user's Chrome (real GPU) and saves results to the server.
+// Fire-and-forget — first visit bakes, subsequent visits skip.
+bakeMissing();
 
 // ---------- renderer (low internal res, upscaled for the retro look) ----------
 const canvas = document.getElementById('c');
@@ -66,6 +74,16 @@ agents.setShrubs(forage.shrubs);                           // choppable firewood
 agents.setBoats(boats);                                    // communal canoes NPCs ferry across the water
 agents.setFood(forage.plants);                             // bushes/trees double as food sources
 agents.setValuables(forage.valuables);                     // rare finds people gather & trade
+agents.setFlowers(forage.flowers || []);                   // wildflowers female elves pick for crown-making
+agents.setOnCrownMade(async (npc, flowerIds) => {
+  const crownCanvas = await generateCrown(flowerIds);
+  npc.wearCrown(crownCanvas);
+  // regenerate portrait with the procedural crown as an overlay
+  const f = wojak.face(npc.gender, npc.race, npc.skinTone,
+    { img: crownCanvas, scale: PORTRAIT_SCALE, anchorX: PORTRAIT_ANCHOR_X, bottomY: PORTRAIT_BOTTOM_Y });
+  npc.portrait = f.url;
+  npc.recolor(f.palette);
+});
 agents.spawnFauna();                                       // rabbits — quarry that roam, flee & are hunted (docs/hunting.md)
 let warren = null;
 new Warren(scene, agents.fauna).load().then(w => { warren = w; });   // draws the rabbits
@@ -73,7 +91,6 @@ new Warren(scene, agents.fauna).load().then(w => { warren = w; });   // draws th
 // trails: a wear field that NPCs (and the player) tread into bare paths over
 // time, suppressing grass on the route. See docs/trails.md.
 const trail = new TrailField(ground);
-trail.addGrass(forage.grass);
 trail.addGrass(forage.reeds);   // tall swamp grass also thins off trodden paths
 trail.addGrass(forage.ferns);   // woodland ferns also thin off trodden paths
 
@@ -87,10 +104,6 @@ trail.addGrass(forage.ferns);   // woodland ferns also thin off trodden paths
 // no density ring). Only a gentle alpha dissolve at the far edge, where the clumps
 // take over.
 const grassDetail = new GrassDetail(scene, { trail, radius: 22, count: 60000, fade: 'alpha' });
-// beyond the blade field, cheap STATIC clump cards carry grass deep into the
-// distance (scene-lit, so they match the terrain). They overlap the blade edge so
-// the handoff is hidden. See js/grass.js.
-const grassClumps = new GrassClumps(scene, { trail, innerR: 16, outerR: 110, count: 34000 });
 
 const basket = {};                          // what we've foraged: { berries, apples }
 const basketText = () => Object.entries(basket).map(([k, v]) => `${v} ${k}`).join(', ');
@@ -118,23 +131,53 @@ fetch('sprites/npc/lea_clan.json').then(r => r.ok ? r.json() : []).catch(() => [
   .then(api => {
     npcApi = api;
     for (const n of api.npcs) agents.attach(n);
-    warmTrails(120);
-    // give each peasant a procedural wojak portrait for its dialog, and tint its
-    // in-world sprite (magenta/green/yellow zones) to match (once assets load). Lea
-    // bodies pass their sampled skin tone so the portrait matches the rendered body.
-    wojak.ready().then(() => {
-      for (const n of api.npcs){ const f = wojak.face(n.gender, n.race, n.skinTone);
+    setLoad('painting faces…', 0.08);
+    // Portraits first, then warmTrails. warmTrails pre-simulates synchronously and
+    // triggers onCrownMade for any elf who gathers 7 flowers. onCrownMade is async
+    // (awaits generateCrown), so it completes after warmTrails returns. If portraits
+    // were generated AFTER warmTrails, wojak.ready() could overwrite a crown portrait
+    // that onCrownMade had already set. Generating portraits first guarantees the
+    // base portrait is always in place before onCrownMade overrides it with the crown.
+    wojak.ready().then(async () => {
+      for (const n of api.npcs){
+        const f = wojak.face(n.gender, n.race, n.skinTone, null);
         n.portrait = f.url;
         if (!n.slug?.includes('-lea-')) n.recolor(f.palette); // Leas have baked wagara colors
       }
+      setLoad('letting three days pass…', 0.20);
+      await warmTrails(120, p => setLoad('letting three days pass…', 0.20 + 0.80 * p));
+      setLoad('ready', 1.0);
     });
   });
+
+// Loading-bar helpers — track world-warm-up progress on the splash screen.
+let _worldReady = false;
+const _loadFill   = document.getElementById('loading-fill');
+const _loadLabel  = document.getElementById('loading-label');
+const _loadStatus = document.getElementById('loading-status');
+function setLoad(msg, frac){
+  if (_loadLabel) _loadLabel.textContent = msg;
+  if (_loadFill)  _loadFill.style.width  = (frac * 100).toFixed(1) + '%';
+  if (frac >= 1){
+    _worldReady = true;
+    // Brief pause so the bar visually completes before swapping to CLICK TO ENTER.
+    setTimeout(() => {
+      _loadStatus?.classList.add('done');
+      setTimeout(() => {
+        _loadStatus?.classList.add('hide');
+        document.getElementById('enter-text')?.classList.remove('hide');
+        document.getElementById('controls-text')?.classList.remove('hide');
+      }, 420);
+    }, 250);
+  }
+}
 
 // Pre-simulate the agents (no rendering) so trails are already trodden in by the
 // time the player looks. We cycle day/night a few times so both the campfire
 // gathering and daytime foraging lay their paths. See docs/trails.md.
-function warmTrails(seconds){
+async function warmTrails(seconds, onProgress){
   const dt = 0.15, steps = Math.floor(seconds / dt);
+  const CHUNK = 40;   // yield to the browser every ~6 simulation-seconds
   for (let s = 0; s < steps; s++){
     agents.night = 0.5 - 0.5 * Math.cos(s / steps * Math.PI * 6);   // ~3 day/night cycles
     agents.day = 1 - agents.night;
@@ -145,6 +188,10 @@ function warmTrails(seconds){
     agents.resolveTrees();
     for (const n of npcApi.npcs) if (n.moving) trail.deposit(n.x, n.z, dt);
     trail.tick(dt);
+    if ((s + 1) % CHUNK === 0){
+      onProgress?.((s + 1) / steps);
+      await new Promise(r => setTimeout(r, 0));
+    }
   }
   trail.flush();
 }
@@ -338,20 +385,32 @@ function updateFocus(){
 }
 
 // geocentric sky: sun/moon on the ecliptic, real-catalogue stars, drifting clouds
+const _pf = (k, def) => { const v = parseFloat(params.get(k)); return isNaN(v) ? def : v; };
 const sky = new Sky(scene, {
-  latitude:  +(params.get('lat')    ?? 42),
-  dayLength: +(params.get('daylen') ?? 600),   // real seconds per full day-night cycle
-  time:      +(params.get('time')   ?? 0.35),  // 0=midnight .. 0.5=noon
-  sunLon:    +(params.get('sunlon') ?? 35),    // sun's ecliptic longitude (season)
+  latitude:  _pf('lat',    42),
+  dayLength: _pf('daylen', 600),   // real seconds per full day-night cycle
+  time:      _pf('time',   0.35),  // 0=midnight .. 0.5=noon
+  sunLon:    _pf('sunlon', 35),    // sun's ecliptic longitude (season)
 });
 sky.load();
 new SkyPicker(sky);   // \ to open, [ ] to cycle, M to toggle mode
+
+const rain = new Rain(scene);
+rain.setSky(sky);
+// Save the base day sky colours so we can lerp back when dry.
+// domeU is ready after sky.load(), which is synchronous.
+const _skyHorizBase = sky.domeU.uHorizon.value.clone();
+const _skyZenBase   = sky.domeU.uZenith.value.clone();
+const _rainSkyHoriz = new THREE.Color(0.44, 0.44, 0.46);  // stormy horizon — near-neutral grey
+const _rainSkyZen   = new THREE.Color(0.28, 0.28, 0.30);  // deep overcast zenith — flat grey
 
 // the weather is Claude's to command, through dialogue (see dialogs/claude.json)
 const weatherActions = {
   cloudsMore:  () => sky.addCloudCover(+0.2),
   cloudsFewer: () => sky.addCloudCover(-0.2),
-  cloudsClear: () => sky.setCloudCover(0),
+  cloudsClear: () => { sky.setCloudCover(0); rain.stopRain(); },
+  rainStart:   () => rain.startRain(),
+  rainStop:    () => rain.stopRain(),
   timeDawn:    () => sky.setDayFraction(0.23),
   timeNoon:    () => sky.setDayFraction(0.50),
   timeDusk:    () => sky.setDayFraction(0.78),
@@ -425,8 +484,8 @@ let yaw = 0, pitch = 0;
 const keys = {};
 addEventListener('keydown', e => keys[e.code] = true);
 addEventListener('keyup',   e => keys[e.code] = false);
-canvas.addEventListener('click', () => canvas.requestPointerLock());
-start.addEventListener('click', () => canvas.requestPointerLock());
+canvas.addEventListener('click', () => { if (_worldReady) canvas.requestPointerLock(); });
+start.addEventListener('click',  () => { if (_worldReady) canvas.requestPointerLock(); });
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
   if (!locked && (inDialog || settingsOpen)) return; // a dialogue/settings panel is open — stay in-game
@@ -485,8 +544,10 @@ if (params.has('pitch')) pitch = +params.get('pitch');
 const poseURL = () =>
   `${location.origin}${location.pathname}?x=${pos.x.toFixed(1)}&z=${pos.z.toFixed(1)}` +
   `&y=${pos.y.toFixed(1)}&yaw=${yaw.toFixed(3)}&pitch=${pitch.toFixed(3)}&fly=1`;
-let poseMsg = '';
-let forageMsg = '';
+let poseMsg = '';    let _poseMsgT = 0;
+let forageMsg = ''; let _forageMsgT = 0;
+const setForageMsg = (s, ms = 2000) => { forageMsg = s; clearTimeout(_forageMsgT); _forageMsgT = setTimeout(() => forageMsg = '', ms); };
+const setPoseMsg   = (s, ms = 2500) => { poseMsg   = s; clearTimeout(_poseMsgT);   _poseMsgT   = setTimeout(() => poseMsg   = '', ms); };
 let nearTalker = null;     // {c, dialog|peasant, name} of the nearest talkable NPC
 let nearFruit = null;      // nearest ripe forageable plant within reach
 let nearObject = null;     // a non-pickable thing you can inspect with E (e.g. a campfire/pot)
@@ -652,6 +713,7 @@ function peasantTree(npc, sky){
     : npc.actionLabel === 'ask'    ? v('d-ask', ["Going to ask a neighbour for a bite — they'll not see me go hungry.", "Off to beg a meal from kin. That's what they're for.", "Asking round for food. No shame in it."])
     : npc.actionLabel === 'hunt'   ? v('d-hunt', ["After a rabbit — quick beast, but it's meat for the pot if I catch it.", "Hunting. There's a rabbit, if my legs are quick enough.", "Chasing a coney. Meat enough for many, if I land it."])
     : npc.actionLabel === 'collect'? v('d-collect', ["Something caught my eye — a pretty thing to keep.", "Stooping for a bauble I spied.", "A shiny bit on the ground — I couldn't pass it."])
+    : npc.actionLabel === 'gather-flower'? v('d-gflower', ["Picking flowers — I've a mind to make myself a crown.", "After wildflowers. I want them fresh.", `${npc.flowerInventory?.length || 0} of ${7} so far — nearly there.`])
     : npc.actionLabel === 'greet'  ? v('d-greet', ["Just passing the time with the others.", "Chatting with folk. Nothing pressing.", "Idling with company."])
     :                                v('d-wander', ["Wandering. Looking for somewhere to be.", "Just roaming — no errand to speak of.", "Drifting where my feet take me."]);
   const top = [['food',    n.food    ?? 0, v('f-food', ["Hungry. My belly's been grumbling.", "Famished, if I'm honest.", "Could eat a horse — or a rabbit, at least.", "Peckish enough to gnaw bark.", "My stomach thinks my throat's cut."])],
@@ -805,7 +867,7 @@ function fireTree(fire){
 function board(b){
   boating = b; b.aboard = true;
   pos.x = b.x; pos.z = b.z;
-  forageMsg = 'You climb into the boat.'; setTimeout(() => forageMsg = '', 2000);
+  setForageMsg('You climb into the boat.');
 }
 // step ashore: find the nearest walkable shore around the boat and stand there;
 // refuse if there's only open water within reach (you'd have to wade/swim).
@@ -816,12 +878,12 @@ function disembark(){
       if (walkable(x, z)){
         pos.x = x; pos.z = z; pos.y = height(x, z) + EYE;
         boating.aboard = false; boating = null;
-        forageMsg = 'You step ashore.'; setTimeout(() => forageMsg = '', 2000);
+        setForageMsg('You step ashore.');
         return;
       }
     }
   }
-  forageMsg = 'No shore close enough to step out.'; setTimeout(() => forageMsg = '', 2000);
+  setForageMsg('No shore close enough to step out.');
 }
 
 // how close open water is, and which way — drives the seashore wash. Marches a
@@ -848,8 +910,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyP'){
     const u = poseURL();
     navigator.clipboard?.writeText(u).catch(()=>{});
-    poseMsg = 'pose copied'; console.log('POSE', u);
-    setTimeout(() => poseMsg = '', 2500);
+    setPoseMsg('pose copied'); console.log('POSE', u);
   }
   if (e.code === 'KeyE' && playing && !inDialog && boating){
     disembark();
@@ -889,8 +950,7 @@ addEventListener('keydown', e => {
     const n = nearFruit.collect();
     if (n > 0){
       basket[nearFruit.kind] = (basket[nearFruit.kind] || 0) + n;
-      forageMsg = `+${n} ${nearFruit.kind}`;
-      setTimeout(() => forageMsg = '', 2000);
+      setForageMsg(`+${n} ${nearFruit.kind}`);
     }
   }
 });
@@ -899,6 +959,7 @@ const hands = createHands();              // Doom-style first-person hands viewm
 
 const _handsTint = new THREE.Color();
 const _fireWarm  = new THREE.Color(1.0, 0.58, 0.20);   // warm amber fire light
+const _rainTint  = new THREE.Color(0.55, 0.62, 0.80);  // cool blue-grey cast under rain
 const FIRE_LIGHT_RANGE = 10;
 
 let last = performance.now();
@@ -941,8 +1002,21 @@ function loop(now){
   waterTex.offset.x = (now*0.000015) % 1;
   waterTex.offset.y = (now*0.00001) % 1;
 
+  // Lerp sky gradient toward storm grey before sky.update() so that background
+  // colour, fog colour and dome shader all derive from the modified values.
+  const _ri = rain.intensity;
+  sky.domeU.uHorizon.value.copy(_skyHorizBase).lerp(_rainSkyHoriz, _ri);
+  sky.domeU.uZenith.value.copy(_skyZenBase).lerp(_rainSkyZen,   _ri);
   sky.update(dt, camera);
+  rain.update(pos.x, pos.y, pos.z, dt, sky.cloudCover, sky.wind);
+  if (rain.intensity > 0 && sky.domeU) {           // darken clouds — rainclouds absorb light
+    const cd = 1 - rain.intensity * 0.60;
+    sky.domeU.uCloudLight.value.multiplyScalar(cd);
+    sky.domeU.uCloudShadow.value.multiplyScalar(cd * 0.7);
+  }
   const tint = sky.spriteTint;                     // daylight illumination for unlit sprites
+  if (rain.intensity > 0)                          // darken sprites under storm clouds
+    tint.multiplyScalar(1 - rain.intensity * 0.45).lerp(_rainTint, rain.intensity * 0.22 * sky.day);
 
   const simDt = playing ? dt : 0;                  // world is paused on the splash
   agents.threat = playing && !fly ? { x: pos.x, z: pos.z } : null;   // rabbits flee the player too
@@ -974,7 +1048,6 @@ function loop(now){
   if (warren) warren.update(camera, simDt, tint);      // draw the rabbits
   forage.update(simDt);
   grassDetail.update(pos.x, pos.z, now * 0.001, sky.groundTint);   // blades follow the viewer, sway, lit like the turf
-  grassClumps.update(pos.x, pos.z);                  // far static clumps (rebuilt only when moving)
   updateFocus();                                     // cursor-aimed: sets nearTalker / nearFruit + the box
   // hands tint: base sky tint darkened at night, then warmed by nearby lit fires
   let fireGlow = 0;
@@ -990,17 +1063,23 @@ function loop(now){
   forage.billboardFruits(camera, sky.spriteTint);
   renderer.render(scene, camera);
   hands.render(renderer);                            // overlay pass, on top of the world
+  // desaturate the canvas when it rains — muted, wet-day look
+  const _sat = 1 - rain.intensity * 0.38;
+  canvas.style.filter = _sat < 0.995 ? `saturate(${_sat.toFixed(3)})` : '';
   drawMinimap(pos.x, pos.z, yaw);
   if (showNpcDbg) npcDbg.textContent = agents.debugText(pos.x, pos.z);
-  hud.textContent =
-    `x ${pos.x.toFixed(0)} z ${pos.z.toFixed(0)} yaw ${yaw.toFixed(2)}${fly ? ' [fly]' : ''}` +
-    `  ·  ${npcApi.npcs.length} peasants  ·  P: copy pose  F: fly  B: npc` +
-    (nearTalker ? `  ·  E: talk to ${nearTalker.name}` : '') +
-    (nearFruit ? `  ·  E: gather ${nearFruit.kind}` : '') +
-    (nearObject ? `  ·  E: examine` : '') +
-    (boating ? `  ·  E: step ashore` : nearBoat ? `  ·  E: board the boat` : '') +
-    (basketText() ? `  ·  basket: ${basketText()}` : '') +
-    (poseMsg ? `  — ${poseMsg}` : '') + (forageMsg ? `  — ${forageMsg}` : '');
+  const _hudParts = [
+    `x ${pos.x.toFixed(0)} z ${pos.z.toFixed(0)} yaw ${yaw.toFixed(2)}${fly ? ' [fly]' : ''}`,
+    `${npcApi.npcs.length} peasants`,
+    `P: copy pose  F: fly  B: npc`,
+    nearTalker  && `E: talk to ${nearTalker.name}`,
+    nearFruit   && `E: gather ${nearFruit.kind}`,
+    nearObject  && `E: examine`,
+    boating     ? `E: step ashore` : nearBoat && `E: board the boat`,
+    basketText() && `basket: ${basketText()}`,
+  ].filter(Boolean).join('  ·  ');
+  const _hudMsgs = [poseMsg && `— ${poseMsg}`, forageMsg && `— ${forageMsg}`].filter(Boolean).join('  ');
+  hud.textContent = _hudParts + (_hudMsgs ? `  ${_hudMsgs}` : '');
   requestAnimationFrame(loop);
 }
 resize();
