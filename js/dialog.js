@@ -43,6 +43,7 @@ function open(tree, opts){
   const portrait = document.createElement('img');
   portrait.id = 'dlg-portrait'; portrait.alt = tree.speaker || '';
   if (tree.portrait) portrait.src = tree.portrait; else portrait.style.display = 'none';
+  if (tree.portraitBg){ portrait.style.backgroundImage = tree.portraitBg; portrait.classList.add('marked'); }   // their household's mark (js/kin-mark.js)
   const main = document.createElement('div'); main.id = 'dlg-main';
   box.appendChild(portrait); box.appendChild(main);
   overlay.appendChild(box); document.body.appendChild(overlay);
@@ -80,7 +81,7 @@ function open(tree, opts){
       const grid = document.createElement('div'); grid.id = 'dlg-roster';
       for (const m of node.roster){
         const cell = document.createElement('div'); cell.className = 'dlg-kin';
-        if (m.portrait){ const im = document.createElement('img'); im.className = 'dlg-kin-face'; im.src = m.portrait; im.alt = m.name || ''; cell.appendChild(im); }
+        if (m.portrait){ const im = document.createElement('img'); im.className = 'dlg-kin-face'; im.src = m.portrait; im.alt = m.name || ''; if (m.portraitBg) im.style.backgroundImage = m.portraitBg; cell.appendChild(im); }
         const nm = document.createElement('div'); nm.className = 'dlg-kin-name'; nm.textContent = m.name || ''; cell.appendChild(nm);
         if (m.relation){ const rel = document.createElement('div'); rel.className = 'dlg-kin-rel'; rel.textContent = m.relation; cell.appendChild(rel); }
         if (m.next || m.onSelect){              // clickable: ask about this person

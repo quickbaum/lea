@@ -1,0 +1,22 @@
+{
+  "ARM_DOWN": 26,
+  "ARM_ADDUCT": 1,
+  "SHOULDER_IN": -30,
+  "ARM_PITCH": -26,
+  "ARM_PRON": 17,
+  "FOREARM_IN": 16,
+  "ARM_SWING": 21,
+  "ELBOW_BASE": 0,
+  "ELBOW_FOLLOW": 16,
+  "THIGH": 24,
+  "KNEE": 38,
+  "KNEE_BASE": 2,
+  "LEG_ADDUCT": 15,
+  "FOOT": 19,
+  "PELVIS_YAW": 10,
+  "PELVIS_SWAY": 0,
+  "SPINE_TWIST": 5,
+  "SPINE_LEAN": 0.5,
+  "CLAV": 6.5,
+  "HEAD_STAB": 4
+}

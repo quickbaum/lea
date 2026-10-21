@@ -14,17 +14,27 @@
   #cross:before,#cross:after{content:"";position:absolute;background:#fff;}
   #cross:before{left:4px;top:0;width:2px;height:10px;}
   #cross:after{top:4px;left:0;height:2px;width:10px;}
-  #map{position:fixed;right:10px;bottom:10px;width:160px;height:160px;
-       image-rendering:pixelated;border:2px solid #000;
-       border: 10px solid;
-       border-image: url('thin_dark_frame.png') 10 round;
-       padding: 0px;
-  }
+  /* the round minimap: turns with you, north marked on its rim */
+  #map{position:fixed;right:10px;bottom:10px;width:172px;height:172px;border-radius:50%;
+       border:4px solid #1d1a14;box-shadow:0 0 0 1px #c9a23a,0 3px 10px rgba(0,0,0,.6);}
+  /* the name of where you are, just above the minimap */
+  #place{position:fixed;right:10px;bottom:190px;width:180px;text-align:center;pointer-events:none;
+       font:italic 14px Georgia,'Times New Roman',serif;color:#e8c75a;letter-spacing:.3px;
+       text-shadow:0 1px 2px #000,0 0 6px #000;transition:opacity .35s ease;}
+  #place.fade{opacity:0;}
+  body.no-minimap #place{bottom:10px;}
+  /* the big map (M) */
+  #bigmap{position:fixed;inset:0;z-index:60;background:#0d0c09;cursor:grab;}
+  #bigmap:active{cursor:grabbing;}
+  #bigmap canvas{display:block;width:100vw;height:100vh;}
+  #bigmap .hint{position:absolute;left:0;right:0;bottom:12px;text-align:center;pointer-events:none;
+       font:12px monospace;color:#cdbf98;opacity:.75;text-shadow:0 1px 3px #000;}
   #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
          cursor:pointer;text-align:center;overflow:hidden;
          background:rgb(0 19 11);}     /* semitransparent dark-green tint over the paused world */
   #start .splash-content{position:relative;z-index:1;display:flex;flex-direction:column;align-items:center;}
-  #start .logo{width:min(60vw,640px);height:auto;filter:drop-shadow(0 6px 18px #000c);
+  #start .logo{width:auto;height:auto;max-width:min(60vw,640px);max-height:34vh;   /* leaves room for the world options */
+         filter:drop-shadow(0 6px 18px #000c);
          margin-bottom:22px;animation:logoIn .8s cubic-bezier(.22,1,.36,1) both;}
   @keyframes logoIn{from{opacity:0;transform:translateY(10px) scale(.97);}to{opacity:1;transform:none;}}
   #start .tagline{font-family:Georgia,serif;font-style:italic;color:#dccfa0;
@@ -41,6 +51,42 @@
   #loading-fill{height:100%;background:#9ab87f;border-radius:2px;width:0%;
          transition:width .35s ease;}
   #loading-status.done{opacity:0;transition:opacity .4s ease;pointer-events:none;}
+  /* world options on the splash: which Lea to make */
+  #world-opts{cursor:default;margin:0 0 16px;padding:10px 14px 12px;background:rgba(0,0,0,.45);
+         border:1px solid rgba(201,162,58,.35);border-radius:4px;font-size:12px;letter-spacing:1px;
+         display:grid;grid-template-columns:auto 1fr;gap:7px 12px;align-items:center;text-align:left;}
+  #world-opts .lbl{color:#9ab87f;}
+  #world-opts .set{display:flex;gap:4px;flex-wrap:wrap;}
+  #world-opts .set button{background:#1d1a14;color:#cdb;border:1px solid #5a4a2a;border-radius:3px;
+         font:12px monospace;letter-spacing:1px;padding:3px 8px;cursor:pointer;}
+  #world-opts .set button.on{background:#c9a23a;color:#111;border-color:#c9a23a;}
+  #world-opts input[type=number]{width:110px;background:#1d1a14;color:#cdb;border:1px solid #5a4a2a;
+         border-radius:3px;font:12px monospace;padding:3px 6px;}
+  #world-opts input[type=range]{width:150px;vertical-align:middle;accent-color:#c9a23a;}
+  #world-opts .row{display:flex;gap:6px;align-items:center;}
+  #world-opts .make{grid-column:1 / -1;display:flex;gap:10px;align-items:center;justify-content:space-between;margin-top:4px;}
+  #world-opts .make button{background:#c9a23a;color:#111;border:0;border-radius:3px;font:bold 12px monospace;
+         letter-spacing:2px;padding:6px 12px;cursor:pointer;}
+  #world-opts .make button:disabled{opacity:.35;cursor:default;}
+  #world-opts .note{opacity:.7;font-size:11px;}
+  #world-opts .make button.back{background:#1d1a14;color:#cdb;border:1px solid #5a4a2a;font-weight:normal;}
+  /* the intro: five preset Leas and Custom, as big buttons; nothing loads until one is chosen */
+  #intro-choices{cursor:default;width:min(860px,92vw);}
+  #intro-choices .intro-ask{font-family:Georgia,serif;font-style:italic;color:#dccfa0;font-size:20px;
+         margin:0 0 12px;text-shadow:0 2px 6px #000;}
+  #intro-presets{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+  @media (max-width:640px){ #intro-presets{grid-template-columns:1fr 1fr;} }
+  #intro-presets .preset{display:flex;flex-direction:column;gap:6px;text-align:left;cursor:pointer;
+         background:rgba(0,0,0,.55);border:1px solid rgba(201,162,58,.45);border-radius:5px;
+         padding:14px 16px;color:#cdb;font-family:monospace;min-height:118px;
+         transition:background .15s,border-color .15s,transform .15s;}
+  #intro-presets .preset:hover,#intro-presets .preset:focus-visible{background:rgba(40,32,12,.8);
+         border-color:#c9a23a;transform:translateY(-2px);outline:none;}
+  #intro-presets .preset .name{font-family:Georgia,serif;font-style:italic;font-size:22px;color:#e8d9a0;}
+  #intro-presets .preset .blurb{font-size:12px;line-height:1.4;opacity:.85;flex:1;}
+  #intro-presets .preset .meta{font-size:11px;letter-spacing:1px;color:#9ab87f;}
+  #intro-presets .preset.last{border-color:#c9a23a;box-shadow:0 0 0 1px #c9a23a inset;}
+  #intro-presets .preset.custom{border-style:dashed;}
   /* settings: gear button + sound panel */
   #gear{position:fixed;right:10px;top:10px;z-index:30;width:34px;height:34px;
         background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
@@ -58,7 +104,34 @@
   #settings .done{margin-top:22px;width:100%;background:#2a3a26;color:#dccfa0;border:1px solid #5a6b50;
             border-radius:4px;padding:9px;font-size:14px;letter-spacing:2px;cursor:pointer;font-family:monospace;}
   #settings .done:hover{background:#34492e;}
+  #settings h2.sub{margin:26px 0 4px;font-size:20px;}
+  #settings .checks{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin-top:14px;font-size:13px;}
+  #settings .checks label{display:flex;align-items:center;gap:8px;cursor:pointer;}
+  #settings .checks input{accent-color:#9ab87f;}
+  #meter{position:fixed;left:10px;bottom:46px;z-index:30;font:12px monospace;color:#dccfa0;
+         background:rgba(0,19,11,.7);border:1px solid #5a6b50;border-radius:4px;padding:3px 7px;pointer-events:none;}
   .hide{display:none!important;}
+  /* cursor mode: free mouse over canvas, crosshair hidden */
+  body.cursor-mode #c{cursor:default;}
+  body.cursor-mode #cross{display:none;}
+  /* inventory button */
+  /* look button — only visible in cursor mode */
+  #look-btn{position:fixed;right:10px;bottom:10px;z-index:30;display:none;
+    background:rgba(0,19,11,.85);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
+    font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;font-family:monospace;}
+  #look-btn:hover{background:#1a3a1a;}
+  body.cursor-mode #look-btn{display:block;}
+  #inv-btn{position:fixed;left:10px;bottom:10px;z-index:30;
+    background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
+    font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;
+    font-family:monospace;opacity:.7;}
+  #inv-btn:hover{opacity:1;}
+  /* inventory panel */
+  #inv-panel{position:fixed;left:10px;bottom:46px;z-index:40;
+    background:rgb(0,19,11);border:1px solid #5a6b50;border-radius:6px;
+    box-shadow:0 10px 40px #000b;padding:16px 20px;min-width:180px;
+    color:#dccfa0;font-family:monospace;font-size:13px;line-height:1.8;}
+  #inv-panel h3{margin:0 0 8px;font-size:13px;letter-spacing:2px;opacity:.6;font-weight:normal;}
 </style>
 <script type="importmap">
 {
@@ -73,12 +146,35 @@
 <canvas id="c"></canvas>
 <div id="cross"></div>
 <div id="hud"></div>
-<canvas id="map" width="128" height="128"></canvas>
+<canvas id="map" width="192" height="192"></canvas>
+<div id="place" class="hide"></div>
+<div id="meter" class="hide"></div>
 <div id="start">
   <div class="splash-content">
     <img class="logo" src="qbworld.png" alt="Quickbaum's Lea">
     <p class="tagline">A FAEREAN DRAMA<br>IN SEVEN FITS</p>
-    <div id="loading-status">
+    <div id="intro-choices">
+      <p class="intro-ask">Which Lea will you enter?</p>
+      <div id="intro-presets"></div>
+    </div>
+    <div id="world-opts" class="hide">
+      <span class="lbl">SIZE</span>
+      <div class="set" data-key="size">
+        <button data-v="800">SMALL</button><button data-v="1600">MEDIUM</button><button data-v="3200">LARGE</button></div>
+      <span class="lbl">HILLS</span>
+      <div class="set" data-key="hills">
+        <button data-v="0">FLAT</button><button data-v="0.5">GENTLE</button><button data-v="1">HILLY</button><button data-v="2">MOUNTAINS</button></div>
+      <span class="lbl">WATER</span>
+      <div class="set" data-key="water">
+        <button data-v="0">DRY</button><button data-v="1">NORMAL</button><button data-v="2">WET</button></div>
+      <span class="lbl">FOLK</span>
+      <div class="row"><input type="range" id="wo-folk" min="8" max="160" step="8"><span id="wo-folk-val"></span></div>
+      <span class="lbl">SEED</span>
+      <div class="row"><input type="number" id="wo-seed" min="0" max="4294967295" step="1">
+        <div class="set"><button id="wo-reroll" title="A new random seed">REROLL</button></div></div>
+      <div class="make"><button id="wo-back" class="back">&larr; BACK</button><span class="note" id="wo-note"></span><button id="wo-make">ENTER THIS LEA</button></div>
+    </div>
+    <div id="loading-status" class="hide">
       <p id="loading-label">preparing the world&hellip;</p>
       <div id="loading-track"><div id="loading-fill"></div></div>
     </div>
@@ -86,6 +182,9 @@
     <p class="controls hide" id="controls-text">WASD move &middot; mouse look &middot; shift run &middot; E talk &middot; O sound &middot; esc release</p>
   </div>
 </div>
+<button id="look-btn" title="Return to mouselook (Esc)">&#x25B6; look</button>
+<button id="inv-btn" title="Inventory (pack)">pack</button>
+<div id="inv-panel" class="hide"></div>
 <button id="gear" title="Sound settings (O)">⚙</button>
 <div id="settings" class="hide">
   <div class="panel">
@@ -94,11 +193,27 @@
       <input type="range" id="vol-music" min="0" max="100" step="1"><span class="val" id="vol-music-val">50%</span></div>
     <div class="row"><label for="vol-sfx">EFFECTS</label>
       <input type="range" id="vol-sfx" min="0" max="100" step="1"><span class="val" id="vol-sfx-val">100%</span></div>
+    <h2 class="sub">Performance</h2>
+    <div class="row"><label for="gfx-pixel">PIXEL SIZE</label>
+      <input type="range" id="gfx-pixel" min="2" max="6" step="1"><span class="val" id="gfx-pixel-val"></span></div>
+    <div class="row"><label for="gfx-draw">DRAW DIST</label>
+      <input type="range" id="gfx-draw" min="70" max="170" step="10"><span class="val" id="gfx-draw-val"></span></div>
+    <div class="row"><label for="gfx-lod">TREE DETAIL</label>
+      <input type="range" id="gfx-lod" min="20" max="150" step="5"><span class="val" id="gfx-lod-val"></span></div>
+    <div class="checks">
+      <label><input type="checkbox" id="gfx-grass"> grass blades</label>
+      <label><input type="checkbox" id="gfx-sway"> grass sway</label>
+      <label><input type="checkbox" id="gfx-smooth"> smooth camera height</label>
+      <label><input type="checkbox" id="gfx-hands"> hands</label>
+      <label><input type="checkbox" id="gfx-map"> minimap</label>
+      <label><input type="checkbox" id="gfx-meter"> frame meter</label>
+    </div>
     <button class="done" id="settings-done">DONE</button>
+    <p class="credit" style="margin:10px 0 0;font:11px/1.4 monospace;opacity:.6;text-align:center">Speech icons by Lorc, Delapouite and Skoll — <a href="https://game-icons.net" target="_blank" rel="noopener" style="color:inherit">game-icons.net</a>, CC BY 3.0. Sayings: Hávamál tr. H. A. Bellows (1923); Proverbs, JPS 1917; traditional songs.</p>
   </div>
 </div>
 <script>window.LEAVES_CONFIG = { target: '#start', opacity: 0.9, density: 100 };</script>
 <script src="js/leaves.js"></script>
-<script type="module" src="js/main.js"></script>
+<script type="module" src="js/intro.js"></script>
 </body>
 </html>

@@ -19,9 +19,8 @@ export class TrailField {
     clear   = 0.08,       // base wear at which tufts begin to thin (per-tuft, +hash)
     trailColor = [0.30, 0.23, 0.14],   // packed-earth colour
   } = {}){
-    this.geo = ground.geometry;
-    this.colorAttr = this.geo.attributes.color;
-    this.base = Float32Array.from(this.colorAttr.array);   // biome + duff, the un-trodden ground
+    this.ground = ground;           // terrain.js Ground: shared colour grid, tiled meshes
+    this.base = Uint8Array.from(ground.color);     // biome + duff, the un-trodden ground (0..255)
     this.wear = new Float32Array(COLS * COLS);
     this.active = new Set();        // cell indices with wear > 0
     this.opts = { deposit, decayGrass, decaySoil, cap, clear };
@@ -42,6 +41,32 @@ export class TrailField {
 
   // register a grass group (from flora's scatterGrass) for trail suppression
   addGrass(g){ if (g && g.items) this.grass.push({ inst: g.inst, items: g.items, hidden: new Uint8Array(g.items.length) }); }
+
+  // A permanent kept clearing (a glade the folk keep open around a great tree):
+  // set lasting wear in a soft-edged disc so the ground bares and the existing
+  // grass/reed/fern suppression empties it — reused wholesale rather than a new
+  // system. Marked permanent so it never regrows. Call after addGrass(); flush()
+  // to apply at once. `strength` peaks at the centre and fades to 0 at the rim.
+  clearing(cx, cz, r, strength = 0.7){
+    if (!this.permanent) this.permanent = new Set();
+    const span = Math.ceil(r / STEP);
+    const col0 = Math.round((cx + SIZE / 2) / STEP), row0 = Math.round((cz + SIZE / 2) / STEP);
+    for (let row = row0 - span; row <= row0 + span; row++){
+      for (let col = col0 - span; col <= col0 + span; col++){
+        if (col < 0 || col > SEG || row < 0 || row > SEG) continue;
+        const x = col * STEP - SIZE / 2, z = row * STEP - SIZE / 2;
+        const d = Math.hypot(x - cx, z - cz);
+        if (d > r) continue;
+        // full across most of the disc (so reeds/ferns, thr up to ~0.30, all clear
+        // and the core bares to soil), fading only near the rim
+        const f = Math.min(1, (1 - d / r) / 0.3);
+        const w = strength * f * f * (3 - 2 * f);
+        const i = row * COLS + col;
+        if (w > this.wear[i]){ this.wear[i] = w; this.permanent.add(i); this._paintCell(i); }
+      }
+    }
+    this._pending = true;
+  }
 
   // wear (0..1) at a world point; 0 off the mesh. Lets other systems (e.g. the
   // decorative grass) keep off trodden ground too.
@@ -76,14 +101,15 @@ export class TrailField {
     // Stage A — trodden grass: the ground darkens early & smoothly, keeping its
     // hue (flattened, bruised grass), giving the dark patch a path begins as.
     const dark = 1 - 0.5 * smooth(0.04, 0.22, w);              // down to 0.5 brightness
-    let r = b[i*3] * dark, g = b[i*3+1] * dark, bl = b[i*3+2] * dark;
+    let r = b[i*3] * dark, g = b[i*3+1] * dark, bl = b[i*3+2] * dark;     // 0..255, like ground.color
     // Stage B — soil chips through: only past this cell's OWN hashed threshold,
     // so bare earth emerges in a grainy, speckled way that grows with traffic.
     const soilThr = 0.32 + this._hash(i) * 0.46;               // 0.32..0.78 per cell
     const s = smooth(soilThr - 0.03, soilThr + 0.03, w);
-    r = r * (1 - s) + t[0] * s; g = g * (1 - s) + t[1] * s; bl = bl * (1 - s) + t[2] * s;
-    const arr = this.colorAttr.array;
+    r = r * (1 - s) + t[0] * 255 * s; g = g * (1 - s) + t[1] * 255 * s; bl = bl * (1 - s) + t[2] * 255 * s;
+    const arr = this.ground.color;
     arr[i*3] = r; arr[i*3+1] = g; arr[i*3+2] = bl;
+    this.ground.touch(i);
   }
 
   // decay + throttled GPU upload + throttled grass suppression
@@ -91,6 +117,7 @@ export class TrailField {
     if (dt > 0 && this.active.size){
       const { decayGrass, decaySoil } = this.opts;
       for (const i of this.active){
+        if (this.permanent && this.permanent.has(i)) continue;   // kept clearings never regrow
         // heal fast while it's just trodden grass, slowly once soil is bare
         const s = smooth(0.25, 0.45, this.wear[i]);     // 0 = trodden, 1 = bare soil
         this.wear[i] -= (decayGrass + (decaySoil - decayGrass) * s) * dt;
@@ -100,14 +127,14 @@ export class TrailField {
       this._pending = true;
     }
     this._upT += dt;
-    if (this._upT >= 0.15){ this._upT = 0; if (this._pending){ this.colorAttr.needsUpdate = true; this._pending = false; } }
+    if (this._upT >= 0.15){ this._upT = 0; if (this._pending){ this.ground.upload(); this._pending = false; } }
 
     this._grassT += dt;
     if (this._grassT >= 0.5){ this._grassT = 0; this._updateGrass(); }
   }
 
   // force the pending colour upload + grass pass (used after a warm-up burst)
-  flush(){ this.colorAttr.needsUpdate = true; this._pending = false; this._updateGrass(); }
+  flush(){ this.ground.upload(); this._pending = false; this._updateGrass(); }
 
   // Thin grass tufts off trodden ground. Each tuft has its OWN hashed threshold
   // (in the trodden-grass band, before soil shows), so the path's grass wears

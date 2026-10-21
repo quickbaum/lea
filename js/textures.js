@@ -475,6 +475,80 @@ export function makeCattailTexture({ seed = Math.random } = {}){
 }
 
 // An acorn on a transparent card: tan nut, darker hatched cap, tiny stem.
+// Sedge tussock (fen, carr floor): a dense fountain of thin arching blades,
+// yellow-green with straw-dead tips, rising from a dark crown at the base.
+export function makeSedgeTexture({ seed = Math.random } = {}){
+  const w = 64, h = 48;
+  return makeTexture(w, h, (g) => {
+    g.clearRect(0, 0, w, h);
+    const LIVE = [[120, 132, 58], [104, 120, 50], [138, 142, 70], [92, 108, 44]];
+    for (let i = 0; i < 46; i++){
+      const bx = w / 2 + (seed() - 0.5) * 14;          // all from one crown
+      const len = (0.55 + seed() * 0.45) * h;
+      const lean = (seed() - 0.5) * 2;                 // -1..1: which way it arches
+      const c = LIVE[seed() * LIVE.length | 0], dead = seed() < 0.35;
+      g.strokeStyle = dead ? `rgb(${168 + seed()*20|0},${150 + seed()*16|0},${96})` : `rgb(${c[0]},${c[1]},${c[2]})`;
+      g.lineWidth = 1;
+      g.beginPath(); g.moveTo(bx, h);
+      // a quadratic arc: up, then bending out and down past the crown
+      g.quadraticCurveTo(bx + lean * len * 0.25, h - len, bx + lean * len * 0.75, h - len * (0.55 + seed() * 0.3));
+      g.stroke();
+    }
+    g.fillStyle = 'rgb(58,52,30)'; g.fillRect(w / 2 - 8, h - 3, 16, 3);   // the tussock's dark crown
+  });
+}
+
+// Cotton grass (fen): slender sedge stalks topped by white cottony seed heads.
+export function makeCottonGrassTexture({ seed = Math.random } = {}){
+  const w = 48, h = 64;
+  return makeTexture(w, h, (g) => {
+    g.clearRect(0, 0, w, h);
+    for (let i = 0; i < 9; i++){                       // low leaves
+      const bx = 10 + seed() * (w - 20), bh = 10 + seed() * 12;
+      g.strokeStyle = `rgb(${110 + seed()*20|0},${118 + seed()*16|0},${54})`; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(bx, h); g.lineTo(bx + (seed() - 0.5) * 8, h - bh); g.stroke();
+    }
+    for (let i = 0; i < 6; i++){                       // stalks + heads
+      const bx = 8 + seed() * (w - 16), top = 8 + seed() * 22, tx = bx + (seed() - 0.5) * 6;
+      g.strokeStyle = 'rgb(118,124,62)'; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(bx, h); g.lineTo(tx, top); g.stroke();
+      for (let k = 0; k < 14; k++){                    // the cotton: a soft clump of white specks
+        const a = seed() * Math.PI * 2, r = seed() * 4;
+        const sh = 225 + seed() * 30 | 0;
+        g.fillStyle = `rgb(${sh},${sh},${sh - 6})`;
+        g.fillRect(tx + Math.cos(a) * r - 1, top - 2 + Math.sin(a) * r * 1.2, 2, 2);
+      }
+    }
+  });
+}
+
+// Heather (heath): a low rounded cushion of wiry brown-green shoots, flecked
+// with mauve flowers — enough dark gaps that it reads as a shrub, not a blob.
+export function makeHeatherTexture({ seed = Math.random } = {}){
+  const w = 64, h = 40;
+  return makeTexture(w, h, (g) => {
+    g.clearRect(0, 0, w, h);
+    const SHOOT = [[70, 72, 40], [86, 84, 46], [62, 60, 36], [96, 92, 52]];
+    for (let i = 0; i < 70; i++){
+      // shoots fan up from the base; the envelope is a half-ellipse (the cushion)
+      const u = seed() * 2 - 1, bx = w / 2 + u * w * 0.42;
+      const top = h - (1 - u * u) * h * (0.65 + seed() * 0.35);
+      const c = SHOOT[seed() * SHOOT.length | 0];
+      g.strokeStyle = `rgb(${c[0]},${c[1]},${c[2]})`; g.lineWidth = 1;
+      g.beginPath(); g.moveTo(w / 2 + u * w * 0.2, h); g.lineTo(bx, top); g.stroke();
+      if (seed() < 0.75){                              // flowers along the shoot's upper end
+        const fl = 2 + (seed() * 4 | 0);
+        for (let k = 0; k < fl; k++){
+          const t = seed() * 0.45;
+          const fx = bx + (w / 2 + u * w * 0.2 - bx) * t, fy = top + (h - top) * t;
+          g.fillStyle = seed() < 0.5 ? 'rgb(176,110,164)' : 'rgb(150,88,140)';
+          g.fillRect(fx | 0, fy | 0, 2, 1);
+        }
+      }
+    }
+  });
+}
+
 export function makeAcornTexture(){
   const w = 24, h = 32, cx = w/2;
   return makeTexture(w, h, (g) => {
@@ -523,24 +597,38 @@ export function makeTrinketTexture(kind = 'stone'){
 // wood sticks, little food items (coloured by what's stowed), and any glinting
 // valuables. Cached per (food, wood, kind, trinkets) by the caller.
 const PACK_FOOD_COLOR = {
-  berries: '#c4263a', apples: '#ce3c2c', mushrooms: '#b0623c', acorns: '#9c6b35',
-  hazelnuts: '#8a6438', roots: '#6f8f3a', 'cattail root': '#6f8f3a', food: '#c4263a',
+  berries: '#6e1f4c', apples: '#ce3c2c', mushrooms: '#b0623c', acorns: '#9c6b35',
+  hazelnuts: '#8a6438', roots: '#6f8f3a', 'cattail root': '#6f8f3a', chamomile: '#e6dea0', food: '#b5643a',
 };
-export function makePackTexture(food = 0, wood = 0, kind = 'food', trinkets = 0){
+// `mark` (optional): { mask, n, dye } — the household's pattern (js/kin-mark.js),
+// woven into the sack body in their dye, the same mark as their huts' thatch.
+export function makePackTexture(food = 0, wood = 0, kind = 'food', trinkets = 0, mark = null){
   return makeTexture(48, 48, (g) => {
     g.clearRect(0, 0, 48, 48);
-    const fc = PACK_FOOD_COLOR[kind] || PACK_FOOD_COLOR.food;
+    const kinds = String(kind).split(',');           // one kind, or a mix ("apples,apples,berries")
+    const fcOf = i => PACK_FOOD_COLOR[kinds[i % kinds.length]] || PACK_FOOD_COLOR.food;
     // contents sticking out of the top (drawn first, then the pack over their base)
     for (let i = 0; i < Math.min(wood, 4); i++){       // firewood: pale sticks
       g.strokeStyle = '#7a5226'; g.lineWidth = 3; g.beginPath();
       const x = 15 + i * 6; g.moveTo(x, 20); g.lineTo(x - 2, 4); g.stroke();
     }
     for (let i = 0; i < Math.min(food, 6); i++){       // food: round morsels
-      g.fillStyle = fc; const x = 14 + (i % 3) * 8, y = 14 - (i / 3 | 0) * 6;
+      g.fillStyle = fcOf(i); const x = 14 + (i % 3) * 8, y = 14 - (i / 3 | 0) * 6;
       g.beginPath(); g.arc(x, y, 3.4, 0, Math.PI * 2); g.fill();
     }
     // the pack: a leather sack with a flap, two straps and a buckle
     g.fillStyle = '#7a5a32'; g.fillRect(10, 16, 28, 28);
+    if (mark){                                               // the body is woven cloth carrying the mark
+      const { mask, n, dye } = mark;
+      const ground = [184, 156, 108], fig = dye.map(v => Math.round(v * 255));
+      const im = g.getImageData(10, 27, 28, 17), d = im.data;
+      for (let y = 0; y < 17; y++) for (let x = 0; x < 28; x++){
+        const f = mask[(y % n) * n + (x % n)], c = f ? fig : ground, i = (y * 28 + x) * 4;
+        const grain = ((x * 7 + y * 13) % 5) * 3;            // a little weave so it isn't flat print
+        d[i] = c[0] - grain; d[i + 1] = c[1] - grain; d[i + 2] = c[2] - grain; d[i + 3] = 255;
+      }
+      g.putImageData(im, 10, 27);
+    }
     g.fillStyle = '#6b4d2a'; g.fillRect(10, 16, 28, 11);     // flap
     g.fillStyle = '#54391f'; g.fillRect(10, 16, 28, 2);      // top shadow
     g.strokeStyle = '#43301c'; g.lineWidth = 2;              // straps
@@ -550,6 +638,25 @@ export function makePackTexture(food = 0, wood = 0, kind = 'food', trinkets = 0)
       const x = 14 + i * 20, y = 30;
       g.fillStyle = '#9fe3e8'; g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.fill();
       g.fillStyle = 'rgba(255,255,255,0.85)'; g.beginPath(); g.arc(x - 1, y - 1, 1, 0, Math.PI * 2); g.fill();
+    }
+  });
+}
+
+// What flies through the air when one person hands another something (js/toss.js):
+// a few morsels in the colour of what's stowed, a stick of firewood, or a glint.
+export function makeTossTexture(item = 'food', kind = 'food'){
+  return makeTexture(16, 16, (g) => {
+    g.clearRect(0, 0, 16, 16);
+    if (item === 'wood'){
+      g.strokeStyle = '#7a5226'; g.lineWidth = 3; g.beginPath(); g.moveTo(3, 12); g.lineTo(13, 4); g.stroke();
+      g.strokeStyle = '#a8794a'; g.lineWidth = 1; g.beginPath(); g.moveTo(4, 11); g.lineTo(12, 4); g.stroke();
+    } else if (item === 'gem'){
+      g.fillStyle = '#9fe3e8'; g.beginPath(); g.arc(8, 8, 4, 0, Math.PI * 2); g.fill();
+      g.fillStyle = 'rgba(255,255,255,0.9)'; g.fillRect(6, 6, 2, 2);
+    } else {
+      g.fillStyle = PACK_FOOD_COLOR[kind] || PACK_FOOD_COLOR.food;
+      for (const [x, y] of [[6, 9], [10, 9], [8, 5.5]]){ g.beginPath(); g.arc(x, y, 3, 0, Math.PI * 2); g.fill(); }
+      g.fillStyle = 'rgba(255,255,255,0.45)'; g.fillRect(5, 7, 1, 1); g.fillRect(9, 7, 1, 1);
     }
   });
 }

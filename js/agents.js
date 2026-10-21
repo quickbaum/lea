@@ -7,12 +7,17 @@
 // emergent gatherings are Alexander's "patterns of events bound to patterns of
 // space" (Timeless Way ch. 4-5). See docs/texts/.
 
-import * as THREE from 'three';
 import { height, walkable, terrainType } from './terrain.js';
 import { WORLD_R, WATER } from './config.js';
 import { makeName, composeName } from './names.js';
 import { NavGrid } from './nav.js';
-import { makeOmen } from './astrology.js';
+import { readOmen } from './astrology.js';
+import { RECIPES, RAW_KINDS, recipeFor, startPot, stepPot, carries } from './recipes.js';
+import { addPlan, dropPlan, plansOf, firstPlan, hadDish, strongestCraving, mayCrave, craved } from './plans.js';
+import { addFood, takeFood, takeSpare, giveAll, total, countOf, snackCount, snackTarget, foresight, isKeeper, spoil, SNACKS } from './larder.js';
+import { addNews, pruneNews, GOSSIP_RANGE, GOSSIP_CD } from './gossip.js';
+import { nudge } from './ties.js';
+import { Conversation, DEFAULT_TALK, parted } from './convo.js';
 
 export const NEEDS = ['warmth', 'food', 'company', 'rest'];
 
@@ -20,7 +25,17 @@ export const NEEDS = ['warmth', 'food', 'company', 'rest'];
 // these procedurally; for now one shared folk. `personalSpace` = the comfortable
 // distance this people keeps from others in the open — different cultures keep
 // different distances (proxemics), so this is where that variation will live.
-export const DEFAULT_CULTURE = { name: 'folk', personalSpace: 1.3 };
+export const DEFAULT_CULTURE = { name: 'folk', personalSpace: 1.3, talk: DEFAULT_TALK };
+// two contrasting manners of talk, to see what culture does to conversation (main.js
+// ?culture=chatty|reserved|mixed). Chatty folk talk fast and long, barge in, skip
+// goodbyes; reserved folk keep it short, let only kin join, and always take leave.
+export const CULTURES = {
+  folk: DEFAULT_CULTURE,
+  chatty:   { name: 'chatty', personalSpace: 1.0,
+              talk: { turnS: 2.1, readS: 0.045, loreS: 0.07, pause: 0.4, join: 'interrupt', strangers: true, farewell: false, maxTopics: 7, sayings: 0.45 } },
+  reserved: { name: 'reserved', personalSpace: 1.6,
+              talk: { turnS: 3.0, readS: 0.06, loreS: 0.095, pause: 1.5, join: 'never', strangers: false, farewell: true, maxTopics: 2, sayings: 0.2 } },
+};
 
 // Individual temperament + skill. Personality is *which wants pull hardest*: the
 // drive multipliers say how fast each need rises (a glutton hungers sooner, a
@@ -29,11 +44,16 @@ export const DEFAULT_CULTURE = { name: 'folk', personalSpace: 1.3 };
 // belonging are met (see Brain.choose). Skill is how well the body serves: a
 // strong person chops faster and carries more, a keen-eyed one spots small
 // valuables from further off. Procedural for now; the culture generator will
-// later seed the distributions. (Math.random, like the rest of the agent jitter
-// — not yet seed-reproducible.)
+// later seed the distributions.
+//
+// Randomness policy: WORLD-DEFINING draws (who a person is — persona, name,
+// stargazer flag, starting needs — and where the fauna spawn) come from the
+// world's seeded rng (world.rng), so one WORLD_SEED reproduces the same folk.
+// EPHEMERAL jitter (decision timing, wander headings, separation nudges, flame
+// cosmetics) stays on Math.random — it doesn't define the world.
 const DEFAULT_PERSONA = { warmth: 1, food: 1, company: 1, rest: 1, beauty: 1, strength: 1, perception: 1, generosity: 1 };
-function makePersona(){
-  const v = (lo, hi) => lo + Math.random() * (hi - lo);
+function makePersona(rng = Math.random){
+  const v = (lo, hi) => lo + rng() * (hi - lo);
   return {
     warmth:  v(0.7, 1.3),   // temperament: how fast each drive rises
     food:    v(0.7, 1.4),
@@ -51,9 +71,27 @@ const DRIFT = { warmth: 0.045, food: 0.022, company: 0.030, rest: 0.020 };
 
 const DIST_COST = 0.022;     // utility lost per world-unit of travel
 const ACT_MIN   = 0.05;      // below this best-score, just wander
+
+// Reverence — the finest want of all, above even beauty: a content, unlonely soul
+// drifts to one of the great faced trees (docs/mycelium.md), sits a while, and
+// leaves. Deliberate and OCCASIONAL because the urge rebuilds over days, not the
+// minutes the daily drives cycle in. No lore — just a pull toward a marked place.
+const REV_DRIFT   = 0.0016;  // reverence accrues slowly (a rough day to fill)
+const REV_PULL    = 2.2;     // draw of a great tree at peace — enough to make the trek from ~30u
+const REV_SATISFY = 0.08;    // spent while sitting at the tree (a visit lasts seconds)
+const REV_BREAK   = 0.92;    // a need this urgent ends the rite — devotion isn't hunger
+const CIRCLE_LAPS  = 1;      // circuits before the offering. Ovoo practice is three, but the
+                             // needs clock here is fast (warmth fills in ~20s) and a three-circuit
+                             // rite can never finish before hunger breaks it — so one clear lap.
+const CIRCLE_STEPS = 8;      // waypoints per lap — enough to read as a circle, not a triangle
+const MOOT_COMPANY = 0.22;   // company sated per second at a moot (cf. the night fire)
+const MOOT_DRAW    = 1.6;    // how strongly folk already sitting the ring draw others in
+const ROOTWISE_CHANCE = 0.22; // who can hear what the wood carries (cf. stargazers)
+const SHRINE_TOL  = 2.2;     // stop at the trunk's edge, within the glade
 const HARD_R    = 0.5;       // body radius: two NPCs never get closer than this
 const INTIMATE  = 0.7;       // personal space shrinks in intimate settings (the fire circle)
 const SEP_SPEED = 2.2;       // how fast crowding is eased apart (units/sec)
+const SEP_R     = 6;         // widest crowding radius considered (> any personal space)
 const OB_CELL   = 4;         // spatial-hash cell size for obstacle (trunk) lookups
 
 // firewood economy: a fire burns fuel and dies untended; people chop shrubs,
@@ -66,7 +104,7 @@ const LOGS_PER_SHRUB = 3;    // wood a felled shrub yields
 const FUEL_PER_LOG   = 0.18; // fuel each log restores when the fire eats one off the pile
 // Wood isn't fed straight to the flame: people stack it by the hearth as a
 // visible communal reserve, and the fire draws logs off that pile as it burns.
-const WOOD_CAP    = 12;      // logs a hearth's woodpile holds (also the visible stack's size)
+export const WOOD_CAP = 12;  // logs a hearth's woodpile holds (also the visible stack's size — read by campfire-view.js)
 const WOOD_LOW    = 4;       // below this the pile wants restocking — someone goes to chop
 const WOOD_START  = 5;       // logs a fresh hearth is laid with (so it doesn't die at once)
 const STACK_KEEP  = 0;       // logs a person keeps in their pack after stacking the rest
@@ -108,7 +146,145 @@ const FERRY_CALM     = 0.72; // only ferry when no survival need is past this (n
 const CURFEW_BIAS   = 1.7;   // pull toward camp, scaled by how far into the evening it is
 const FAR_FROM_CAMP = 45;    // farther than this from any reachable fire at dusk → build your own
 const SIGHT_RANGE   = 18;    // how close a groupmate must be to be "seen" (sighting memory)
+// Neighbour bin size for AgentWorld.near(). Must be >= the largest radius anyone
+// asks for (SIGHT_RANGE is the widest), or the 3×3 block searched around a point
+// would miss people standing inside it.
+const NBR_CELL      = SIGHT_RANGE;
+// Sightings & gossip run on their own slow clock rather than every frame: a fact
+// is timestamped and gossip has a cooldown of its own, so noticing a passer-by a
+// fifth of a second later is invisible — and it is the most expensive pass here.
+const SOCIAL_DT     = 0.2;
+// glimpses of how people feel, in passing (ties.js; talk itself is js/convo.js)
+const GLANCE_FAM = 0.25, GLANCE_REG = 0.4;   // a tie strong enough to show in passing
+const GLANCE_CD  = 30;      // seconds between one person's glimpses
+const PLAN_BIAS  = 1.4;     // pull toward a plan on the agenda (plans.js)
+const PLAN_DIST  = 0.006;   // a plan is worth a longer walk than a passing want
+// The kinds our plans want gathered, with how much: a dish's base (unless the raw
+// bag already holds enough of it) and its extras (unless we carry one); a shared
+// plan's task likewise. Read by the gathering and hunting in Brain.choose.
+function wantedKinds(npc, now){
+  const want = new Map();
+  for (const pl of plansOf(npc, now)){
+    if (pl.start && now < pl.start) continue;
+    const r = (pl.kind === 'dish' || (pl.kind === 'task' && pl.cook)) ? RECIPES[pl.dish] : null;
+    if (r){
+      if (!((npc.raw || 0) >= 2 && r.base.includes(npc.rawKind))) for (const k of r.base) if (!(npc.raw > 0 && npc.rawKind !== k)) want.set(k, 1);
+      for (const st of r.steps) if (st.do === 'add' && !carries(npc, st.item)) for (const k of st.item) want.set(k, Math.max(want.get(k) || 0, 0.6));
+    }
+    if (pl.kind === 'task' && pl.item && !pl.cook && !carries(npc, pl.item)) for (const k of pl.item) want.set(k, 1.2);
+  }
+  return want;
+}
 const BUILD_LOGS  = LOGS_PER_SHRUB;   // wood needed to start a fire from scratch
+
+// rain shelter: lean-tos NPCs raise against heavy rain (docs/shelters.md).
+// Rain boosts warmth drain (RAIN_CHILL); only sheltered NPCs avoid that penalty.
+// Three tiers: tree canopy (free, partial) → existing lean-to → build one.
+const RAIN_CHILL   = 1.8;   // warmth drains this many × faster while exposed to rain
+const RAIN_SEEK    = 0.28;  // rain intensity at which NPCs actively look for cover
+const RAIN_MISERY  = 0.45;  // how much of the urge to get out of the rain is the rain
+                            // itself rather than the cold (see Brain.choose)
+const RAIN_BUILD   = 0.62;  // intensity at which they'll raise a lean-to if nothing is near
+const LEAN_WARMTH  = 0.38;  // warmth advertised by a lean-to (per unit of rain intensity)
+const TREE_SHADE   = 0.16;  // warmth a tree canopy provides (partial cover, no build needed)
+const TREE_SHADE_R = 3.2;   // canopy radius giving meaningful cover
+const LEAN_CAP     = 2;     // max occupants per lean-to
+const LEAN_BUILD_T = 5.0;   // seconds to raise a lean-to (one chop → one lean-to)
+const LEAN_LOGS    = 1;     // shrub-logs consumed to build one
+const SHELTER_BIAS = 1.45;  // urgency bonus toward cover when rain + warmth drive are high
+const BUILD_SH_B   = 1.25;  // bonus toward building when no alternative
+
+// huts: the SETTLED shelter (docs/camp.md). Where the lean-to above is what you
+// throw up when rain catches you in the open, a hut is what you raise AT CAMP and
+// come home to — sited on a ring outside the sitting circle with its doorway to
+// the hearth (so the clearing between stays the living space: Pat. 67 COMMON LAND,
+// 106 POSITIVE OUTDOOR SPACE), thatched, slept in, and rethatched when weather has
+// stripped the roof. Kin settle beside kin (Pat. 37 HOUSE CLUSTER), so the plan of
+// a camp reads as the social diagram it is.
+// Huts differ in size, because households do: a lone soul throws up a small
+// skerm, a family raises a mongolu big enough to sleep several. Size is not
+// decoration — it sets how many sleep there, how many poles the frame takes and
+// how many armfuls the roof needs, so a bigger hut is visibly more work.
+// Sized against a person, not against each other. The world is metric (the eye
+// sits at 1.7), and with HUT_SHAPE below the crown is 1.25× the half-width — so
+// the SMALLEST hut must still clear a standing body. The first pass at variation
+// took the minimum down to 1.30, which is a 1.6m crown: shorter than the people
+// meant to live in it. Floor it where someone can stand up inside.
+const HUT_RAD       = [1.90, 2.80];   // half-width in metres — 3.8m to 5.6m across
+const HUT_SHAPE     = 1.25;  // crown height as a multiple of the half-width
+const HUT_GAP       = 1.5;   // clear ground left between two huts' walls — room to walk
+                             // between them: the wall puts anyone shut out HUT_BODY clear
+                             // of it, so at 0.7 two walls left no gap a body could hold
+// Trees. A trunk inside the dome is the obvious clip, but the wall must also
+// clear a body's width of walkway and the low limbs round the trunk — at the
+// old fixed 1.8m from the hut's MIDDLE, a 5.6m hut stood right through a trunk.
+const HUT_TREE_CLEAR  = 1.6;  // wall to trunk, for a tree
+const HUT_SHRUB_CLEAR = 0.5;  // wall to stem, for a shrub
+// Raising one is a PROCESS, not a rite you stand through (docs/camp.md):
+//   stake out the ground → set the frame of poles → thatch it, armful by armful.
+// Only the first two happen on the spot; the thatching takes as many trips out to
+// the meadow as the roof needs, so a hut going up is something you watch happen
+// over an evening rather than a thing that appears.
+const STAKE_T       = 4.0;   // seconds to scrape and stake out the ground
+const FRAME_T       = 7.0;   // seconds to bend and set the saplings
+const LAY_T         = 2.8;   // seconds to lay one armful onto the roof
+const SITE_CLAIM_T  = 30;    // seconds a chosen site is held before the claim lapses
+const ABANDON_T     = 420;   // seconds an unfinished hut may go unworked before it's given up
+// Standing huts nobody sleeps in any more. The folk don't leave them to litter
+// the meadow: a derelict is worth something — its frame is seasoned poles, and
+// poles are the same stuff a new hut's frame and a hearth's woodpile want. So a
+// person short of wood will strike one rather than go and fell a live shrub.
+const DERELICT_T    = 900;   // seconds unslept-in before a hut counts as derelict
+const STRIKE_T      = 5.0;   // seconds to pull one down
+const STRIKE_BIAS   = 1.2;   // pull toward striking a derelict when we want poles
+const STRIKE_REACH  = 34;    // how far someone will walk to salvage one
+const ROT_T         = 2400;  // a derelict nobody salvages finally falls in on itself
+// How far out the ring sits is measured from the HUT's own size, not fixed: a
+// 5.6m dome parked at a fixed 4.6m would have its back wall standing in the
+// sitting circle. These are the gaps tried beyond (seat ring + half-width).
+const HUT_RING      = [0.7, 1.6, 2.6];
+const HUTS_PER_FIRE = 6;     // huts one hearth's camp will grow
+const HUT_WARMTH    = 0.55;  // warmth a full roof sheds rain-wise (a lean-to gives 0.38)
+const HUT_REST      = 0.5;   // rest advertised at night — what draws the weary in
+const HUT_CAMP_R    = 26;    // how near a hearth you must be for it to be "your camp"
+const HUT_INDOORS   = 1.35;  // a whole roof draws harder than a tree or a lean-to
+// The wall is solid. A hut is not a bush you drift through: people walk round it,
+// and the only way in is the doorway (which is why the doorway faces the hearth —
+// see the siting above). Each hut's wall is its own radius; this is the margin.
+// A body is not a point. The sprites are ~0.8m wide billboards, and the thatch
+// panels bulge past the nominal wall at their corners, so an occupant parked at
+// wall-minus-a-little still cuts through the roof. Keep a whole body's width.
+const HUT_CLEAR     = 0.85;  // how far inside its wall an occupant is held
+const HUT_BODY      = 0.45;  // and how far outside it anyone shut out is put
+const HUT_DOORA     = 0.52;  // half-angle of the doorway, radians (matches HUT_DOOR in the view)
+const ENTER_HOLD    = 1.6;   // once lined up to go in, how far wide of the door (× HUT_DOORA) before the approach is given up
+const HUT_SLOT_A    = 0.95;  // radians between neighbouring spots round the back wall (5 fit, clear of the door)
+// The roof rots. This is load-bearing, not flavour: without it huts only ever
+// accumulate, and a structure that cannot fall down stops meaning anything.
+const THATCH_DRY    = 1 / 2600; // thatch lost per second in fair weather (~4 days to bare)
+const THATCH_WET    = 4;     // ...times this while it rains — storms are what strip a roof
+const THATCH_LOW    = 0.6;   // below this the roof wants mending
+const THATCH_ARM    = 0.6;   // roof one armful of cut grass restores
+const THATCH_CUT_T  = 3.0;   // seconds of cutting to gather one armful
+const THATCH_ARMS   = 2;     // armfuls a person carries at once
+const THATCH_BIAS   = 1.5;   // pull toward mending your own roof
+const HUT_BUILD_B   = 1.6;   // pull toward raising one when you've nowhere to sleep
+const HUT_SITE_TTL  = 6;     // seconds a chosen hut site is cached (siting is a grid scan)
+const CUT_SPOT_TTL  = 20;    // seconds a chosen patch of thatching grass is kept in mind
+// sleeping — the Lea's first night beat. Turning in is a commitment: the night is
+// slept through unless a real need wakes you (hunger, or the cold).
+const SLEEP_NIGHT  = 0.45;  // how dark before anyone turns in
+const SLEEP_AT     = 0.45;  // rest need at which a roof of your own starts to call
+const SLEEP_WAKE   = 0.22;  // night level at which the camp wakes
+const SLEEP_REST   = 0.30;  // rest drained per second asleep (a fireside seat gives 0.18)
+const SLEEP_WARMTH = 0.06;  // warmth eased per second under a WHOLE roof (a fire gives 0.30)
+const SLEEP_CHILL  = 0.85;  // how much of the night's chill a whole roof keeps off you
+const SLEEP_BIAS   = 0.9;   // pull toward bed at night (must beat dozing at the fire)
+const SLEEP_TURNIN = 0.8;   // you don't take the cold to bed — warm at the fire first
+const SLEEP_BREAK  = 0.95;  // a need past this wakes you and ends the night. Set high on
+                            // purpose: you go to bed with the hunger you have — only real
+                            // desperation turns you out of it.
+
 // No real pathfinding yet: an NPC that can't make headway toward a goal (e.g. a
 // fire across water) gives up on it and — if cold — builds its own fire instead.
 const STUCK_TIME     = 3.5;  // seconds of no progress before we call a goal unreachable
@@ -122,7 +298,7 @@ const RATION_SATIETY = 0.3;  // hunger one ration relieves when eaten
 const EAT_AT         = 0.5;  // hunger level at which we reach into the pack
 const EAT_CD         = 4;    // min seconds between bites (so a pack isn't gulped at once)
 const DEPOSIT_KEEP   = 2;    // rations kept on the person when caching surplus
-const STORE_CAP      = 40;   // a hearth's food cache capacity
+export const STORE_CAP = 40; // a hearth's food cache capacity (read by campfire-view.js for the basket heap)
 const FORAGE_BIAS    = 1.0;  // pull toward gathering, scaled by how empty the pack is
 const GETFOOD_BIAS   = 1.3;  // pull toward the camp cache when hungry & empty-handed
 const STORE_BIAS     = 0.8;  // pull toward caching a full pack at camp
@@ -130,60 +306,27 @@ const STORE_BIAS     = 0.8;  // pull toward caching a full pack at camp
 // cooking: some foraged things can't be eaten raw (roots, acorns, most fungi).
 // People carry them in a separate raw bag, bring them to a lit fire, and simmer
 // them in the hearth pot; the finished stew lands in the shared food cache.
-const COOK_KINDS = new Set(['roots', 'acorns', 'cattail root', 'morels', 'meat']);
+const COOK_KINDS = RAW_KINDS;              // (recipes.js — one list of what must be cooked)
 export const needsCooking = (kind) => COOK_KINDS.has(kind);
 const COOK_TIME  = 22;      // seconds a potful takes to become edible
 const COOK_BIAS  = 1.0;     // pull toward taking raw food to the pot
 const POT_CAP    = 12;      // raw units a pot holds at once
 const STEW_SATIETY  = 0.34; // hunger one cooked portion from the pot relieves (a hearty meal)
 const POT_EAT_RANGE = 3.5;  // how close you must be to the pot to eat from it
+const TEA_WARMTH    = 0.3;  // chill a cup of chamomile tea takes off (recipes.js)
+const BREW_BIAS     = 0.9;  // pull toward brewing chamomile when cold
+const SNACK_BIAS    = 0.5;
+const RESERVE_AT    = 0.8;  // hunger at which the snacks kept in reserve get eaten
+const keptCount = n => countOf(n, 'apples') + countOf(n, 'hazelnuts');  // pull toward topping up the snacks we keep on hand (larder.js)
 const SUP_BIAS      = 1.6;  // pull, when hungry & empty-handed, toward a pot with ready stew
 // a stew's name, by its main ingredient (for the look-at description)
 const DISH_NAME = { mushrooms: 'mushroom stew', morels: 'morel stew', roots: 'root stew',
-  acorns: 'acorn porridge', 'cattail root': 'cattail broth', meat: 'rabbit stew' };
-const dishName = (kind) => DISH_NAME[kind] || `${kind} stew`;
+  acorns: 'acorn porridge', 'cattail root': 'cattail broth', meat: 'rabbit stew', food: 'stew' };
+export const dishName = (kind) => RECIPES[kind] ? kind : recipeFor(kind) || DISH_NAME[kind] || `${kind} stew`;   // a recipe's name, or an ingredient's dish
 
-// gossip: news spreads by talk, so knowledge outruns line-of-sight. Each NPC keeps
-// a small, decaying store of facts — who they've seen (and where), where food
-// grows — and trades the freshest when two of them meet. See docs/gossip.md.
-const GOSSIP_RANGE = 4.5;   // how close two must be to swap news
-const GOSSIP_CD    = 8;     // seconds before a person will gossip again
-const GOSSIP_SWAP  = 2;     // facts copied each way per exchange
-const NEWS_MAX     = 8;     // facts a person carries
-const NEWS_TTL     = 2;     // in-game days before a fact fades from memory
-
-// add/refresh a fact (keyed so newer sightings of the same subject overwrite older)
-function addNews(npc, fact){
-  if (!npc.news) npc.news = new Map();
-  const ex = npc.news.get(fact.key);
-  if (!ex || fact.t > ex.t) npc.news.set(fact.key, fact);
-}
-function pruneNews(npc, now){
-  const m = npc.news; if (!m) return;
-  // reputation & omens linger far longer than a fleeting sighting
-  for (const [k, f] of m) if (now - f.t > (f.kind === 'kind' || f.kind === 'omen' ? NEWS_TTL * 5 : NEWS_TTL)) m.delete(k);
-  const over = m.size - NEWS_MAX;            // past the cap, shed the least valuable first
-  if (over > 0){ const low = [...m.entries()].sort((a, b) => NEWS_RANK(a[1]) - NEWS_RANK(b[1]) || a[1].t - b[1].t);
-    for (let i = 0; i < over; i++) m.delete(low[i][0]); }
-}
-// rank facts for sharing/telling: reputation and food tips are worth more than the
-// constant churn of "who I just saw" (sightings refresh to `now` every frame, so by
-// freshness alone they'd drown everything else out).
-const NEWS_RANK = f => (f.kind === 'omen' ? 3 : f.kind === 'kind' ? 2 : f.kind === 'food' ? 1 : 0);
+// gossip lives in js/gossip.js (addNews / pruneNews / newsFor), told a turn at a time by js/convo.js — see docs/gossip.md
 const STARGAZER_CHANCE = 0.25;   // a quarter of folk read the stars (form & spread omens)
 const OMEN_CD = [40, 100];       // seconds between an astrologer forming a fresh omen
-// copy the choicest few facts from one person to another (no telling someone of themselves)
-function shareNews(from, to){
-  if (!from.news) return;
-  const fresh = [...from.news.values()].sort((x, y) => NEWS_RANK(y) - NEWS_RANK(x) || y.t - x.t);
-  let n = 0;
-  for (const f of fresh){
-    if (n >= GOSSIP_SWAP) break;
-    if (f.subj === to) continue;
-    const ex = to.news && to.news.get(f.key);
-    if (!ex || f.t > ex.t){ addNews(to, { ...f }); n++; }
-  }
-}
 
 // barter: trade food <-> firewood with a neighbour, so a forager and a wood-cutter
 // each end up with both without doing both jobs. A need is met by exchange, not
@@ -208,7 +351,7 @@ const KIN_FREELY   = 0.55;   // generosity floor among kin (they give almost reg
 // fauna & hunting (docs/hunting.md). Rabbits roam, flee, and leave faint tracks; a
 // hungry hunter stalks one and, with luck and a keen eye, catches it — a meat
 // windfall that flows through the pot and the sharing-out (meat is a COOK_KIND).
-const FAUNA_N      = 12;        // rabbits afoot at once
+const FAUNA_N      = 48;        // rabbits afoot at once
 const FLEE_R       = 7;         // how near a threat comes before a rabbit bolts
 const RAB_WANDER   = 0.9;       // grazing pace
 const RAB_FLEE     = 1.9;       // bolting pace (just over a walker's 1.6 — hard but catchable)
@@ -232,119 +375,6 @@ const FLOWER_MAX    = 7;     // flowers needed to complete a crown
 
 const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
 const cap1 = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
-
-// ---------------------------------------------------------------- flame texture
-// A soft teardrop flame on a transparent card, drawn once and reused (additive).
-// A soft, mostly-white teardrop (a luminance mask, hot at the base, feathered to
-// nothing at the pointed tip). It carries little colour of its own so each flame
-// layer can be TINTED — orange body, amber middle, white-hot core — via the
-// material colour and combined additively. Drawn taller than wide for an upward lick.
-function flameTexture(){
-  const w = 32, h = 56, cv = document.createElement('canvas');
-  cv.width = w; cv.height = h;
-  const g = cv.getContext('2d');
-  const grad = g.createRadialGradient(w/2, h*0.74, 1, w/2, h*0.62, h*0.66);
-  grad.addColorStop(0.0,  'rgba(255,255,255,1)');
-  grad.addColorStop(0.32, 'rgba(255,250,235,0.92)');
-  grad.addColorStop(0.66, 'rgba(255,225,195,0.42)');
-  grad.addColorStop(1.0,  'rgba(255,200,170,0)');
-  g.fillStyle = grad;
-  g.beginPath();                                   // teardrop: round base, pointed top
-  g.moveTo(w/2, 1);
-  g.quadraticCurveTo(w*0.99, h*0.52, w*0.5, h*0.98);
-  g.quadraticCurveTo(w*0.01, h*0.52, w/2, 1);
-  g.fill();
-  const t = new THREE.CanvasTexture(cv);
-  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter;   // crisp, no blur (matches the game)
-  t.generateMipmaps = false;
-  return t;
-}
-let FLAME_TEX = null;
-const hexRGB = (h) => [((h >> 16) & 255) / 255, ((h >> 8) & 255) / 255, (h & 255) / 255];
-
-// a grainy ash/charcoal disc for the fire pit — speckled greys with a few ember
-// flecks, and a soft radial alpha so the scorch fades into grass at the rim
-// instead of ending on a hard circle (it's mapped onto the draped ground patch).
-function pitTexture(){
-  const s = 128, cv = document.createElement('canvas'); cv.width = cv.height = s;
-  const g = cv.getContext('2d');
-  g.clearRect(0, 0, s, s);
-  // scorched earth: charred black at the heart, baked & reddened soil around it,
-  // singed ash-grey toward the rim — the burn fades out into the ground.
-  const base = g.createRadialGradient(s/2, s/2, s*0.04, s/2, s/2, s*0.5);
-  base.addColorStop(0.0,  '#100c09');   // charred black centre
-  base.addColorStop(0.32, '#251a12');   // dark char
-  base.addColorStop(0.58, '#3c2417');   // baked, reddened earth ring
-  base.addColorStop(0.82, '#4a4036');   // singed soil & ash
-  base.addColorStop(1.0,  '#564b41');   // scorched dirt, blending out
-  g.fillStyle = base; g.fillRect(0, 0, s, s);
-  // grit: pale ash dust, black charcoal flecks, a scatter of ember sparks
-  for (let i = 0; i < 1600; i++){
-    const x = Math.random() * s, y = Math.random() * s, b = Math.random();
-    g.fillStyle = b < 0.5 ? `rgba(${150 + Math.random()*40|0},${142 + Math.random()*36|0},128,${0.10 + Math.random() * 0.35})`
-      : b < 0.86 ? `rgba(12,10,8,${0.3 + Math.random() * 0.55})`
-      : `rgba(${190 + Math.random() * 55 | 0},${70 + Math.random() * 45 | 0},25,${0.2 + Math.random() * 0.4})`;
-    g.fillRect(x, y, 1 + Math.random() * 2, 1 + Math.random() * 2);
-  }
-  // fade the alpha out toward the edge (keep RGB, mask the disc round + soft)
-  g.globalCompositeOperation = 'destination-in';
-  const grad = g.createRadialGradient(s/2, s/2, s*0.18, s/2, s/2, s*0.5);
-  grad.addColorStop(0,   'rgba(0,0,0,1)');
-  grad.addColorStop(0.7, 'rgba(0,0,0,0.9)');
-  grad.addColorStop(1,   'rgba(0,0,0,0)');
-  g.fillStyle = grad; g.fillRect(0, 0, s, s);
-  g.globalCompositeOperation = 'source-over';
-  const t = new THREE.CanvasTexture(cv);
-  t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;   // crisp, no blur
-  return t;
-}
-let PIT_TEX = null;
-
-// The scorched ground under a hearth, built as a small mesh that DRAPES over the
-// real heightfield: every vertex's Y is sampled from height(), so it lies flush
-// on any slope instead of a flat disc that cuts into the hill on one side and
-// floats on the other. It sits just ABOVE the ground (we can't carve a recess into
-// the coarse terrain — anything dug below it would be hidden by the terrain mesh —
-// so the pit's depth is read from the ash & coals heaped on top, not a dug bowl).
-// Y is relative to the hearth origin (cx,cz) so the mesh parents straight onto the
-// campfire group. UVs are a top-down planar projection, so the pit texture's soft
-// round edge handles the blend into grass.
-const PATCH_LIFT = 0.03;
-function groundPatch(cx, cz, r){
-  const RINGS = 4, SPOKES = 18;
-  const h0 = height(cx, cz);
-  const pos = [], uv = [], idx = [];
-  pos.push(0, PATCH_LIFT, 0); uv.push(0.5, 0.5);            // centre
-  for (let ri = 1; ri <= RINGS; ri++){
-    const f = ri / RINGS, rr = r * f;
-    for (let si = 0; si < SPOKES; si++){
-      const a = si / SPOKES * Math.PI * 2;
-      const dx = Math.cos(a) * rr, dz = Math.sin(a) * rr;
-      pos.push(dx, height(cx + dx, cz + dz) - h0 + PATCH_LIFT, dz);   // drape on the surface
-      uv.push(0.5 + Math.cos(a) * f * 0.5, 0.5 + Math.sin(a) * f * 0.5);
-    }
-  }
-  for (let si = 0; si < SPOKES; si++){                       // centre fan (up-facing winding)
-    const a = 1 + si, b = 1 + (si + 1) % SPOKES;
-    idx.push(0, b, a);
-  }
-  for (let ri = 0; ri < RINGS - 1; ri++){                    // ring quads
-    const base = 1 + ri * SPOKES, next = base + SPOKES;
-    for (let si = 0; si < SPOKES; si++){
-      const ia = base + si, ib = base + (si + 1) % SPOKES;
-      const oa = next + si, ob = next + (si + 1) % SPOKES;
-      idx.push(ia, ob, oa, ia, ib, ob);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  const mat = new THREE.MeshLambertMaterial({ map: PIT_TEX, color: 0xffffff,
-    transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2 });
-  return new THREE.Mesh(geo, mat);
-}
 
 // ------------------------------------------------------------ campfire siting
 // Choosing where to lay a hearth is a small act of SITE REPAIR (Pattern 104):
@@ -393,6 +423,10 @@ function findCampfireSite(cx, cz, trees, R = 30, S = 3){
 // Pattern 181 (THE FIRE) + Pattern 185 (SITTING CIRCLE). A smart object: it
 // advertises warmth always and company at night, and hands out evenly-spaced
 // seats in a ring so a gathering self-arranges.
+//
+// SIM ONLY — no Three.js here. The meshes, flame and light live in
+// js/campfire-view.js (CampfireView), injected by AgentWorld's makeFireView
+// option; headless runs (tools/sim-harness.mjs) simply skip the view.
 export class Campfire {
   constructor(world, x, z, { built = true } = {}){
     this.world = world;
@@ -405,277 +439,16 @@ export class Campfire {
     this.seatArc = 1.15;     // comfortable arc spacing between neighbours (intimate)
     this.arrive = 0.6;       // how close a seat counts as "arrived"
     this.slots = new Map();  // npc -> ring angle
-    this.flicker = 1;
     this.fuel = built ? 0.7 : 0;          // the live flame; an unbuilt hearth isn't lit yet
     this.woodpile = built ? WOOD_START : 0;  // logs stacked nearby — laid as the build finishes
     this.idleT = 0;          // seconds it has burned with nobody near (then it's damped)
-    this.embers = [];        // glowing flecks on the ash, pulsing with the flame
-
-    FLAME_TEX ||= flameTexture();
-    PIT_TEX ||= pitTexture();
-    const g = new THREE.Group();
-    g.position.set(x, height(x, z), z);
-
-    // A hearth is built UP and let DOWN by adding/removing pieces — stones to the
-    // ring, sticks to the wood — not by scaling (that looked rubbery). We lay the
-    // full set once and reveal as many as the gathering warrants (see update). The
-    // reveal order is spread by the golden angle so the ring fills evenly, not one
-    // side first. No two fires are laid the same (style + scatter vary).
-    const rnd = Math.random;
-    this.style = ['teepee', 'cabin', 'pile'][Math.floor(rnd() * 3)];
-    this.fireLevel = 0;                                   // 0..1, eased toward attendance
-    const S = this.structure = new THREE.Group();
-    g.add(S);
-    const GOLD = 2.399963;
-
-    // fire pit: the scorched ground itself, draped over the real slope (always
-    // shown). Not a flat disc — it follows the hill — and a touch wider than the
-    // stone ring, so the char haloes out past it.
-    const h0 = height(x, z);
-    const PIT_R = 1.35;
-    S.add(groundPatch(x, z, PIT_R));
-    // local Y just above the scorched ground at an offset — so the ash, charcoal,
-    // coals and stones rest ON it (and follow the slope) rather than hovering flat.
-    const floorY = (dx, dz) => height(x + dx, z + dz) - h0 + PATCH_LIFT + 0.01;
-
-    // The bed of the pit, built the way a real one settles: a soft layer of grey
-    // ASH (mounded, not flat), angular black CHARCOAL chunks half-sunk in it, and
-    // glowing COALS nestled low among them — hottest at the heart, cooling outward.
-    // Ash + charcoal are always there (a hearth carries its leavings); the coals
-    // are revealed by fireLevel and pulse with the flame (see update).
-
-    // ash: low irregular mounds, paler at the rim, settling toward the centre
-    for (let i = 0, n = 22 + (rnd() * 10 | 0); i < n; i++){
-      const a = rnd() * Math.PI*2, r = Math.pow(rnd(), 0.7) * 0.9;        // denser toward middle
-      const dx = Math.cos(a)*r, dz = Math.sin(a)*r;
-      const g = 0.30 + rnd() * 0.28 + 0.12 * (r / 0.9);                   // darker centre, paler edge
-      const ash = new THREE.Mesh(new THREE.DodecahedronGeometry(0.05 + rnd() * 0.07),
-        new THREE.MeshLambertMaterial({ color: new THREE.Color(g, g * 0.96, g * 0.9) }));
-      ash.position.set(dx, floorY(dx, dz) + 0.01, dz);
-      ash.scale.set(1 + rnd() * 0.5, 0.35 + rnd() * 0.25, 1 + rnd() * 0.5);  // flattened, settled
-      ash.rotation.set(rnd()*3, rnd()*3, rnd()*3); S.add(ash);
-    }
-    // charcoal: charred chunks & burnt log-ends, angular and dark, half-buried
-    const charMat = new THREE.MeshLambertMaterial({ color: 0x1c1815 });
-    for (let i = 0, n = 7 + (rnd() * 4 | 0); i < n; i++){
-      const a = rnd() * Math.PI*2, r = rnd() * 0.62;
-      const dx = Math.cos(a)*r, dz = Math.sin(a)*r;
-      const ch = new THREE.Mesh(new THREE.DodecahedronGeometry(0.07 + rnd() * 0.09), charMat);
-      ch.position.set(dx, floorY(dx, dz), dz);                            // resting in the ash, bottoms buried
-      ch.scale.set(1 + rnd() * 0.8, 0.5 + rnd() * 0.4, 1 + rnd() * 0.8);
-      ch.rotation.set(rnd()*3, rnd()*3, rnd()*3); S.add(ch);
-    }
-    // coals: glowing chunks low in the bed; each remembers its heat (hot at centre)
-    // and a flicker phase, so the bed shimmers unevenly rather than pulsing as one.
-    for (let i = 0; i < 14; i++){
-      const a = rnd() * Math.PI*2, r = Math.pow(rnd(), 1.4) * 0.55;       // clustered at the heart
-      const dx = Math.cos(a)*r, dz = Math.sin(a)*r;
-      const em = new THREE.Mesh(new THREE.DodecahedronGeometry(0.035 + rnd() * 0.05),
-        new THREE.MeshBasicMaterial({ color: 0xff7a2a, fog: false }));
-      em.position.set(dx, floorY(dx, dz) + 0.005, dz);                   // nestled among the char
-      em.rotation.set(rnd()*3, rnd()*3, rnd()*3);
-      em._heat = clamp01(1 - r / 0.55) * (0.6 + rnd() * 0.4);             // centre = hottest
-      em._ph = rnd() * Math.PI * 2;
-      S.add(em); this.embers.push(em);
-    }
-    // stones — a full ring laid down, revealed in an even spread (ring fills, not one side)
-    const stoneMat = new THREE.MeshLambertMaterial({ color: 0x8a8a86 });
-    this.stones = [];
-    for (let i = 0; i < 11; i++){
-      const a = i * GOLD, r = 0.9 + rnd() * 0.07;
-      const dx = Math.cos(a) * r, dz = Math.sin(a) * r;
-      const s = new THREE.Mesh(new THREE.DodecahedronGeometry(0.12 + rnd() * 0.1), stoneMat);
-      // sit each stone on the actual ground at its spot, so the ring rides the
-      // contour around the bowl rather than hovering at one flat height.
-      s.position.set(dx, height(x + dx, z + dz) - h0 + 0.07 + rnd() * 0.06, dz);
-      s.rotation.set(rnd()*3, rnd()*3, rnd()*3); S.add(s); this.stones.push(s);
-    }
-    // the wood, in this fire's style — laid to its largest, revealed stick by stick
-    const logMat = new THREE.MeshLambertMaterial({ color: 0x4a3320 });
-    this.logs = [];
-    // each log records `_top`, roughly how high it reaches, so a pot set over the
-    // fire can hide the fuel that would otherwise poke up through it (see update).
-    if (this.style === 'teepee'){                         // sticks leaning into a cone
-      for (let i = 0; i < 7; i++){
-        const a = i * GOLD;
-        const log = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.95, 0.1), logMat);
-        log.position.set(Math.cos(a)*0.22, 0.42, Math.sin(a)*0.22);
-        log.rotation.z = Math.cos(a)*0.5; log.rotation.x = -Math.sin(a)*0.5;
-        log._top = 0.84;                                   // tall sticks converging up top
-        S.add(log); this.logs.push(log);
-      }
-    } else if (this.style === 'cabin'){                   // crisscrossed log-cabin stack (revealed layer by layer)
-      for (let layer = 0; layer < 3; layer++){
-        const horiz = layer % 2 === 0, y = 0.1 + layer * 0.16;
-        for (const off of [-0.22, 0.22]){
-          const log = new THREE.Mesh(new THREE.BoxGeometry(horiz ? 0.75 : 0.12, 0.12, horiz ? 0.12 : 0.75), logMat);
-          log.position.set(horiz ? 0 : off, y, horiz ? off : 0); log._top = y + 0.06;
-          S.add(log); this.logs.push(log);
-        }
-      }
-    } else {                                              // a rough pile of logs lying flat
-      for (let i = 0; i < 6; i++){
-        const log = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 0.8, 6), logMat);
-        log.rotation.z = Math.PI/2; log.rotation.y = rnd() * Math.PI;
-        log.position.set((rnd()-0.5)*0.35, 0.08 + i * 0.035, (rnd()-0.5)*0.35);
-        log._top = 0.08 + i * 0.035 + 0.07;
-        S.add(log); this.logs.push(log);
-      }
-    }
-    // flame: nested crossed billboards (reads from any angle) — a deep-orange
-    // body, an amber middle and a white-hot core — with small licking tongues and
-    // rising sparks. Each part is given its own phase so the fire DANCES (sways,
-    // leans, stretches, brightens out of step) rather than pulsing as one blob.
-    const mkFlameMat = (hex, op) => new THREE.MeshBasicMaterial({
-      map: FLAME_TEX, color: hex, transparent: true, opacity: op,
-      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false });
-    this.flame = new THREE.Group();
-    this.flameParts = [];
-    const LAYERS = [
-      { w: 0.92, h: 1.30, hex: 0xff4a12, op: 0.80 },   // outer body, deep orange (tallest)
-      { w: 0.60, h: 0.98, hex: 0xff9a2a, op: 0.95 },   // amber middle
-      { w: 0.34, h: 0.66, hex: 0xfff2c4, op: 1.00 },   // white-hot core (lowest, brightest)
-    ];
-    for (const ly of LAYERS){
-      const mat = mkFlameMat(ly.hex, ly.op);
-      const part = new THREE.Group();
-      for (let i = 0; i < 2; i++){                       // crossed pair, omni-directional
-        const q = new THREE.Mesh(new THREE.PlaneGeometry(ly.w, ly.h), mat);
-        q.rotation.y = i * Math.PI / 2; q.position.y = ly.h / 2;
-        part.add(q);
-      }
-      part._ph = rnd() * Math.PI * 2; part._mat = mat; part._rgb = hexRGB(ly.hex);
-      this.flame.add(part); this.flameParts.push(part);
-    }
-    // licking tongues: small flames around the heart that wave and duck in and out
-    this.tongues = [];
-    for (let i = 0; i < 4; i++){
-      const mat = mkFlameMat(0xffb648, 0.85);
-      const q = new THREE.Mesh(new THREE.PlaneGeometry(0.24, 0.5), mat);
-      const a = rnd() * Math.PI * 2;
-      q.position.set(Math.cos(a) * 0.18, 0.85 + rnd() * 0.3, Math.sin(a) * 0.18);
-      q.rotation.y = rnd() * Math.PI;
-      q._ph = rnd() * Math.PI * 2; q._mat = mat; q._baseY = q.position.y;
-      this.flame.add(q); this.tongues.push(q);
-    }
-    // sparks: tiny embers that rise from the heart, drift out and wink out, then respawn
-    this.sparks = [];
-    for (let i = 0; i < 6; i++){
-      const sp = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.05, 0.04),
-        new THREE.MeshBasicMaterial({ color: 0xffcc66, transparent: true,
-          blending: THREE.AdditiveBlending, depthWrite: false, fog: false }));
-      sp._t = rnd(); sp._a = rnd() * Math.PI * 2; sp._r = 0.05 + rnd() * 0.12; sp._spd = 0.55 + rnd() * 0.5;
-      this.flame.add(sp); this.sparks.push(sp);
-    }
-    g.add(this.flame);
-    // warm point light that the (lit) terrain and trees pick up
-    this.light = new THREE.PointLight(0xff7a33, 2.2, 14, 2);
-    this.light.position.set(0, 0.7, 0); g.add(this.light);
-
-    // the camp food cache: a little basket beside the hearth whose heaped contents
-    // grow with the stock. Hidden when empty. (Pattern 181's hearth as camp centre.)
-    this.foodStore = 0;
-    this.basket = new THREE.Group();
-    const weave = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.27, 0.34, 9),
-      new THREE.MeshLambertMaterial({ color: 0x7a5328 }));
-    weave.position.y = 0.17;
-    this.basketHeap = new THREE.Mesh(new THREE.SphereGeometry(0.26, 8, 6),
-      new THREE.MeshLambertMaterial({ color: 0xb2412e }));
-    this.basketHeap.position.y = 0.34;
-    this.basket.add(weave); this.basket.add(this.basketHeap);
-    // sit it on the ground at its OWN offset, not the fire's centre height, so it
-    // doesn't float/sink on a slope (h0 is the hearth-centre height).
-    this.basket.position.set(1.7, height(x + 1.7, z + 0.4) - h0, 0.4); this.basket.visible = false;
-    g.add(this.basket);
-
-    // the cooking pot: a dark cauldron held over the flames, holding whatever raw
-    // ingredients are simmering. Hidden (with its support) when nothing's cooking.
-    // How it's HELD is varied per hearth, so fires don't all look alike:
-    //  · 'rocks'  — the cauldron balanced low on three stout hearth-stones
-    //  · 'tripod' — slung from a lashed tripod of sticks over the flames
-    //  · 'spit'   — hung from a crossbar resting on two forked uprights
-    this.pot = { raw: 0, ready: 0, kind: null, cook: 0 };   // raw units simmering, cooked portions waiting, ingredient, simmer seconds
-    this.potGroup = new THREE.Group();
-    const potMat  = new THREE.MeshLambertMaterial({ color: 0x2b2b2e });
-    const cookWoodMat = new THREE.MeshLambertMaterial({ color: 0x4a3320 });
-    const cookStoneMat = new THREE.MeshLambertMaterial({ color: 0x807d77 });
-    this.cookStyle = ['rocks', 'tripod', 'spit'][Math.floor(rnd() * 3)];
-    let potY;                                               // height of the cauldron's belly centre
-    if (this.cookStyle === 'rocks'){
-      potY = 0.26;                                          // sits low, cradled by the stones
-      for (let i = 0; i < 3; i++){
-        const a = i / 3 * Math.PI*2 + rnd();
-        const st = new THREE.Mesh(new THREE.DodecahedronGeometry(0.16 + rnd() * 0.05), cookStoneMat);
-        st.position.set(Math.cos(a) * 0.28, 0.11, Math.sin(a) * 0.28);
-        st.scale.y = 0.85; st.rotation.set(rnd()*3, rnd()*3, rnd()*3);
-        this.potGroup.add(st);
-      }
-    } else if (this.cookStyle === 'tripod'){
-      potY = 0.52; const apex = 1.18;
-      for (let i = 0; i < 3; i++){
-        const a = i / 3 * Math.PI*2 + 0.3;
-        const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.04, 1.32, 5), cookWoodMat);
-        leg.position.set(Math.cos(a) * 0.42, apex * 0.5, Math.sin(a) * 0.42);   // foot splayed out, top to the apex
-        leg.rotation.z = -Math.cos(a) * 0.33; leg.rotation.x = Math.sin(a) * 0.33;
-        this.potGroup.add(leg);
-      }
-      const hook = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, apex - potY - 0.12, 4), potMat);
-      hook.position.y = (apex + potY + 0.04) / 2; this.potGroup.add(hook);    // a short chain to the rim
-    } else {                                                // spit
-      potY = 0.5; const barY = 0.9;
-      for (let s = -1; s <= 1; s += 2){
-        const up = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.045, barY + 0.12, 5), cookWoodMat);
-        up.position.set(s * 0.52, (barY + 0.12) / 2, 0); up.rotation.z = -s * 0.12;
-        this.potGroup.add(up);
-      }
-      const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.2, 5), cookWoodMat);
-      bar.rotation.z = Math.PI/2; bar.position.y = barY; this.potGroup.add(bar);
-      const hook = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, barY - potY - 0.12, 4), potMat);
-      hook.position.y = (barY + potY + 0.04) / 2; this.potGroup.add(hook);
-    }
-    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 8, 0, Math.PI*2, 0, Math.PI*0.62), potMat);
-    belly.scale.y = 0.8; belly.position.y = potY;
-    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.035, 6, 16), potMat);
-    rim.rotation.x = Math.PI/2; rim.position.y = potY + 0.16;
-    // fuel reaching above here would clip up into the cauldron, so it's hidden
-    // while the pot is set (you cook over coals, not a standing stack of sticks).
-    this._potClear = potY - 0.12;
-    // the broth surface — coloured by the dish, bubbles gently while cooking
-    this._brothY = potY + 0.14;
-    this.potBroth = new THREE.Mesh(new THREE.CircleGeometry(0.25, 14),
-      new THREE.MeshLambertMaterial({ color: 0x6b5230 }));
-    this.potBroth.rotation.x = -Math.PI/2; this.potBroth.position.y = this._brothY;
-    this.potGroup.add(belly); this.potGroup.add(rim); this.potGroup.add(this.potBroth);
-    this.potGroup.position.set(0, 0, 0); this.potGroup.visible = false;
-    g.add(this.potGroup);
-
-    // the woodpile: logs people stack by the hearth, crisscrossed in layers so it
-    // reads as a real stack. We pre-build WOOD_CAP logs and show as many as are
-    // stocked, so the pile visibly grows and shrinks. (Pattern 181 — the hearth
-    // as the camp's stocked centre.)
-    const logMat2 = new THREE.MeshLambertMaterial({ color: 0x5a3d22 });
-    this.woodLogs = [];
-    this.woodpileGroup = new THREE.Group();
-    const perLayer = 3, logLen = 1.0, logR = 0.09, gap = 0.24;
-    for (let layer = 0; this.woodLogs.length < WOOD_CAP; layer++){
-      const horiz = layer % 2 === 0;                  // alternate direction each layer
-      for (let j = 0; j < perLayer && this.woodLogs.length < WOOD_CAP; j++){
-        const log = new THREE.Mesh(new THREE.CylinderGeometry(logR, logR, logLen, 6), logMat2);
-        log.rotation.z = Math.PI/2;                   // lay it on its side (running along x)
-        if (!horiz) log.rotation.y = Math.PI/2;       // odd layers run along z
-        const off = (j - (perLayer-1)/2) * gap;
-        log.position.set(horiz ? 0 : off, logR + layer*logR*2, horiz ? off : 0);
-        this.woodpileGroup.add(log); this.woodLogs.push(log);
-      }
-    }
-    // ground the stack at its own offset so it rests on the slope, not floating
-    // off the hearth-centre height.
-    this.woodpileGroup.position.set(-1.6, height(x - 1.6, z + 0.5) - h0, 0.5);
-    g.add(this.woodpileGroup);
-    this._refreshWoodpile();
-
-    this.group = g;
+    this.foodStore = 0;      // the camp food cache (the basket by the hearth)
+    // the cooking pot: raw units simmering, cooked portions waiting, ingredient, simmer seconds
+    this.pot = { raw: 0, ready: 0, kind: null, cook: 0 };
+    this.view = null;        // CampfireView, set by the injected factory
+    this.group = null;       // the view's THREE.Group (scene handle), if a view exists
   }
+
 
   get lit(){ return this.fuel > 0; }
   get done(){ return this.built >= 1; }
@@ -690,51 +463,47 @@ export class Campfire {
     return this.built >= 1;
   }
   needsWood(){ return this.woodpile < WOOD_LOW; }   // the pile wants restocking
-  addWood(logs){ this.woodpile = Math.min(WOOD_CAP, this.woodpile + logs); this._refreshWoodpile(); }
-  extinguish(){ this.fuel = 0; }   // damped out; update() hides the flame & kills the light next frame
-  // show as many stacked logs as we have wood (bottom layers fill first => it grows up)
-  _refreshWoodpile(){
-    const n = Math.min(this.woodpile | 0, this.woodLogs.length);
-    for (let i = 0; i < this.woodLogs.length; i++) this.woodLogs[i].visible = i < n;
-  }
+  addWood(logs){ this.woodpile = Math.min(WOOD_CAP, this.woodpile + logs); }
+  extinguish(){ this.fuel = 0; }   // damped out; the view hides the flame & kills the light next frame
 
-  // shared food cache at the hearth
+  // shared food cache at the hearth (the view mirrors it into the basket each frame)
   hasFood(){ return this.foodStore > 0; }
-  addFood(n){ this.foodStore = Math.min(STORE_CAP, this.foodStore + n); this._refreshBasket(); }
-  takeFood(n){ const got = Math.min(this.foodStore, n); this.foodStore -= got; this._refreshBasket(); return got; }
-  _refreshBasket(){
-    this.basket.visible = this.foodStore > 0;
-    const f = Math.min(1, this.foodStore / STORE_CAP);
-    this.basketHeap.scale.setScalar(0.5 + 0.9 * f);
-  }
+  addFood(n){ this.foodStore = Math.min(STORE_CAP, this.foodStore + n); }
+  takeFood(n){ const got = Math.min(this.foodStore, n); this.foodStore -= got; return got; }
 
   // the cooking pot: add raw ingredients (returns how many were accepted), and a
   // look-at description of what's simmering. The pot only cooks over a lit fire.
-  cook(kind, n){
+  cook(kind, n, by = null){
     const p = this.pot;
     const take = Math.min(n | 0, POT_CAP - p.raw - p.ready);
     if (take <= 0) return 0;
-    if (p.raw === 0 && p.ready === 0){ p.kind = kind; p.cook = 0; }   // fresh pot takes its name
+    if (p.raw === 0 && p.ready === 0){ p.kind = kind; p.cook = 0; p.cooks = new Map(); startPot(p, kind); }   // a fresh pot: its dish (recipes.js)
+    else if (!this.accepts(kind)) return 0;
+    if (by){ if (!p.cooks) p.cooks = new Map(); p.cooks.set(by, (p.cooks.get(by) || 0) + take); }   // who made it (talk credits them)
     p.raw += take;
-    this._refreshPot();
     return take;
   }
+  // will this go in the pot? An empty pot takes anything; a dish under way only its own base
+  accepts(kind){
+    const p = this.pot;
+    if (p.raw + p.ready >= POT_CAP) return false;
+    if (p.raw + p.ready === 0) return true;
+    const r = RECIPES[p.recipe];
+    return r ? r.base.includes(kind) && p.ready === 0 : p.kind === kind;
+  }
+  isTea(){ const r = RECIPES[this.pot.recipe]; return !!(r && r.warms); }
+  // whoever put the most into the pot: it's their stew
+  potCook(){ const c = this.pot.cooks; let best = null, n = 0; if (c) for (const [k, v] of c) if (v > n){ n = v; best = k; } return best; }
   // eat one cooked portion straight from the pot (the communal meal); 0 if none ready
+  // eat one portion; returns its quality (0..1, recipes.js), or 0 if there's none
   takeStew(){
     if (this.pot.ready <= 0) return 0;
+    const q = this.pot.readyQ ?? 1;
     this.pot.ready -= 1;
-    if (this.pot.raw <= 0 && this.pot.ready <= 0) this.pot.kind = null;
-    this._refreshPot();
-    return 1;
+    if (this.pot.raw <= 0 && this.pot.ready <= 0){ this.pot.kind = null; this.pot.recipe = null; this.pot.readyQ = null; }
+    return Math.max(0.05, q);
   }
   potReady(){ return this.pot.ready > 0; }
-  _refreshPot(){
-    const p = this.pot;
-    this.potGroup.visible = (p.raw + p.ready) > 0;
-    const tint = { mushrooms: 0x7a5a3a, morels: 0x5a3f2a, roots: 0xa97f43,
-      acorns: 0x8a6a3a, 'cattail root': 0x9c8a5a }[p.kind] || 0x6b5230;
-    this.potBroth.material.color.setHex(tint);
-  }
   // fuller descriptions for the inspect dialog (E on the fire) — read live each call
   potReport(){
     const p = this.pot;
@@ -835,115 +604,263 @@ export class Campfire {
     if (this.fuel < FUEL_LOW && this.woodpile > 0){
       this.woodpile -= 1;
       this.fuel = Math.min(FUEL_CAP, this.fuel + FUEL_PER_LOG);
-      this._refreshWoodpile();
-    }
-    this.flicker += (Math.random() - 0.5) * 8 * dt;
-    this.flicker = clamp01(this.flicker * 0.9 + 0.1 * (0.8 + Math.random() * 0.4));
-    const f = 0.75 + this.flicker * 0.5;
-    const fuelSize = Math.min(1, this.fuel * 2.5);        // flame shrinks as fuel runs low
-
-    // the hearth is built up / let down by ADDING & REMOVING pieces (not scaling):
-    // a lone fire is a few stones and sticks, a gathering has a full ring and a
-    // proper stack. The level eases (so pieces don't flicker on/off at the margin).
-    let near = 0;
-    for (const n of this.world.npcs) if (Math.hypot(n.x - this.x, n.z - this.z) < this.ringR + 1.5) near++;
-    this.fireLevel += (Math.min(1, near / 6) - this.fireLevel) * Math.min(1, dt * 0.4);
-    const L = this.fireLevel;
-    const B = this.built;     // < 1 while the build ritual is still laying the hearth
-    // while building, pieces appear in order — hearthstones (stage 1), then the wood
-    // (stage 2) — driven by build progress; once finished, by the gathering's size.
-    const styleMaxLogs = this.style === 'cabin' ? 6 : this.style === 'teepee' ? 7 : 6;
-    const styleFullLogs = this.style === 'cabin' ? (1 + Math.round(L * 2)) * 2   // 1–3 layers
-      : this.style === 'teepee' ? 3 + Math.round(L * 4) : 2 + Math.round(L * 4);
-    const nStones = B < 1 ? Math.round(5 * clamp01(B / 0.30)) : 5 + Math.round(L * 6);
-    for (let i = 0; i < this.stones.length; i++) this.stones[i].visible = i < nStones;
-    const nLogs = B < 1 ? Math.round(styleMaxLogs * clamp01((B - 0.25) / 0.35)) : styleFullLogs;
-    // when a pot is set over the fire, hide fuel that would poke up into it —
-    // cooking happens over the coals, with the tall stack burnt down.
-    const potted = (this.pot.raw + this.pot.ready) > 0;
-    for (let i = 0; i < this.logs.length; i++)
-      this.logs[i].visible = i < nLogs && !(potted && this.logs[i]._top > this._potClear);
-    const nEmber = 4 + Math.round(L * 10);     // a lone fire glows with a few coals; a big one, a full bed
-
-    // the flame itself is fluid, so it may grow with the wood (eased L) — that reads
-    // natural, unlike scaling the stones. Light reach follows it.
-    const sz = fuelSize * (0.7 + 0.9 * L);
-    this.flame.visible = this.lit;
-    this.light.intensity = (1.8 + 1.4 * f) * sz;
-    this.light.distance = 11 + 8 * L;                     // a big fire throws light further
-    // cap flame height to just below the pot base when cooking (pot visible = potted);
-    // 1.30 is the outer billboard layer height. This keeps flame under the cauldron.
-    const flameH = potted ? this._potClear / 1.30 : sz;
-    this.flame.scale.set(sz, flameH, sz);                 // overall size; the dance is per-part below
-
-    if (this.lit){
-      this._ft = (this._ft || 0) + dt;
-      const t = this._ft;
-      // each nested body layer waves on its own phase: lean, side-sway, vertical
-      // stretch and a brightness pulse — all out of step, so the fire flickers alive.
-      for (const part of this.flameParts){
-        const ph = part._ph;
-        part.scale.y = 1 + 0.24 * Math.sin(t * 7 + ph) * f;
-        part.scale.x = 1 + 0.10 * Math.sin(t * 9 + ph * 1.3);
-        part.rotation.z = 0.10 * Math.sin(t * 5 + ph);
-        part.position.x = 0.05 * Math.sin(t * 6 + ph * 1.7);
-        const b = 0.6 + 0.55 * f;
-        part._mat.color.setRGB(part._rgb[0] * b, part._rgb[1] * b, part._rgb[2] * b);
-      }
-      // tongues lick upward and occasionally duck out of sight
-      for (const q of this.tongues){
-        const ph = q._ph, s = 0.5 + 0.5 * Math.sin(t * 8 + ph);
-        q.visible = Math.sin(t * 3 + ph) > -0.35;
-        q.scale.y = 0.7 + 0.7 * s;
-        q.position.y = q._baseY + 0.14 * s;
-        q.rotation.z = 0.28 * Math.sin(t * 6 + ph);
-        const b = 0.55 + 0.6 * f;
-        q._mat.color.setRGB(b, b * 0.68, b * 0.22);
-      }
-      // sparks ride up from the heart, drift outward and fade, then respawn at the base
-      const sparking = this.fuel > 0.25;
-      for (const sp of this.sparks){
-        sp._t += dt * sp._spd;
-        if (sp._t > 1){ sp._t -= 1; sp._a = Math.random() * Math.PI * 2; sp._r = 0.05 + Math.random() * 0.12; sp._spd = 0.55 + Math.random() * 0.5; }
-        const life = sp._t, fade = 1 - life;
-        sp.visible = sparking;
-        sp.position.set(Math.cos(sp._a) * sp._r * (1 + life * 1.5), 0.7 + life * 1.5, Math.sin(sp._a) * sp._r * (1 + life * 1.5));
-        sp.material.color.setRGB(fade, fade * 0.55, fade * 0.12);
-        sp.scale.setScalar(0.5 + 0.9 * fade);
-      }
-    }
-    // the coal bed: each coal glows around its own heat (hot at the heart) with its
-    // own flicker, so the bed shimmers unevenly — deep red at the edge, near
-    // white-orange at the centre — and fades to black when the fire is out.
-    const eg = this.lit ? 0.45 + 0.5 * f : 0;
-    const ct = this._ft || 0;
-    for (let i = 0; i < this.embers.length; i++){
-      const em = this.embers[i];
-      em.visible = this.lit && i < nEmber;
-      if (!em.visible) continue;
-      const flick = 0.78 + 0.22 * Math.sin(ct * 4 + em._ph);
-      const v = clamp01(eg * em._heat * flick + 0.06);
-      em.material.color.setRGB(Math.min(1, 0.55 + v * 0.7), v * v * 0.7, v * v * v * 0.3);
     }
 
     // simmer the pot — only over a live flame. When done, the raw turns to ready
     // portions that sit in the pot to be eaten from (not tipped into the cache).
-    if (this.pot.raw > 0 && this.lit && dt > 0){
-      this.pot.cook += dt;
-      const bub = 0.5 + 0.5 * Math.sin(this._t = (this._t || 0) + dt * 6);  // gentle bubbling
-      this.potBroth.position.y = this._brothY + bub * 0.015;
-      if (this.pot.cook >= COOK_TIME){                     // done: raw → ready stew
-        this.pot.ready += this.pot.raw;
-        this.pot.raw = 0; this.pot.cook = 0;
-        this._refreshPot();
-      }
-    }
+    // Each dish is worked through step by step by whoever's at the fire and knows it.
+    stepPot(this, this.world, dt);
 
     // is this a night gathering? (lit, dark out, enough folk actually seated round it)
     let seated = 0;
     for (const n of this.world.npcs)
       if (n.sitting && Math.hypot(n.x - this.x, n.z - this.z) < this.ringR + 2) seated++;
     this.gathering = this.lit && this.world.night > NIGHT_GATHER && seated >= GATHER_MIN;
+
+    this.view?.update(dt);           // the meshes mirror the new state (if we have any)
+  }
+}
+
+// ------------------------------------------------------------------- shelter
+// A lean-to: raised quickly from one shrub's worth of poles + a bark slab.
+// NPCs build one near the fire when rain is heavy enough and nothing else covers
+// them. Faces toward the nearest fire (the open front draws the warmth + company
+// of the hearth while the slab sheds the rain — ethnographically accurate, see
+// docs/shelters.md). Capacity LEAN_CAP; once built, it persists.
+// SIM ONLY — the lean-to's meshes live in js/campfire-view.js (ShelterView).
+class Shelter {
+  constructor(world, x, z, angle = 0){
+    this.world = world; this.x = x; this.z = z; this.built = 0;
+    this.reach = 1.3;   // within this radius = sheltered
+    this.angle = angle; // open front faces the nearest fire (read by the view)
+    this.view = null;   // ShelterView, set by the injected factory
+    this.group = null;  // the view's THREE.Group (scene handle), if a view exists
+  }
+
+  get done(){ return this.built >= 1; }
+  raise(dt){
+    this.built = Math.min(1, this.built + dt / LEAN_BUILD_T);
+    this.view?.sync();   // grows from ground up while being raised
+    return this.built >= 1;
+  }
+
+  // number of NPCs currently inside (used to cap occupancy)
+  _occ(){ return this.world.npcs.filter(n => Math.hypot(n.x - this.x, n.z - this.z) < this.reach).length; }
+
+  advertise(rain){
+    if (rain < 0.05 || !this.done) return {};
+    if (this._occ() >= LEAN_CAP) return {};
+    return { warmth: LEAN_WARMTH * rain };
+  }
+
+  satisfy(npc, dt){
+    npc.sheltered = true;
+    const rain = this.world.rain || 0;
+    npc.needs.warmth = clamp01(npc.needs.warmth - LEAN_WARMTH * 0.6 * rain * dt);
+  }
+}
+
+// ----------------------------------------------------------------------- hut
+// The settled shelter: a bent-sapling dome thatched with cut grass, raised on the
+// ring around a hearth with its doorway facing the fire. Four events hang off it
+// (docs/camp.md) — raising it, mending its roof, sheltering under it when rain
+// catches you at camp, and turning in for the night. The roof decays and must be
+// rethatched, so a hut is a thing people keep rather than a thing people place.
+// Ownership is USE-RIGHT, not title (Pat. 79): the builder's while they sleep in
+// it, open to their kin, and `lastUsed` is what a lapsing claim will read.
+// SIM ONLY — the meshes live in js/campfire-view.js (HutView).
+class Hut {
+  constructor(world, x, z, angle, owner, fire, rad = HUT_RAD[0]){
+    this.world = world; this.x = x; this.z = z; this.angle = angle;
+    this.fire = fire || null;      // the hearth whose ring it stands on
+    this.rad = rad;                // half-width — this hut's own size
+    // Everything a hut costs and holds follows from how big it is.
+    this.cap       = Math.max(2, Math.round(rad * 1.8));   // sleepers
+    this.logsNeed  = Math.max(2, Math.round(rad * 2.0));   // poles for the frame
+    this.loadsNeed = Math.max(2, Math.round(rad * 2.4));   // armfuls of thatch for the roof
+    // the three stages of raising it
+    this.staked = 0;               // 0..1 ground scraped and marked out
+    this.frame  = 0;               // 0..1 saplings bent and set
+    this.loads  = 0;               // armfuls laid so far, of loadsNeed
+    // what's been brought and not yet used: poles for the frame (a trip at a time,
+    // by anyone of the household), and thatch cut before the frame was up
+    this.poles = 0; this.thatchPile = 0;
+    this.thatch = 0;               // 0..1 roof — rises as it's laid, then decays
+    this.owner = owner || null;    // whoever staked it
+    this.kin = owner ? owner.group : null;   // their family/clan may shelter here too
+    this.lastUsed = world.time;
+    this.idleT = 0;                // seconds since anyone last worked on the raising
+    this.unusedT = 0;              // seconds since anyone last sheltered or slept here
+    this.beds = new Set();         // who sleeps here — a household, not the whole clan
+    this.view = null;              // HutView, set by the injected factory
+    this.group = null;             // the view's THREE.Group (scene handle), if a view exists
+    this._synced = -1;             // thatch level the view was last told about
+  }
+
+  // geometry, all off the one radius
+  get wall(){ return this.rad; }                  // so tests can ask, without exporting constants
+  get inner(){ return Math.max(0.2, this.rad - HUT_CLEAR); }
+  get reach(){ return this.rad + 0.15; }          // within this = inside
+  get done(){ return this.staked >= 1 && this.frame >= 1 && this.loads >= this.loadsNeed; }
+  // 0..1 for the view: the frame is the first 45% of the raising, thatch the rest
+  get built(){ return 0.45 * this.frame + 0.55 * Math.min(1, this.loads / this.loadsNeed); }
+  // How well the roof actually WORKS, as against how full it looks. People
+  // rethatch a leaking roof, not a tidy one, so thatch settles at an equilibrium
+  // somewhere below full — and a roof at that level should still be a roof. Only
+  // a badly gone one stops keeping the weather out.
+  get roof(){ return clamp01(this.thatch / THATCH_LOW); }
+
+  // ---- the raising, stage by stage -------------------------------------------
+  // Each returns true when that stage is finished. The brain calls whichever one
+  // the hut is up to; between them the builder is free to go and fetch what the
+  // next stage needs, which is what makes this a process rather than a rite.
+  stakeOut(dt){
+    this.idleT = 0;
+    this.staked = Math.min(1, this.staked + dt / STAKE_T);
+    this.view?.sync();
+    return this.staked >= 1;
+  }
+  setFrame(dt){
+    this.idleT = 0;
+    this.frame = Math.min(1, this.frame + dt / FRAME_T);
+    if (this.frame >= 1) while (this.thatchPile > 0 && this.loads < this.loadsNeed){ this.thatchPile--; this.layThatch(); }   // the waiting thatch goes on
+    this.view?.sync();
+    return this.frame >= 1;
+  }
+  // a trip's worth brought to the hut and left there (poles, or thatch before the frame stands)
+  addPoles(n){ this.idleT = 0; this.poles += n; }
+  addThatch(n){
+    this.idleT = 0;
+    if (this.frame >= 1) for (let i = 0; i < n && this.loads < this.loadsNeed; i++) this.layThatch();
+    else this.thatchPile += n;
+  }
+  // lay one armful onto the roof. While the hut is going up this counts toward
+  // the courses it still needs; once it stands, the same act mends it.
+  layThatch(){
+    this.idleT = 0;
+    if (this.loads < this.loadsNeed){
+      this.loads++;
+      this.thatch = Math.min(1, this.loads / this.loadsNeed);
+    } else {
+      this.thatch = clamp01(this.thatch + THATCH_ARM);
+    }
+    this._synced = this.thatch;
+    this.view?.sync();
+  }
+  // Nobody's home, and nobody has been for a long while. A hut is only derelict
+  // once its own people have stopped using it — kin coming and going keeps it
+  // alive, which is what makes a lived-in camp look different from a left one.
+  get derelict(){ return this.unusedT > DERELICT_T; }
+  // What pulling it down yields. The poles are in the frame, so a hut that never
+  // got that far is just stakes and is worth nothing.
+  get salvage(){ return this.frame >= 1 ? this.logsNeed : 0; }
+
+  // what this hut is waiting for: 'stake' | 'frame' | 'thatch' | null
+  needs(){
+    if (this.staked < 1) return 'stake';
+    if (this.frame < 1) return 'frame';
+    if (this.loads < this.loadsNeed) return 'thatch';
+    return this.thatch < THATCH_LOW ? 'thatch' : null;
+  }
+  // whose hut is this? Yours if you raised it, or if its owner is your kin. This
+  // is the RAIN test — anyone's kin may duck under a roof in a downpour.
+  mayUse(npc){ return !this.owner || this.owner === npc || (this.kin && npc.group === this.kin); }
+  // ...but SLEEPING is by bed, and a hut holds a household's worth. A clan bigger
+  // than one roof raises a second one — which is what makes a camp a ring of huts
+  // rather than a single shed, and what puts kin next to kin on that ring.
+  bedIn(npc){ return this.beds.has(npc) || (this.mayUse(npc) && this.beds.size < this.cap); }
+  claimBed(npc){ if (!this.beds.has(npc) && this.beds.size < this.cap) this.beds.add(npc); }
+  // occupants other than `npc` (capacity is a family's worth, not a crowd's)
+  _occ(npc){
+    let c = 0;
+    // own scratch array: the shared one may be mid-iteration in the caller above us
+    for (const o of this.world.near(this.x, this.z, this.reach, this._nearBuf || (this._nearBuf = [])))
+      if (o !== npc) c++;
+    return c;
+  }
+  hasRoom(npc){ return this._occ(npc) < this.cap; }
+
+  // ---- the wall, the door, and getting in ------------------------------------
+  // Bearing from the hut out to (x,z), measured against the way the door faces.
+  // 0 = straight out through the doorway.
+  doorOffset(x, z){
+    let d = Math.atan2(x - this.x, z - this.z) - this.angle;
+    while (d >  Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  }
+  atDoor(x, z){ return Math.abs(this.doorOffset(x, z)) < HUT_DOORA; }
+  // the spot just outside the doorway — where you stand before stepping in
+  doorMouth(){
+    return { x: this.x + Math.sin(this.angle) * (this.rad + 0.55),
+             z: this.z + Math.cos(this.angle) * (this.rad + 0.55) };
+  }
+  // Where inside someone settles. Spots run round the BACK of the floor, facing
+  // the door, the first at the very back and the rest fanning out to either side
+  // — so a household lies along the far wall looking out at the fire, rather
+  // than everyone stopping on the threshold the moment they are "in". Kept per
+  // person while they are coming or staying; a spot is freed when they go.
+  spot(npc){
+    const slots = this._slots || (this._slots = new Map());
+    let k = slots.get(npc);
+    if (k === undefined){
+      for (const [o] of slots) if (o._hutIn !== this && o._hutWant !== this) slots.delete(o);
+      const used = new Set(slots.values());
+      k = 0; while (used.has(k)) k++;
+      slots.set(npc, k);
+    }
+    const off = k === 0 ? 0 : Math.ceil(k / 2) * (k % 2 ? 1 : -1) * HUT_SLOT_A;
+    const a = this.angle + Math.PI + off, r = this.inner * 0.8;
+    return { x: this.x + Math.sin(a) * r, z: this.z + Math.cos(a) * r };
+  }
+  // Where someone heading for this hut should actually walk. Already inside, or
+  // lined up with the doorway → on in (to their spot, if they are staying, else
+  // the middle). Otherwise round to the door mouth first, so they arrive at the
+  // opening rather than at the back wall.
+  // Lined up but still outside, they make for the THRESHOLD (just inside the door,
+  // on its axis), not their spot at the back: walking at the back spot from the
+  // edge of the door's wedge took them diagonally out of it again, the goal flipped
+  // to the door mouth, which put them back in — a flicker, every frame, at the door.
+  // And once lined up they're committed (npc._entering) until they're in or have
+  // drifted well wide of it, so the wedge's edge can't make them chatter.
+  entry(npc, stay = false){
+    const d = Math.hypot(npc.x - this.x, npc.z - this.z);
+    if (d < this.rad){ npc._entering = null; return stay ? this.spot(npc) : { x: this.x, z: this.z }; }
+    const off = Math.abs(this.doorOffset(npc.x, npc.z));
+    if (off < HUT_DOORA || (npc._entering === this && off < HUT_DOORA * ENTER_HOLD)){ npc._entering = this; return this.threshold(); }
+    if (npc._entering === this) npc._entering = null;
+    return this.doorMouth();
+  }
+  threshold(){
+    return { x: this.x + Math.sin(this.angle) * (this.rad - 0.7), z: this.z + Math.cos(this.angle) * (this.rad - 0.7) };
+  }
+
+  // the roof rots — slowly in fair weather, fast under rain
+  tick(dt, rain){
+    this.unusedT += dt;          // reset by anyone sheltering or sleeping here
+    if (!this.done) return;      // a roof still going up is gaining, not losing
+    this.thatch = clamp01(this.thatch - THATCH_DRY * dt * (1 + THATCH_WET * rain));
+    if (Math.abs(this.thatch - this._synced) > 0.02){ this._synced = this.thatch; this.view?.sync(); }
+  }
+
+  // shelter from rain at camp — a whole roof sheds far more than a lean-to, a
+  // rotted one barely more than a tree
+  shelter(npc, dt){
+    npc.sheltered = true; this.unusedT = 0;
+    const rain = this.world.rain || 0;
+    npc.needs.warmth = clamp01(npc.needs.warmth - HUT_WARMTH * 0.6 * this.roof * rain * dt);
+    this.lastUsed = this.world.time;
+  }
+
+  // the night: rest comes back fast, warmth only trickles (no fire in here — this
+  // is why someone wakes cold and goes out to the hearth, which is exactly right)
+  sleep(npc, dt){
+    this.claimBed(npc); this.unusedT = 0;
+    npc.sleeping = true; npc.sitting = true; npc.sheltered = true; npc.moving = false;
+    npc._roof = this.roof;                      // read next frame by the warmth drift
+    npc.needs.rest   = clamp01(npc.needs.rest   - SLEEP_REST   * dt);
+    npc.needs.warmth = clamp01(npc.needs.warmth - SLEEP_WARMTH * this.roof * dt);
+    this.lastUsed = this.world.time;
   }
 }
 
@@ -954,7 +871,7 @@ export class Campfire {
 class Quarry {
   constructor(world, x, z){
     this.world = world; this.x = x; this.z = z;
-    this.heading = Math.random() * Math.PI * 2;
+    this.heading = world.rng() * Math.PI * 2;
     this.alive = true; this.moving = false; this.fleeing = false;
     this.respawnT = 0; this._reT = 0; this._tx = x; this._tz = z;
   }
@@ -969,7 +886,8 @@ class Quarry {
     if (!this.alive){ this.moving = false; this.respawnT -= dt; if (this.respawnT <= 0){ this._relocate(); this.alive = true; } return; }
     // nearest threat: any NPC, plus the registered player position (world.threat)
     let tx = null, tz = null, td = FLEE_R;
-    for (const n of this.world.npcs){ const d = Math.hypot(n.x - this.x, n.z - this.z); if (d < td){ td = d; tx = n.x; tz = n.z; } }
+    for (const n of this.world.near(this.x, this.z, FLEE_R)){   // binned: only folk close enough to spook us
+      const d = Math.hypot(n.x - this.x, n.z - this.z); if (d < td){ td = d; tx = n.x; tz = n.z; } }
     const pt = this.world.threat;
     if (pt){ const d = Math.hypot(pt.x - this.x, pt.z - this.z); if (d < td){ td = d; tx = pt.x; tz = pt.z; } }
     this.fleeing = tx !== null;
@@ -1006,7 +924,9 @@ class Quarry {
 class Brain {
   constructor(world, npc){
     this.world = world; this.npc = npc;
-    npc.needs = { warmth: rand(), food: rand(), company: rand(), rest: rand() };
+    const r = world.rng;   // starting needs are part of who a person is — seeded
+    npc.needs = { warmth: r(), food: r(), company: r(), rest: r() };
+    npc.reverence = r() * 0.4;   // the pull toward the great trees, seeded, slow to build
     this.target = null;          // current candidate {kind, x, z, ref, satisfy}
     this.decideT = Math.random() * 0.6;
     this.wanderH = Math.random() * Math.PI*2; this.wanderT = 0;
@@ -1025,11 +945,23 @@ class Brain {
     this._building = null;         // a hearth we're mid-ritual laying (commit until done)
     this._ferry = null;            // an active boat crossing (commit until landed) — see ferryStep
     this._ferryCd = FERRY_CD[0] + Math.random() * (FERRY_CD[1] - FERRY_CD[0]);
+    this._buildingShel = null;     // a lean-to we're mid-ritual raising (commit until done)
+    this._buildingHut = null;      // a hut we're mid-ritual raising (commit until done)
+    this._sleep = null;            // the hut we've turned in for the night in (commit until dawn)
+    this._hutSite = null; this._hutSiteT = 0;   // cached siting scan (see choose)
+    this._cutSpot = null; this._cutSpotT = 0;   // the patch of thatching grass we're working
   }
 
   step(dt){
     const npc = this.npc, w = this.world, n = npc.needs;
+    let ct;                                       // a talk's hold on our feet (convo.js steer)
+    const prevSheltered = npc.sheltered;         // read before reset; Shelter.satisfy re-sets this frame
+    const prevSleeping = npc.sleeping;           // likewise — Hut.sleep re-sets it
+    const roof = prevSleeping ? (npc._roof || 0) : 0;   // how whole the roof over us is
+    npc.sheltered = false;
     npc.moving = false; npc.chopping = false;   // set true only while felling a shrub
+    npc.sleeping = false;                       // set true only by Hut.sleep, once abed
+    this._hutSiteT -= dt; this._cutSpotT -= dt;
 
     // 0. let old "unreachable" grudges expire (a fire may be reachable from elsewhere)
     for (const [f, left] of this._blacklist){
@@ -1040,10 +972,17 @@ class Brain {
     // person's own temperament — so individuals hunger/chill/tire/lonely at their
     // own rates (the loner barely grows lonely; the glutton hungers fast).
     const p = npc.persona || DEFAULT_PERSONA;
-    n.warmth  = clamp01(n.warmth  + DRIFT.warmth  * dt * (0.4 + 1.6 * w.night) * p.warmth);
+    const rainChill = prevSheltered ? 1 : (1 + w.rain * RAIN_CHILL);
+    // Asleep under a roof, the night's chill is largely kept off — but only in
+    // proportion to the thatch. A whole roof and you sleep the night through; a
+    // rotted one and you wake cold and go out to the fire, which is exactly the
+    // pressure that should send someone to cut an armful of grass in the morning.
+    const sleepChill = 1 - SLEEP_CHILL * roof;
+    n.warmth  = clamp01(n.warmth  + DRIFT.warmth  * dt * (0.4 + 1.6 * w.night) * p.warmth * rainChill * sleepChill);
     n.food    = clamp01(n.food    + DRIFT.food    * dt * p.food);
     n.company = clamp01(n.company + DRIFT.company * dt * p.company);
     n.rest    = clamp01(n.rest    + DRIFT.rest    * dt * p.rest);
+    npc.reverence = clamp01((npc.reverence || 0) + REV_DRIFT * dt * (p.perception || 1));
 
     npc._huntCd = (npc._huntCd || 0) - dt;   // cooldown between pounce attempts
 
@@ -1054,22 +993,57 @@ class Brain {
       npc._omenCd -= dt;
       if (w.night > 0.5 && npc._omenCd <= 0){
         npc._omenCd = OMEN_CD[0] + Math.random() * (OMEN_CD[1] - OMEN_CD[0]);
-        const text = makeOmen({ moonLon: w.moonLon || 0, sunLon: w.sunLon || 0, illum: w.moonIllum || 0 });
-        addNews(npc, { kind: 'omen', key: 'omen', text, x: npc.x, z: npc.z, t: w.time });
+        const o = readOmen({ moonLon: w.moonLon || 0, sunLon: w.sunLon || 0, illum: w.moonIllum || 0 });
+        addNews(npc, { kind: 'omen', key: 'omen', text: o.text, house: o.house, tenor: o.tenor, x: npc.x, z: npc.z, t: w.time });
+      }
+    }
+
+    // 1a. what's carried goes off in time (larder.js) — berries soonest
+    if ((this._spoilT = (this._spoilT || 0) - dt) <= 0){
+      this._spoilT = 5;
+      const lost = spoil(npc, w.time);
+      if (lost){ npc._spoiled = { n: lost, t: w.time }; if (w.potStats) w.potStats.spoiled = (w.potStats.spoiled || 0) + lost; }
+    }
+
+    // 1a'. a craving for a dish (plans.js) — not hunger — becomes a plan to make it,
+    // once the body's needs aren't pressing and there's no such plan already
+    if ((this._craveT = (this._craveT || 0) - dt) <= 0){
+      this._craveT = 8;
+      if (mayCrave(npc, w.time) && n.food < 0.8 && n.warmth < 0.85 && !firstPlan(npc, 'dish') && !firstPlan(npc, 'task')){
+        const dish = strongestCraving(npc, w.time);
+        if (dish){ addPlan(npc, { kind: 'dish', dish, until: w.time + 0.3 + 0.4 * foresight(npc) }); craved(npc, w.time);
+          if (w.potStats) w.potStats.craved = (w.potStats.craved || 0) + 1; }
       }
     }
 
     // 1b. eat when hungry. A communal pot at hand is supped first — slowly, a
     // portion at a time, so a stewful is shared down to empty — else the pack.
     npc.eatCd -= dt;
-    if (n.food > EAT_AT && npc.eatCd <= 0){
+    if ((n.food > EAT_AT || (n.food > 0.15 && firstPlan(npc, 'meal'))) && npc.eatCd <= 0){   // (a shared meal: eat with the others)
       let ate = false;
       for (const f of w.fires){
-        if (f.pot.ready > 0 && Math.hypot(f.x - npc.x, f.z - npc.z) < POT_EAT_RANGE && f.takeStew() > 0){
-          n.food = clamp01(n.food - STEW_SATIETY); ate = true; break;
+        const kind = f.pot.kind, cook = f.potCook(), tea = f.isTea();
+        if (tea && n.warmth < 0.45) continue;              // tea is for the cold, not the hungry
+        const meal = firstPlan(npc, 'meal');               // a shared meal is eaten together, not only by the hungry
+        if (!tea && n.food <= EAT_AT && !(meal && meal.fire === f && n.food > 0.15)) continue;
+        let q;
+        if (f.pot.ready > 0 && Math.hypot(f.x - npc.x, f.z - npc.z) < POT_EAT_RANGE && (q = f.takeStew()) > 0){
+          if (tea) n.warmth = clamp01(n.warmth - TEA_WARMTH * (0.5 + 0.5 * q));
+          else n.food = clamp01(n.food - STEW_SATIETY * (0.55 + 0.45 * q));   // a botched pot fills you less
+          ate = true;
+          npc._ate = { kind, cook, q, t: w.time };         // something to thank the cook for (convo.js)
+          hadDish(npc, kind, w.time);                       // and the craving for it is spent (plans.js)
+          { const ml = firstPlan(npc, 'meal'); if (ml && ml.fire === f) dropPlan(npc, ml); }
+          break;
         }
       }
-      if (!ate && (npc.pack || 0) > 0){ npc.pack -= 1; n.food = clamp01(n.food - RATION_SATIETY); ate = true; }
+      // from the pack, what'll spoil first; the snacks kept in reserve (keeping kinds, up to
+      // our stock) only when properly hungry — that's what they're kept for
+      if (!ate && n.food > EAT_AT && (npc.pack || 0) > 0){
+        let got = takeFood(npc, 1, w.time, k => !isKeeper(k));                 // what won't keep, first
+        if (!got.length && (n.food > RESERVE_AT || keptCount(npc) > snackTarget(npc))) got = takeFood(npc, 1, w.time);
+        if (got.length){ n.food = clamp01(n.food - RATION_SATIETY); ate = true; }
+      }
       if (ate) npc.eatCd = EAT_CD;
     }
 
@@ -1077,10 +1051,11 @@ class Brain {
     // too tight-fisted to share it — slowly erodes your standing (the "insult the
     // meat" social pressure made mechanical). Generous folk give instead (see choose).
     if ((npc.pack || 0) >= (npc.packMax || PACK_MAX) && (p.generosity || 1) < 1.0 && npc.group){
-      for (const o of w.npcs){
-        if (o !== npc && o.group === npc.group && (o.needs?.food || 0) > 0.6
-            && Math.hypot(o.x - npc.x, o.z - npc.z) < SHARE_RANGE){
-          npc.esteem = (npc.esteem || 0) - HOARD_PENALTY * dt; break;
+      for (const o of w.near(npc.x, npc.z, SHARE_RANGE)){
+        if (o !== npc && o.group === npc.group && (o.needs?.food || 0) > 0.6){
+          npc.esteem = (npc.esteem || 0) - HOARD_PENALTY * dt;
+          nudge(o, npc, 0, -HOARD_PENALTY * dt);             // and the hungry one notices
+          break;
         }
       }
     }
@@ -1100,7 +1075,37 @@ class Brain {
       const f = this._building;
       this.target = { kind: 'build', x: f.x, z: f.z, ref: f, tol: 2.0,
         satisfy: (a, d2) => this.buildRite(a, d2) };
+    } else if (this._buildingShel && !this._buildingShel.done){
+      const s = this._buildingShel;
+      this.target = { kind: 'build-shel', x: s.x, z: s.z, ref: s, tol: 2.0,
+        satisfy: (a, dt2) => this.buildShelterRite(a, dt2) };
+    } else if (this._buildingHut && this._buildingHut.staked < 1){
+      // Only the staking-out is a commitment you see through on the spot; the
+      // frame and the thatch are jobs you come back to between errands.
+      const h = this._buildingHut;
+      this.target = { kind: 'stake-hut', x: h.x, z: h.z, ref: h, tol: h.rad + 1.0,
+        satisfy: (a, dt2) => this.stakeHutRite(a, dt2) };
+    } else if (this._sleep){
+      // turned in for the night: the camp stays abed until dawn, or until a real
+      // need wakes someone — hunger, or the cold of a hut with no fire in it.
+      const h = this._sleep;
+      // The cold only turns you out of a bed you are actually IN. Checked against
+      // the walk over, it woke people before they ever lay down — they'd pick bed
+      // while still chilled, freeze further on the way, and bounce straight back:
+      // 419 of 463 wakings in a harness run were that thrash, not a cold night.
+      const chilled = prevSleeping && n.warmth > SLEEP_BREAK;
+      if (w.night < SLEEP_WAKE || n.food > SLEEP_BREAK || chilled || !h.done){
+        this._sleep = null; this.target = null; this.decideT = 0;
+      } else {
+        this.target = { kind: 'sleep', x: h.x, z: h.z, ref: h, tol: h.reach, inside: true, sit: true,
+          satisfy: (a, dt2) => h.sleep(a, dt2) };
+      }
+    } else if (this._pilgrim){
+      this.pilgrimStep(dt);            // the rite, once begun, is seen through
+    } else if (npc.convo && (ct = npc.convo.steer(npc))){
+      this.target = ct;                // stopped to talk, or walking alongside (convo.js steer)
     } else {
+      if (this.target && this.target.kind === 'talk'){ this.target = null; this.decideT = 0; }   // talk's over, or we're moving on
       this.decideT -= dt;
       if (this.decideT <= 0 || !this.target){
         this.decideT = 0.6 + Math.random() * 0.5;
@@ -1110,25 +1115,42 @@ class Brain {
 
     // 3. act on the current target
     const t = this.target;
-    if (!t){ npc.sitting = false; this.wanderStep(dt); this.path = null; }
+    if (!t){ npc.sitting = false; npc._hutWant = null; this.wanderStep(dt); this.path = null; }
     else {
       // only the sitting affordance claims a ring seat; tending actions (stoke/
       // fetch/store) just walk to the hearth itself with their own tolerance.
       const useSeat = !!t.sit && t.ref instanceof Campfire;
       const isHunt = t.ref instanceof Quarry;                 // a moving target — chase it live
-      const goal = useSeat ? t.ref.seat(npc) : isHunt ? { x: t.ref.x, z: t.ref.z } : { x: t.x, z: t.z };
-      const tol  = useSeat ? t.ref.arrive : (t.tol || 1.5);
-      const d = Math.hypot(goal.x - npc.x, goal.z - npc.z);
+      const isHut  = t.ref instanceof Hut;
+      // A hut is entered through its door: walk to the doorway first, then in.
+      // Arrival is still judged against the hut itself, or standing at the mouth
+      // would read as "arrived" and they'd shelter in the rain outside it.
+      npc._hutWant = isHut ? t.ref : null;
+      const goal = useSeat ? t.ref.seat(npc) : isHunt ? { x: t.ref.x, z: t.ref.z }
+                 : isHut ? t.ref.entry(npc, t.inside) : { x: t.x, z: t.z };
+      // Staying in (rain, sleep): arrived only once through the door and at our
+      // own spot — judged by the hut's reach, they stopped on the threshold.
+      const inside = isHut && t.inside;
+      const tol  = useSeat ? t.ref.arrive : inside ? 0.35 : (t.tol || 1.5);
+      const d = inside ? (npc._hutIn === t.ref ? Math.hypot(goal.x - npc.x, goal.z - npc.z) : Infinity)
+              : isHut ? Math.hypot(t.x - npc.x, t.z - npc.z)
+                      : Math.hypot(goal.x - npc.x, goal.z - npc.z);
       if (d > tol){
         npc.sitting = false;
         if (isHunt) this.moveTo(goal.x, goal.z, dt);          // direct pursuit in the open (no A* thrash)
+        // the last steps in through a doorway are steered, not routed: the hut's
+        // floor is blocked on the nav grid, and A* snaps a goal on it to the
+        // nearest open cell — often round the BACK, where the wall stops you
+        else if (isHut && Math.hypot(goal.x - t.ref.x, goal.z - t.ref.z) < t.ref.rad) this.moveTo(goal.x, goal.z, dt);
         else this.followPath(goal.x, goal.z, dt);
         // stuck = travelled almost nowhere over a sample window (no route / wedged).
         // Position-based, so legitimately rounding a lake never reads as stuck.
         this._stuckSampleT -= dt;
         if (this._stuckSampleT <= 0){
           if (Math.hypot(npc.x - this._sx, npc.z - this._sz) < 1.2){   // gave up: maybe build our own
-            if (this._building && t.ref === this._building){ w.removeFire(this._building); this._building = null; }   // abandon a half-laid hearth we can't reach
+            if (this._building && t.ref === this._building){ w.removeFire(this._building); this._building = null; }
+            else if (this._buildingShel && t.ref === this._buildingShel){ w.removeShelter(this._buildingShel); this._buildingShel = null; }
+            else if (this._buildingHut && t.ref === this._buildingHut){ w.removeHut(this._buildingHut); this._buildingHut = null; this._hutSite = null; w.releaseSite(npc); }
             else if (t.ref instanceof Campfire){ this._blacklist.set(t.ref, BLACKLIST_TIME); t.ref.release(npc); }
             this.target = null; this.path = null;
           }
@@ -1136,7 +1158,8 @@ class Brain {
         }
       } else {                                  // arrived: perform the affordance
         npc.sitting = !!t.sit; this.path = null;
-        npc.heading = Math.atan2(t.x - npc.x, t.z - npc.z);   // face the thing
+        npc.heading = inside ? t.ref.angle                     // settled in: look out at the fire
+                    : Math.atan2(t.x - npc.x, t.z - npc.z);   // face the thing
         t.satisfy(npc, dt);
       }
     }
@@ -1166,8 +1189,8 @@ class Brain {
     let best = null, bestScore = ACT_MIN;
     const consider = (kind, x, z, ad, ref, opts = {}) => {
       const dist = Math.hypot(x - npc.x, z - npc.z);
-      if (dist > 70) return;
-      let s = -DIST_COST * dist + (opts.bias || 0);
+      if (dist > (opts.reach || 70)) return;
+      let s = -(opts.distCost ?? DIST_COST) * dist + (opts.bias || 0);
       for (const k in ad) s += ad[k] * eff[k];
       if (s > bestScore){ bestScore = s; best = { kind, x, z, ref, ...opts,
         satisfy: opts.satisfy || (ref && ref.satisfy ? (a, dt) => ref.satisfy(a, dt) : () => {}) }; }
@@ -1184,7 +1207,7 @@ class Brain {
     // pull, independent of how warm/social we feel, so fires & stews aren't deserted.
     for (const fire of w.fires){
       if (this._blacklist.has(fire) || !fire.lit) continue;
-      const minded = w.npcs.some(o => o !== npc && Math.hypot(o.x - fire.x, o.z - fire.z) < TEND_RADIUS);
+      const minded = w.near(fire.x, fire.z, TEND_RADIUS).some(o => o !== npc);
       if (minded) continue;                               // someone else has it
       const cooking = (fire.pot.raw + fire.pot.ready) > 0;
       consider('tend', fire.x, fire.z, {}, fire, { sit: true, bias: TEND_BIAS * (cooking ? TEND_COOK : 1) });
@@ -1199,7 +1222,52 @@ class Brain {
         a.chopT = 0; a.chopping = false; this.target = null;   // re-decide: carry it on
       }
     };
+    // Wanting poles has two answers now: fell a live shrub, or pull down a hut
+    // nobody lives in any more. The choice is made the same way as everything
+    // else — whichever is worth more once the walk is paid for — so a camp with
+    // a derelict on its edge quietly recycles it, and one without goes to the
+    // scrub. Striking yields a whole frame's worth at once, which is why it wins
+    // when a derelict is anywhere near.
+    const goStrike = (bias) => {
+      let best = null, bd = STRIKE_REACH;
+      for (const h of w.huts){
+        if (!h.derelict || h.salvage <= 0) continue;
+        if (h.owner === npc || (h.kin && npc.group === h.kin && !h.derelict)) continue;  // not your own roof
+        const d = Math.hypot(h.x - npc.x, h.z - npc.z);
+        if (d < bd){ bd = d; best = h; }
+      }
+      if (!best) return false;
+      consider('strike-hut', best.x, best.z, {}, best, { tol: best.reach + 1.0, bias: bias * STRIKE_BIAS,
+        satisfy: (a, dt2) => {
+          a.chopping = true;                       // the same downstroke as felling
+          a.strikeT = (a.strikeT || 0) + dt2;
+          if (a.strikeT >= STRIKE_T){
+            a.firewood = (a.firewood || 0) + best.salvage;   // a pile of poles, to frame or to burn
+            a.strikeT = 0; a.chopping = false;
+            w.removeHut(best);
+            this.target = null;
+          }
+        } });
+      return true;
+    };
+    // cut an armful of thatching grass (for a roof of ours, or our part in raising one)
+    const goCutThatch = (bias) => {
+      if (!this._cutSpot || this._cutSpotT <= 0){
+        this._cutSpot = w.thatchSpot(npc.x, npc.z); this._cutSpotT = CUT_SPOT_TTL;
+      }
+      const spot = this._cutSpot;
+      if (spot) consider('cut-thatch', spot[0], spot[1], {}, null, { tol: 1.6, bias,
+        satisfy: (a, dt2) => {
+          a.chopping = true;                          // the same downstroke as felling — no reaping frames
+          a.thatchT = (a.thatchT || 0) + dt2;
+          if (a.thatchT >= THATCH_CUT_T){
+            a.thatchArms = Math.min(THATCH_ARMS, (a.thatchArms || 0) + 1);
+            a.thatchT = 0; a.chopping = false; this._cutSpot = null; this.target = null;
+          }
+        } });
+    };
     const goChop = (bias) => {
+      goStrike(bias);                              // a derelict frame is wood too
       const shrub = w.nearestShrub(npc.x, npc.z);
       if (shrub) consider('chop', shrub.x, shrub.z, {}, shrub, { tol: 1.5, bias, satisfy: chopSatisfy(shrub) });
     };
@@ -1256,17 +1324,24 @@ class Brain {
       const d = Math.hypot(f.x - npc.x, f.z - npc.z);
       if (d < cd){ cd = d; campFire = f; }
       if (f.hasFood() && d < sd){ sd = d; storeFire = f; }
-      if (f.lit && d < kd){ kd = d; cookFire = f; }     // a live flame we could cook over
-      if (f.potReady() && d < pd){ pd = d; supFire = f; }   // a pot with ready stew to share
+      if (f.lit && d < kd && (!npc.rawKind || f.accepts(npc.rawKind))){ kd = d; cookFire = f; }   // a live flame and room in its pot
+      if (f.potReady() && d < pd && (f.isTea() ? n.warmth > 0.45 : true)){ pd = d; supFire = f; }   // ready stew (or tea, if cold)
     }
     // hungry: go sup at a pot of ready stew (the communal meal — eat from it in step)
-    if (n.food > 0.4 && supFire)
-      consider('sup', supFire.x, supFire.z, {}, supFire, { sit: true, bias: SUP_BIAS * n.food * p.food });
+    if (supFire && (supFire.isTea() ? n.warmth > 0.45 : n.food > 0.4))
+      consider('sup', supFire.x, supFire.z, {}, supFire, { sit: true,
+        bias: SUP_BIAS * (supFire.isTea() ? n.warmth : n.food * p.food) });
+    // cold, with chamomile in the pack and an empty pot on a fire: brew some tea
+    if (n.warmth > 0.5 && countOf(npc, 'chamomile') >= 2 && cookFire && cookFire.pot.raw + cookFire.pot.ready === 0)
+      consider('brew', cookFire.x, cookFire.z, {}, cookFire, { tol: 1.6, bias: BREW_BIAS * n.warmth,
+        satisfy: (a) => { if (countOf(a, 'chamomile') >= 2 && cookFire.accepts('chamomile')) cookFire.cook('chamomile', total(takeFood(a, 2, w.time, 'chamomile')), a); this.target = null; } });
     // hungry and empty-handed: fetch a load from the camp cache (food-keen folk more so)
     if (pack === 0 && n.food > 0.4 && storeFire)
       consider('getfood', storeFire.x, storeFire.z, {}, storeFire, { tol: 1.6, bias: GETFOOD_BIAS * n.food * p.food,
         satisfy: (a) => { const got = storeFire.takeFood((a.packMax || PACK_MAX) - (a.pack || 0));
-          if (got > 0){ a.pack = (a.pack || 0) + got; a.packKind = 'food'; } this.target = null; } });
+          if (got > 0) addFood(a, 'food', got, w.time); this.target = null; } });
+    // what our plans want gathered (a dish's base and extras, a shared plan's part)
+    const wants = wantedKinds(npc, w.time);
     // gather to keep stocked. Raw-edible foods go in the eating pack; things that
     // must be cooked go in a separate raw bag, bound for the pot.
     if (pack < cap || raw < rawCap)
@@ -1274,12 +1349,16 @@ class Brain {
         if (!pl.ripe) continue;                       // already picked — nothing here
         const cookable = needsCooking(pl.kind);
         if (cookable ? raw >= rawCap : pack >= cap) continue;   // no room in the right bag
+        if (cookable && raw > 0 && npc.rawKind !== pl.kind) continue;   // the raw bag holds one kind
         const deficit = cookable ? (1 - raw / rawCap) : packDeficit;
-        consider('food', pl.x, pl.z, {}, pl, { tol: 1.4, bias: FORAGE_BIAS * deficit * p.food,
+        // keep a stock of snacks on hand — the more foresight, the more, and the keeping kind
+        const snack = SNACKS.includes(pl.kind) ? Math.max(0, 1 - snackCount(npc) / snackTarget(npc)) * (isKeeper(pl.kind) ? foresight(npc) : 0.6) : 0;
+        consider('food', pl.x, pl.z, {}, pl, { tol: 1.4, reach: wants.has(pl.kind) ? 150 : 70,
+          bias: FORAGE_BIAS * (deficit * p.food + SNACK_BIAS * snack) + PLAN_BIAS * (wants.get(pl.kind) || 0),
           satisfy: (a) => {                           // pick it: the fruit vanishes & regrows later
             if (pl.ripe){ const y = pl.collect(); if (y > 0){
               if (needsCooking(pl.kind)){ a.raw = Math.min(rawCap, (a.raw || 0) + y); a.rawKind = pl.kind; }
-              else { a.pack = Math.min(a.packMax || PACK_MAX, (a.pack || 0) + y); a.packKind = pl.kind; }
+              else addFood(a, pl.kind, Math.min((a.packMax || PACK_MAX) - (a.pack || 0), y), w.time);
               // now they *know* this patch — a food tip to pass on (it regrows)
               addNews(a, { kind: 'food', key: 'food:' + pl.kind + ':' + (pl.x|0) + ',' + (pl.z|0),
                 foodKind: pl.kind, x: pl.x, z: pl.z, t: w.time });
@@ -1290,7 +1369,7 @@ class Brain {
     // carrying raw ingredients & a live flame with pot-room is near: take them to cook
     if (raw > 0 && cookFire && cookFire.pot.raw < POT_CAP)
       consider('cook', cookFire.x, cookFire.z, {}, cookFire, { tol: 1.6, bias: COOK_BIAS * (0.5 + raw / rawCap),
-        satisfy: (a) => { if ((a.raw || 0) > 0){ const put = cookFire.cook(a.rawKind, a.raw); a.raw -= put; if (a.raw <= 0) a.rawKind = null; } this.target = null; } });
+        satisfy: (a) => { if ((a.raw || 0) > 0){ const put = cookFire.cook(a.rawKind, a.raw, a); a.raw -= put; if (a.raw <= 0) a.rawKind = null; } this.target = null; } });
     // hungry, nothing edible to hand (no rations, no reachable cache) but carrying
     // raw food and no fire to cook on → lay a hearth. But only if there's no hearth
     // near at all: a cold one nearby will be relit by the firewood economy, so we
@@ -1304,35 +1383,41 @@ class Brain {
     // pack full: carry the surplus to camp and cache it (delayed-return)
     if (pack >= cap && campFire)
       consider('store', campFire.x, campFire.z, {}, campFire, { tol: 1.6, bias: STORE_BIAS,
-        satisfy: (a) => { const give = (a.pack || 0) - DEPOSIT_KEEP;
-          if (give > 0){ campFire.addFood(give); a.pack = DEPOSIT_KEEP; } this.target = null; } });
+        satisfy: (a) => { const give = (a.pack || 0) - DEPOSIT_KEEP;   // the spare goes in; the snacks we stock stay with us
+          if (give > 0) campFire.addFood(total(takeSpare(a, give, w.time))); this.target = null; } });
 
     // --- barter: get what we lack from a neighbour who has it, paying with our
     //     own surplus (food <-> firewood). Only trades when the two are actually
     //     adjacent, so nobody trades with someone who has wandered off. ---
     const haveWood = npc.firewood || 0;
     // pay the partner: the complementary utilitarian good if we have it, else spend
-    // a valuable as currency. Returns true if a payment was made.
+    // a valuable as currency. Returns what was paid ('wood' | 'food' | 'gem'), or false.
     const payWith = (a, s, good) => {
       if (good === 'wood' && (a.firewood || 0) >= 1){
-        const pay = Math.min(a.firewood, BARTER_QTY); a.firewood -= pay; s.firewood = (s.firewood || 0) + pay; return true;
+        const pay = Math.min(a.firewood, BARTER_QTY); a.firewood -= pay; s.firewood = (s.firewood || 0) + pay; return 'wood';
       }
       if (good === 'food' && (a.pack || 0) > DEPOSIT_KEEP){
-        const pay = Math.min(a.pack - DEPOSIT_KEEP, BARTER_QTY); a.pack -= pay; s.pack = (s.pack || 0) + pay; if (!s.packKind) s.packKind = a.packKind; return true;
+        giveAll(s, takeSpare(a, Math.min(a.pack - DEPOSIT_KEEP, BARTER_QTY), w.time), w.time); return 'food';
       }
       if ((a.trinkets || 0) >= 1){   // spend a valuable instead — it's worth a swap
-        a.trinkets -= 1; s.trinkets = (s.trinkets || 0) + 1; if (!s.trinketKind) s.trinketKind = a.trinketKind; return true;
+        a.trinkets -= 1; s.trinkets = (s.trinkets || 0) + 1; if (!s.trinketKind) s.trinketKind = a.trinketKind; return 'gem';
       }
       return false;
     };
     const tradeFor = (a, s, want) => {
       if (Math.hypot(a.x - s.x, a.z - s.z) > 2.5){ this.target = null; return; }   // partner moved off
+      let paid = false;
       if (want === 'food'){
         const got = Math.min(s.pack || 0, BARTER_QTY);
-        if (got > 0 && payWith(a, s, 'wood')){ s.pack -= got; a.pack = (a.pack || 0) + got; a.packKind = s.packKind || 'food'; }
+        if (got > 0 && (paid = payWith(a, s, 'wood'))) giveAll(a, takeSpare(s, got, w.time), w.time);
       } else {   // want wood
         const got = Math.min(s.firewood || 0, BARTER_QTY);
-        if (got > 0 && payWith(a, s, 'food')){ s.firewood -= got; a.firewood = (a.firewood || 0) + got; }
+        if (got > 0 && (paid = payWith(a, s, 'food'))){ s.firewood -= got; a.firewood = (a.firewood || 0) + got; }
+      }
+      if (paid){   // a fair swap: both hands move, and each thinks a touch better of the other
+        w._emit({ type: 'give', from: a, to: s, item: paid, kind: a.packKind });
+        w._emit({ type: 'give', from: s, to: a, item: want, kind: s.packKind });
+        nudge(a, s, 0.04, 0.03); nudge(s, a, 0.04, 0.03);
       }
       this.target = null;
     };
@@ -1372,16 +1457,7 @@ class Brain {
       }
       if (giver) consider('ask', giver.x, giver.z, {}, giver, { tol: 1.6, bias: SHARE_BIAS * n.food,
         satisfy: (a) => {
-          if (Math.hypot(giver.x - a.x, giver.z - a.z) < 2.2 && (giver.pack || 0) > SHARE_KEEP){
-            const give = Math.min(SHARE_QTY, giver.pack - SHARE_KEEP);
-            giver.pack -= give; a.pack = (a.pack || 0) + give; a.packKind = a.packKind || giver.packKind;
-            giver.esteem = (giver.esteem || 0) + GIVE_ESTEEM;
-            // the kindness is witnessed: receiver, giver, and any onlookers note it,
-            // seeding the reputation so gossip can carry it (see NEWS_RANK / pruneNews)
-            const fact = { kind: 'kind', key: 'kind:' + giver.id, subj: giver, x: giver.x, z: giver.z, t: w.time };
-            for (const o of w.npcs)
-              if (o !== giver && Math.hypot(o.x - giver.x, o.z - giver.z) <= SIGHT_RANGE) addNews(o, { ...fact });
-          }
+          if (Math.hypot(giver.x - a.x, giver.z - a.z) < 2.2) w.giveFood(giver, a);
           this.target = null;
         } });
     }
@@ -1389,10 +1465,10 @@ class Brain {
     // hunting: hungry, with quarry in sight → give chase. High variance — the
     // keen-eyed and strong catch more; many bolt clean away. A catch is raw meat,
     // which (a COOK_KIND) goes through the pot and is shared out — the great share.
-    if (n.food > 0.5 && w.fauna.length){
+    if ((n.food > 0.5 || wants.has('meat')) && w.fauna.length){
       let q = null, qd = HUNT_SIGHT;
       for (const r of w.fauna){ if (!r.alive) continue; const d = Math.hypot(r.x - npc.x, r.z - npc.z); if (d < qd){ qd = d; q = r; } }
-      if (q) consider('hunt', q.x, q.z, {}, q, { tol: CATCH_RANGE, bias: HUNT_BIAS * n.food * (p.perception || 1),
+      if (q) consider('hunt', q.x, q.z, {}, q, { tol: CATCH_RANGE, bias: HUNT_BIAS * Math.max(n.food, wants.get('meat') || 0) * (p.perception || 1),
         satisfy: (a) => {
           if (!q.alive){ this.target = null; return; }
           if (Math.hypot(q.x - a.x, q.z - a.z) <= CATCH_RANGE + 0.4 && (a._huntCd || 0) <= 0){
@@ -1438,8 +1514,267 @@ class Brain {
       });
     }
 
+    // ── reverence: sit a while at a great tree ──────────────────────────────────
+    // The finest want, indulged only when nothing else presses — survival eased AND
+    // not lonely — so it reads as a deliberate, unhurried pilgrimage rather than a
+    // chore. The pull scales with how much reverence has built up; a visit drains it,
+    // and rising needs eventually pull the person away, so visits end on their own.
+    if (w.shrines && w.shrines.length){
+      // eased of survival, and not sharply lonely: a calm soul, free to wander off
+      const peace = clamp01(1 - 0.9 * surv) * clamp01(1 - 0.6 * n.company);
+      const pull = npc.reverence > 0.2 ? REV_PULL * npc.reverence * peace : 0;
+      for (const sh of w.shrines){
+        // Folk already at the tree draw others in — ACTIVITY NODES (30), "communal
+        // life concentrates, it doesn't spread thin", and 126's "strong and steady
+        // pulse... drawing people in toward the center". Deliberately OUTSIDE the
+        // peace gate: you go to a palaver tree *because people are there*, and a
+        // lonely soul is exactly who should be drawn — which is the one thing that
+        // turns staggered solitary visits into an assembly.
+        const social = MOOT_DRAW * Math.min(1, (sh.present || 0) / 2);
+        if (pull <= 0.02 && social <= 0) continue;
+        consider('revere', sh.x, sh.z, { company: social }, sh,
+          { sit: true, tol: SHRINE_TOL, bias: pull,
+            satisfy: (a, dt2) => { a.reverence = clamp01(a.reverence - REV_SATISFY * dt2); } });
+      }
+    }
+
+    // ── rain shelter (docs/shelters.md) ─────────────────────────────────────────
+    // Rain accelerates warmth drain (RAIN_CHILL, only while exposed). When
+    // intensity rises, NPCs seek the nearest cover in three tiers:
+    //   1. Tree canopy — free, partial, just walk under it.
+    //   2. Built lean-to — better protection, already raised by someone.
+    //   3. Build a lean-to — when rain is heavy and nothing is nearby.
+    // (A hut at camp is better than any of them — see the hut block below.)
+    //
+    // Wanting out of the rain is NOT the same as being cold. This used to read
+    // `rain × warmth-deficit`, so anyone who happened to be warm carried on
+    // foraging through a downpour and the whole reflex only fired on people who
+    // were already freezing. Being rained on is its own discomfort
+    // (docs/shelters.md §6, and the alternative framing in "the shelter drive"),
+    // so a downpour pulls at everyone — harder on the cold, but never nothing.
+    const rainUrge = w.rain * (RAIN_MISERY + (1 - RAIN_MISERY) * n.warmth);
+    if (w.rain > RAIN_SEEK){
+
+      // tier-1: nearest tree canopy (partial cover, no construction needed)
+      let treeX = null, treeZ = null, treeD = TREE_SHADE_R + 12;
+      for (const [tx, tz] of w.trees){
+        const d = Math.hypot(tx - npc.x, tz - npc.z);
+        if (d < treeD){ treeD = d; treeX = tx; treeZ = tz; }
+      }
+      if (treeX !== null){
+        consider('tree-shelter', treeX, treeZ, { warmth: TREE_SHADE * w.rain }, null, {
+          tol: TREE_SHADE_R,
+          bias: SHELTER_BIAS * 0.55 * rainUrge,
+          satisfy: (a, dt2) => {
+            a.sheltered = true;
+            // face outward from the trunk so the NPC huddles under the canopy
+            const ox = a.x - treeX, oz = a.z - treeZ;
+            const ol = Math.hypot(ox, oz);
+            if (ol > 0.1) a.heading = Math.atan2(ox, oz);
+            a.needs.warmth = clamp01(a.needs.warmth - TREE_SHADE * 0.5 * w.rain * dt2);
+          }
+        });
+      }
+
+      // tier-2: an existing lean-to with space
+      for (const s of w.shelters){
+        const ad = s.advertise(w.rain);
+        if (!ad.warmth) continue;
+        consider('shelter', s.x, s.z, ad, s, {
+          tol: s.reach,
+          bias: SHELTER_BIAS * rainUrge,
+          satisfy: (a, dt2) => s.satisfy(a, dt2)
+        });
+      }
+
+      // tier-3: build one — only when rain is heavy, no fire AND no existing shelter near.
+      // Tree proximity is NOT excluded here — the utility comparison handles it. A tree
+      // wins in the race naturally; building only wins in genuinely open terrain.
+      if (w.rain > RAIN_BUILD && !haveReachableFire && !anyFireClose){
+        const anyNear = w.shelters.some(s => Math.hypot(s.x - npc.x, s.z - npc.z) < 18);
+        if (!anyNear){
+          if ((npc.firewood || 0) >= LEAN_LOGS)
+            consider('build-shel', npc.x, npc.z, {}, null, { tol: 2.0,
+              bias: BUILD_SH_B * rainUrge,
+              satisfy: (a, dt2) => this.buildShelterRite(a, dt2) });
+          else goChop(CHOP_BIAS * w.rain * n.warmth);
+        }
+      }
+    }
+
+    // ── the hut: the settled shelter at camp (docs/camp.md) ─────────────────────
+    // Four events hang off a hut, and they are what make it a place rather than a
+    // prop: raising one, mending its roof, sheltering under it when rain catches
+    // you at camp, and turning in for the night. The lean-to above stays what it
+    // is — what you throw up when the open country catches you out.
+    {
+      // Two different questions, and conflating them is what makes a camp one
+      // shed instead of a ring: which roof may I duck under (kin's, in rain), and
+      // which roof is MINE to sleep and keep up (a bed in it).
+      let myHut = null, hd = 40, myBed = null, bd = 40;
+      for (const h of w.huts){
+        if (!h.done || !h.mayUse(npc)) continue;    // one still going up is no shelter
+        const d = Math.hypot(h.x - npc.x, h.z - npc.z);
+        if (d < hd){ hd = d; myHut = h; }
+        if (h.bedIn(npc) && d < bd){ bd = d; myBed = h; }
+      }
+
+      if (myHut){
+        // (a) rain at camp: a whole roof beats a tree or a lean-to — while it holds
+        // (labelled apart from the lean-to's 'shelter' so the harness can tell
+        // "went indoors at camp" from "threw up a lean-to in the open")
+        if (w.rain > RAIN_SEEK && myHut.roof > 0.15 && myHut.hasRoom(npc))
+          consider('indoors', myHut.x, myHut.z, { warmth: HUT_WARMTH * myHut.roof * w.rain }, myHut,
+            { tol: myHut.reach, inside: true, sit: true, bias: SHELTER_BIAS * HUT_INDOORS * rainUrge,
+              satisfy: (a, dt2) => myHut.shelter(a, dt2) });
+
+      }
+      if (myBed){
+        // (b) turn in — deep night, weary, and a roof of our own to sleep under.
+        // A bed has to beat dozing at the fire (which also sates rest), or nobody
+        // would ever go to bed; it only says so once it's properly dark.
+        // ...and you warm yourself at the fire BEFORE turning in, rather than
+        // taking the cold to bed with you. The order falls out of one clause:
+        // gather at the hearth, get warm, then go to your hut.
+        if (w.night > SLEEP_NIGHT && n.rest > SLEEP_AT && n.warmth < SLEEP_TURNIN && myBed.hasRoom(npc))
+          consider('sleep', myBed.x, myBed.z, { rest: HUT_REST }, myBed,
+            { tol: myBed.reach, inside: true, sit: true, bias: SLEEP_BIAS * w.night, satisfy: (a, dt2) => myBed.sleep(a, dt2) });
+
+        // (c) mend the roof. Cheaper than building — an armful of cut grass, no
+        // felling — so care is affordable and neglect is a choice.
+      }
+
+      // (c) WORK ON A HUT OF OURS. Raising one and mending one are the same
+      // loop — carry an armful, lay it — differing only in whether the frame is
+      // up yet. So an unfinished hut and a leaking roof both come through here,
+      // and the trips out for poles and thatch fall out of it.
+      const job = w.huts.find(h => (h.owner === npc || (h.kin && npc.group === h.kin)) && h.needs());
+      if (job){
+        const need = job.needs();
+        const bare = !job.done;
+        // How badly the work is wanted. An unfinished hut is pressing — you have
+        // nowhere to sleep until it stands — while a thin roof on a sound hut
+        // matters at dusk and in the wet and hardly at all on a fine morning.
+        const want = bare
+          ? clamp01(0.5 + 0.4 * n.rest + 0.5 * (w.evening || 0) + 0.6 * w.rain)
+          : (1 - job.thatch / THATCH_LOW) * (0.6 + 0.8 * (w.evening || 0) + 0.8 * w.rain);
+        const goWork = (bias) =>
+          consider(need === 'frame' ? 'frame-hut' : need === 'stake' ? 'stake-hut' : bare ? 'thatch-hut' : 'rethatch',
+            job.x, job.z, {}, job, { tol: job.reach + 0.9, bias,
+              satisfy: (a, dt2) => this.workHut(job, a, dt2) });
+
+        if (need === 'stake') goWork(THATCH_BIAS * want);
+        else if (need === 'frame'){
+          // poles go on the hut's pile a trip at a time, so a frame needn't wait on one
+          // person carrying them all (nor lose them to a hungry fire on the way)
+          if ((npc.firewood || 0) + job.poles >= job.logsNeed || (npc.firewood || 0) >= 2) goWork(THATCH_BIAS * want * 1.1);
+          else goChop(CHOP_BIAS * want);                    // fell the poles it needs
+        } else if ((npc.thatchArms || 0) > 0) goWork(THATCH_BIAS * want);
+        else {
+          // Hold on to the patch we picked. Re-rolling it every decision meant
+          // walking toward a spot that moved every second and never arriving —
+          // 8% of everyone's waking life spent going nowhere.
+          goCutThatch(THATCH_BIAS * want * 0.85);
+        }
+      } else if (!myBed && campFire && cd < HUT_CAMP_R){
+        // (d) STAKE OUT A NEW ONE. Nowhere of our own to sleep, at a camp with
+        // room on its ring. What makes you want a roof: weariness, the evening
+        // closing in, and rain.
+        // ("I'd better start mine", said in talk, makes it more pressing — convo.js)
+        const want = clamp01(0.4 * n.rest + 0.9 * (w.evening || 0) + 0.9 * w.rain + (firstPlan(npc, 'hut') ? 0.35 : 0));
+        if (want > 0.12 && w.hutsAt(campFire).length < HUTS_PER_FIRE){
+          // siting is a grid scan — hold the answer for a few seconds rather than
+          // redoing it every decision while we walk over
+          if (!this._hutSite || this._hutSite.fire !== campFire || this._hutSiteT <= 0){
+            const site = w.hutSite(campFire, npc);
+            this._hutSite = site ? { ...site, fire: campFire } : null;
+            this._hutSiteT = HUT_SITE_TTL;
+            if (site) w.claimSite(npc, site);        // spoken for, before anyone sets off
+          }
+          const site = this._hutSite;
+          // No materials needed to stake out ground — that is the point of doing
+          // it first: the claim is made on the land, then the poles are fetched.
+          if (site)
+            consider('stake-hut', site.x, site.z, { rest: HUT_REST * 0.7 }, null,
+              { tol: site.rad + 1.0, bias: HUT_BUILD_B * want, site,
+                satisfy: (a, dt2) => this.stakeHutRite(a, dt2) });
+        }
+      }
+    }
+
+    // the agenda (plans.js): plans made in talk, by a craving, or as a part in a
+    // shared plan. "I'll go later" pulls once the need is there; "I'll go now"
+    // pulls hard. Each lapses at its `until`, or is dropped once done.
+    for (const pl of plansOf(npc, w.time)){
+      if (pl.start && w.time < pl.start) continue;                  // agreed for tomorrow: not yet
+      const done = () => { dropPlan(npc, pl); this.target = null; };
+      if (pl.kind === 'food'){
+        if (pack >= cap){ dropPlan(npc, pl); continue; }            // pack's full anyway
+        if (pl.now || n.food > 0.35)
+          consider('plan-food', pl.x, pl.z, {}, null, { tol: 6, reach: 250, distCost: PLAN_DIST,
+            bias: PLAN_BIAS * (pl.now ? 1.5 : n.food), satisfy: done });
+      } else if (pl.kind === 'bring'){                              // fetch an ingredient for a pot, then take it there
+        if (!pl.fire.pot.raw && !pl.project){ dropPlan(npc, pl); continue; }   // the pot's done without it
+        if (carries(npc, pl.item))
+          consider('bring', pl.fire.x, pl.fire.z, {}, pl.fire, { tol: 2.5, reach: 250, distCost: PLAN_DIST, bias: PLAN_BIAS * 1.3,
+            satisfy: (a) => { if (pl.deliver) pl.deliver(a); if (!carries(a, pl.item)) done(); } });   // stepPot (or the project) takes it
+        else if (pl.x != null)
+          consider('plan-food', pl.x, pl.z, {}, null, { tol: 6, reach: 250, distCost: PLAN_DIST, bias: PLAN_BIAS * 1.3 });
+      } else if (pl.kind === 'help'){                               // "Can I help?" "Crack the acorns." — stay and work
+        if (!pl.fire.pot.raw){ dropPlan(npc, pl); continue; }
+        consider('help', pl.fire.x, pl.fire.z, {}, pl.fire, { tol: 2.5, bias: PLAN_BIAS, satisfy: () => {} });
+      } else if (pl.kind === 'wood'){
+        if ((npc.firewood || 0) > 0) dropPlan(npc, pl); else goChop(PLAN_BIAS * (pl.now ? 1.5 : 0.8));
+      } else if (pl.kind === 'task' && pl.project.kind === 'hut'){  // my part in raising a hut: poles or thatch, taken to it
+        const h = pl.project.hut, wood = pl.item[0] === 'wood';
+        const have = wood ? (npc.firewood || 0) : (npc.thatchArms || 0);
+        if (have >= Math.min(pl.task.n, wood ? 99 : THATCH_ARMS))
+          consider('bring', h.x, h.z, {}, h, { tol: h.reach + 0.9, reach: 250, distCost: PLAN_DIST, bias: PLAN_BIAS * 1.3,
+            satisfy: (a) => { pl.deliver(a); this.target = null; } });
+        else if (wood) goChop(PLAN_BIAS);
+        else goCutThatch(PLAN_BIAS);
+      } else if (pl.kind === 'task' && pl.item){                    // my part in a shared plan: get it, take it to the basket
+        const have = pl.item.reduce((a, k) => a + (RAW_KINDS.has(k) ? (npc.rawKind === k ? raw : 0) : countOf(npc, k)), 0);
+        if (have >= pl.task.n || (have > 0 && w.time > pl.project.by - 0.1))
+          consider('bring', pl.fire.x, pl.fire.z, {}, pl.fire, { tol: 2.5, reach: 250, distCost: PLAN_DIST, bias: PLAN_BIAS * 1.3,
+            satisfy: (a) => { pl.deliver(a); this.target = null; } });
+      } else if (pl.kind === 'task' && pl.cook && pl.project.stash.size){   // the cook: start it from the basket
+        const pr = pl.project, r = RECIPES[pr.dish], f = pr.fire;
+        const baseIn = r.base.reduce((a, k) => a + (pr.stash.get(k) || 0), 0);
+        const extrasIn = pr.tasks.every(t => !t.id.startsWith('add:') || t.state === 'done');
+        if (baseIn >= 2 && (extrasIn || w.time > pr.by - 0.2) && f.lit && f.pot.raw + f.pot.ready === 0)
+          consider('plan-cook', f.x, f.z, {}, f, { tol: 1.6, reach: 250, distCost: PLAN_DIST, bias: PLAN_BIAS * 1.5,
+            satisfy: (a) => {
+              const { kind, n: m } = pr.takeStash(r.base, 12);
+              if (m > 0 && f.cook(kind, m, a) > 0 && f.pot.recipe === pr.dish){ pl.onCooked(f); addPlan(a, { kind: 'help', fire: f, until: w.time + 0.1 }); }
+              this.target = null;
+            } });
+      } else if (pl.kind === 'meal'){                               // the shared meal: come and eat when it's ready
+        if (pl.fire.pot.ready > 0) consider('sup', pl.fire.x, pl.fire.z, {}, pl.fire, { sit: true, reach: 250, distCost: PLAN_DIST, bias: PLAN_BIAS });
+        else if (!pl.fire.pot.raw) dropPlan(npc, pl);              // it's all gone
+      } else if (pl.kind === 'dish' || (pl.kind === 'task' && pl.cook && !pl.project)){
+        // a dish to make: with the base in the raw bag, take it to a fire whose pot will have it
+        const r = RECIPES[pl.dish];
+        if (!r){ dropPlan(npc, pl); continue; }
+        if (raw >= 2 && r.base.includes(npc.rawKind)){
+          let f = pl.fire && pl.fire.lit && pl.fire.accepts(npc.rawKind) ? pl.fire : null;
+          if (!f) for (const g of w.fires) if (g.lit && g.accepts(npc.rawKind) && (!f || Math.hypot(g.x - npc.x, g.z - npc.z) < Math.hypot(f.x - npc.x, f.z - npc.z))) f = g;
+          if (f) consider('plan-cook', f.x, f.z, {}, f, { tol: 1.6, reach: 250, distCost: PLAN_DIST, bias: PLAN_BIAS * 1.4,
+            satisfy: (a) => {
+              const put = f.cook(a.rawKind, a.raw, a); a.raw -= put; if (a.raw <= 0) a.rawKind = null;
+              if (put > 0 && f.pot.recipe === pl.dish){                 // it's on: now see it through
+                if (pl.onCooked) pl.onCooked(f);
+                if (w.potStats) w.potStats.cravedCooked = (w.potStats.cravedCooked || 0) + 1;
+                dropPlan(a, pl); addPlan(a, { kind: 'help', fire: f, until: w.time + 0.1 });
+              }
+              this.target = null;
+            } });
+        }
+      }
+    }
+
     for (const o of w.npcs){     // other people advertise company — kinfolk more so
-      if (o === npc) continue;
+      if (o === npc || parted(npc, o, w.time)) continue;   // (not someone we've just said goodbye to)
       const kin = npc.group && o.group === npc.group;       // same family/clan/band
       consider('greet', o.x, o.z, { company: kin ? 0.6 : 0.22 }, null,
         { tol: 1.7, satisfy: (a, dt) => { a.needs.company = clamp01(a.needs.company - (kin ? 0.16 : 0.10) * dt); } });
@@ -1457,6 +1792,93 @@ class Brain {
     }
     this.target = best;
     npc.actionLabel = !best ? 'wander' : best.kind;
+    // choosing the rite is a commitment: from here the pilgrimage runs itself,
+    // gate by gate, until it's spent or a real need breaks it
+    // turning in is likewise a commitment: the night is slept through (see step)
+    if (best && best.kind === 'sleep') this._sleep = best.ref;
+    if (best && best.kind === 'revere' && !this._pilgrim)
+      this._pilgrim = { shrine: best.ref, stage: 0, dwell: 0, lap: 0, laid: false, heard: false };
+  }
+
+  // The rite (Alexander 66 HOLY GROUND): pass the gateways in turn, outermost
+  // first, pausing at each with a view toward the next inner precinct (134 ZEN
+  // VIEW); lay a stone in whichever precinct is still being built; then sit with
+  // the tree at the sanctum until the urge is spent. Nothing here is scripted as a
+  // ceremony — it is just the pattern, and the ceremony falls out of it.
+  pilgrimStep(dt){
+    const npc = this.npc, w = this.world, n = npc.needs, p = this._pilgrim, sh = p.shrine;
+    if (Math.max(n.warmth, n.food, n.rest) > REV_BREAK){   // hunger ends devotion
+      sh.releaseSeat(npc);
+      this._pilgrim = null; this.target = null; npc.sitting = false; return;
+    }
+    npc.actionLabel = 'revere';
+
+    if (p.stage < sh.rings.length){                        // 1. the gateways
+      const g = sh.gatePos(p.stage);
+      this.target = { kind: 'revere', x: g.x, z: g.z, tol: 1.3, ref: sh,
+        satisfy: (a, dt2) => {
+          p.dwell += dt2;
+          if (p.dwell >= GATE_PAUSE){ p.dwell = 0; p.stage++; this.target = null; this.path = null; }
+        } };
+      return;
+    }
+
+    // 2. go round it. Ovoo practice (docs/sacred-trees.md §E): the traveller
+    // circles three times, one way, before making the offering. Gives the visit a
+    // shape you can see from across the glade.
+    if (p.lap < CIRCLE_LAPS * CIRCLE_STEPS){
+      const t = sh.rings[sh.rings.length - 1].gate + (p.lap / CIRCLE_STEPS) * Math.PI * 2;
+      // just outside the inner ring: clear of the trunk (which is an obstacle the
+      // steering pushes away from) and still inside the outer precinct
+      const r = sh.rings[sh.rings.length - 1].r + 0.7;
+      this.target = { kind: 'revere', x: sh.cx + Math.sin(t) * r, z: sh.cz + Math.cos(t) * r,
+        tol: 1.2, ref: sh, satisfy: () => { p.lap++; this.target = null; this.path = null; } };
+      return;
+    }
+
+    if (!p.laid){                                          // 3. lay a stone
+      const slot = sh.nextSlot();
+      // the innermost precinct takes only what a person actually values
+      if (slot && (!slot.precious || (npc.trinkets || 0) > 0)){
+        this.target = { kind: 'revere', x: slot.x, z: slot.z, tol: 1.0, ref: sh,
+          satisfy: (a) => {
+            let kind = 'stone';
+            if (slot.precious && (a.trinkets || 0) > 0){ a.trinkets -= 1; kind = a.trinketKind || 'stone'; }
+            sh.place(slot, kind);
+            p.laid = true; this.target = null; this.path = null;
+          } };
+        return;
+      }
+      p.laid = true;                                       // nothing to give — go in empty-handed
+    }
+
+    // 4. the sanctum: take a place on the stones and sit. A root-wise soul also
+    // LISTENS — Dodona (docs/sacred-trees.md §H), where the oak's answer came as
+    // the rustle of its leaves for a reader to interpret. What the wood is carrying
+    // at this tree passes into the listener, and from there into ordinary gossip:
+    // the only bridge by which the mycelium's knowledge reaches the folk at all.
+    const seat = sh.seat(npc);
+    this.target = { kind: 'revere', x: seat.x, z: seat.z, tol: 1.1, sit: true, ref: sh,
+      satisfy: (a, dt2) => {
+        a.heading = Math.atan2(sh.x - a.x, sh.z - a.z);    // face the tree
+        a.reverence = clamp01(a.reverence - REV_SATISFY * dt2);
+        // a moot bonds like the night fire does
+        if (sh.moot) a.needs.company = clamp01(a.needs.company - MOOT_COMPANY * dt2);
+        if (a.rootwise && !p.heard && sh.hear){
+          const fact = sh.hear();
+          if (fact && fact.text){
+            addNews(a, { kind: 'omen', key: 'wood:' + fact.key, text: fact.text,
+                         x: sh.x, z: sh.z, t: w.time, src: 'wood' });
+            a.woodHeard = (a.woodHeard || 0) + 1;
+          }
+          p.heard = true;
+        }
+        // the urge spent — but a moot holds together while its people still want
+        // company, so the assembly disperses rather than snapping apart
+        if (a.reverence <= 0.05 && (!sh.moot || a.needs.company < 0.25)){
+          sh.releaseSeat(a); this._pilgrim = null; this.target = null; a.sitting = false;
+        }
+      } };
   }
 
   // Travel toward (gx,gz) along an A* path that routes around water & tree
@@ -1483,6 +1905,16 @@ class Brain {
 
   moveTo(gx, gz, dt){
     const npc = this.npc, w = this.world;
+    // LEAVING. You go out the way you came in. Entry was always routed through
+    // the doorway (Hut.entry); leaving never was, and it only appeared to work
+    // because a coarse step let people tunnel through the wall band. Widen the
+    // band past one step's travel and they are simply stuck against the inside of
+    // their own hut, walking at the back wall for ever.
+    const home = npc._hutIn;
+    if (home && Math.hypot(gx - home.x, gz - home.z) > home.rad){
+      const mouth = home.doorMouth();
+      gx = mouth.x; gz = mouth.z;
+    }
     // start with the direction to the goal
     let sx = gx - npc.x, sz = gz - npc.z;
     const gd = Math.hypot(sx, sz) || 1; sx /= gd; sz /= gd;
@@ -1500,6 +1932,43 @@ class Brain {
         sx += tx * push * 0.9; sz += tz * push * 0.9;
       }
     }
+    // huts are solid: skirt round them rather than walking into the thatch. The
+    // one we're heading for is skipped once we're lined up with its door, so the
+    // approach doesn't fight the entry (see Hut.entry / AgentWorld.confine).
+    // Against the wall itself the push isn't enough: on a big hut it is weak at
+    // the thatch, the goal still points in, the wall puts them back, and they
+    // grind there. So in contact the step that walks INTO the wall is dropped and
+    // they go round — and which way round is kept until they're clear, or a goal
+    // dead behind the hut flips them left/right every frame and they never leave.
+    let wall = null;
+    for (const h of w.huts){
+      if (h.frame <= 0) continue;      // a staked-out site is walked over, not round
+      const ox = npc.x - h.x, oz = npc.z - h.z;
+      const d = Math.hypot(ox, oz) || 1e-3;
+      const reach = h.rad + 1.5;
+      if (d >= reach) continue;
+      // the hut we're in, or the one we're entering, doesn't shove us about
+      if (npc._hutIn === h) continue;
+      if (npc._hutWant === h && (h.atDoor(npc.x, npc.z) || d < h.rad || npc._entering === h)) continue;
+      const push = (reach - d) / reach;
+      sx += (ox/d) * push * 1.3; sz += (oz/d) * push * 1.3;        // radial: off the wall
+      let tx = -oz/d, tz = ox/d;                                    // tangential: round it
+      if (npc._skirt && npc._skirt.h === h) { if (npc._skirt.side < 0){ tx = -tx; tz = -tz; } }
+      else if (tx*(gx-npc.x) + tz*(gz-npc.z) < 0){ tx = -tx; tz = -tz; }
+      sx += tx * push * 1.1; sz += tz * push * 1.1;
+      if (d < h.rad + HUT_BODY + 0.6 && (!wall || d - h.rad < wall.d - wall.h.rad))
+        wall = { h, d, nx: ox/d, nz: oz/d, tx, tz };
+    }
+    if (wall){
+      const inward = -(sx * wall.nx + sz * wall.nz);
+      if (inward > 0){ sx += wall.nx * inward; sz += wall.nz * inward; }   // never step into the thatch
+      sx += wall.tx * 0.6; sz += wall.tz * 0.6;                             // ...keep going round
+      if (!npc._skirt || npc._skirt.h !== wall.h)
+        npc._skirt = { h: wall.h, side: (wall.tx * -wall.nz + wall.tz * wall.nx) > 0 ? 1 : -1 };
+    } else if (npc._skirt && Math.hypot(npc.x - npc._skirt.h.x, npc.z - npc._skirt.h.z) > npc._skirt.h.rad + 1.5){
+      npc._skirt = null;               // clear of it: the next hut gets a fresh choice
+    }
+
     // give a LIT fire a wide berth: a no-step core so nobody walks through the
     // blaze, while the sitting ring (2.3) and the tend reach (~1.6) lie outside it,
     // so people can still gather round and feed it. Firmer push than a trunk.
@@ -1536,6 +2005,70 @@ class Brain {
     if (this._building.raise(dt)){
       this._building.addWood(a.firewood || 0); a.firewood = 0;   // the hauled armful becomes the woodpile
       this._building = null; this.target = null;
+    }
+  }
+
+  // Lean-to build ritual: called while NPC stands at the site, advances build
+  // progress each frame. Material (one log) is consumed when the lean-to is first
+  // created; it grows from the ground up until done, then the NPC is free again.
+  buildShelterRite(a, dt){
+    const w = this.world;
+    if (!this._buildingShel){
+      const spot = w.clearSpot(a.x, a.z) || [a.x, a.z];
+      this._buildingShel = w.addShelter(spot[0], spot[1]);
+      a.firewood = Math.max(0, (a.firewood || 0) - LEAN_LOGS);   // consume the pole material
+    }
+    a.actionLabel = 'build-shel';
+    if (this._buildingShel.raise(dt)){ this._buildingShel = null; this.target = null; }
+  }
+
+  // The hut-raising rite (docs/camp.md). Like the hearth's, it is laid up in
+  // stages on a chosen spot while the builder stands there — the frame of bent
+  // saplings first, then the thatch — and the poles they hauled are spent on it.
+  // The site was picked at decision time (choose → hutSite) so the doorway faces
+  // the hearth and kin end up beside kin.
+  // Staking out a new hut: the first act, on ground nobody else has spoken for.
+  // The hut comes into being here — bare marked ground, no walls yet — so from
+  // this moment every other builder's siting sees it and settles elsewhere.
+  stakeHutRite(a, dt){
+    const w = this.world;
+    if (!this._buildingHut){
+      const s = this.target && this.target.site;
+      if (!s || !w.siteClear(s.x, s.z, s.rad, a)){          // someone got here first
+        this.target = null; this._hutSite = null; w.releaseSite(a); return;
+      }
+      this._buildingHut = w.addHut(s.x, s.z, s.angle, a, s.fire, s.rad);
+      { const hp = firstPlan(a, 'hut'); if (hp) dropPlan(a, hp); }   // the plan made in talk, kept
+      this._buildingHut.claimBed(a);                        // the raiser's own bed
+      this._hutSite = null; w.releaseSite(a);
+    }
+    a.actionLabel = 'stake-hut';
+    if (this._buildingHut.stakeOut(dt)){ this._buildingHut = null; this.target = null; }
+  }
+
+  // Working on a hut that is already staked: setting its frame, or laying an
+  // armful on its roof. Each is a short job on the spot — between them the person
+  // walks off to fell poles or cut thatch like anyone else, which is what makes
+  // the raising a process you watch rather than a rite you wait out.
+  workHut(hut, a, dt){
+    const need = hut.needs();
+    if (need === 'stake'){ a.actionLabel = 'stake-hut'; hut.stakeOut(dt); return; }
+    if (need === 'frame'){
+      a.actionLabel = 'frame-hut';
+      // leave what we carry on the pile; once the pile has enough, set the frame
+      if ((a.firewood || 0) > 0 && hut.poles < hut.logsNeed){ const put = Math.min(a.firewood, hut.logsNeed - hut.poles); a.firewood -= put; hut.addPoles(put); }
+      if (hut.poles < hut.logsNeed){ this.target = null; return; }               // go and fell some more
+      if (hut.setFrame(dt)){ hut.poles -= hut.logsNeed; this.target = null; }   // the poles become the frame
+      return;
+    }
+    // thatching: one armful at a time, each taking a moment to lay
+    a.actionLabel = hut.done ? 'rethatch' : 'thatch-hut';
+    if ((a.thatchArms || 0) <= 0){ this.target = null; return; }             // go and cut more
+    a.layT = (a.layT || 0) + dt;
+    if (a.layT >= LAY_T){
+      a.layT = 0; a.thatchArms -= 1;
+      hut.layThatch();
+      if (hut.needs() === null) this.target = null;      // finished — stand back and look at it
     }
   }
 
@@ -1657,16 +2190,134 @@ class Brain {
   }
 }
 
-function rand(){ return Math.random(); }
+// ------------------------------------------------------------------- shrines
+// A great faced tree and the rite that grows around it. Straight out of Alexander:
+//
+//   HOLY GROUND (66) — "form a series of nested precincts, each marked by a
+//   gateway, each one progressively more private and more sacred than the last,
+//   the innermost a final sanctum that can only be reached by passing through all
+//   of the outer ones." He notes the organisation itself "can create the sacredness
+//   of sites, perhaps even encourage the slow emergence of coherent rites of
+//   passage" — which is exactly what we want: no scripted ceremony, just the
+//   pattern, and the rite falls out of it. At the innermost sanctum he suggests
+//   "no more than a simple tree" — which is what we already have.
+//   SACRED SITES (24) — "a tree, or rock or stone, takes on the power through
+//   which people can connect themselves to their own past"; a site is embellished
+//   by the progression of spaces approaching it.
+//   SITTING WALL (243) — surround an outdoor area with a low wall "wide enough to
+//   sit on"; an *ambiguous boundary* that marks without shutting out.
+//   SOMETHING ROUGHLY IN THE MIDDLE (126) — "resist the impulse to put it exactly
+//   in the middle", so the rings sit slightly off the trunk and every stone is
+//   jittered: grown, not drawn.
+//
+// The folk lay ordinary stones in the outer ring; the innermost precinct takes
+// only what they actually value — a shell, amber, quartz given up for good.
+const RING_R      = [3.5, 2.1];  // outer → inner precinct radii
+const STONE_GAP   = 1.15;        // spacing along a ring
+const GATE_SLOTS  = 2;           // slots left empty: the gateway (66)
+const GATE_OFFSET = 2.4;         // inner gate turned away from the outer one, so the
+                                 // approach must wind round inside — "layers of access"
+const GATE_PAUSE  = 1.5;         // pause at each gate, ZEN VIEW (134)
+
+class Shrine {
+  constructor(x, z, rng){
+    this.x = x; this.z = z;                  // the tree: the sanctum itself
+    // 126: not exactly in the middle
+    this.cx = x + (rng() - 0.5) * 0.7;
+    this.cz = z + (rng() - 0.5) * 0.7;
+    this.rings = RING_R.map((r, i) => {
+      const n = Math.max(6, Math.round(2 * Math.PI * r / STONE_GAP));
+      const gate = rng() * Math.PI * 2 + i * GATE_OFFSET;
+      const slots = [];
+      for (let k = 0; k < n; k++){
+        const a = gate + (k + GATE_SLOTS) * (Math.PI * 2 / n);   // skip the gateway arc
+        if (k >= n - GATE_SLOTS) break;
+        const jr = r + (rng() - 0.5) * 0.22, ja = a + (rng() - 0.5) * 0.10;
+        slots.push({ a: ja, x: this.cx + Math.sin(ja) * jr, z: this.cz + Math.cos(ja) * jr,
+                     kind: null, precious: i === RING_R.length - 1, ring: i,
+                     yaw: rng() * Math.PI * 2, size: 0.8 + rng() * 0.5 });
+      }
+      return { r, gate, slots };
+    });
+    this._preLay(rng);
+  }
+
+  // The rite is older than the player. Each shrine starts part-built — most barely
+  // begun, some well under way, a few with the outer precinct long finished and an
+  // offering or two already at the heart — so a wanderer finds a living practice
+  // rather than a bare tree waiting to be started. Seeded: one WORLD_SEED always
+  // grows the same shrines. Stones fill round from the gateway, the same order the
+  // folk will carry on in.
+  _preLay(rng){
+    const age = rng();
+    const frac = age < 0.30 ? rng() * 0.3            // barely begun
+               : age < 0.85 ? 0.3 + rng() * 0.55     // well under way
+               :              1;                      // an old, finished precinct
+    const outer = this.rings[0];
+    const n = Math.round(outer.slots.length * frac);
+    for (let i = 0; i < n; i++) outer.slots[i].kind = 'stone';
+    if (frac >= 1){                                   // only then has the inner begun
+      const inner = this.rings[1], OFFER = ['shell', 'amber', 'quartz'];
+      const m = Math.round(inner.slots.length * rng() * 0.5);
+      for (let i = 0; i < m; i++) inner.slots[i].kind = OFFER[(rng() * OFFER.length) | 0];
+    }
+    this.preLaid = this.stones().length;
+  }
+  get glade(){ return this.rings[0].r + 1.4; }     // the kept clearing; nothing is cut inside it
+
+  gatePos(i){
+    const g = this.rings[i];
+    return { x: this.cx + Math.sin(g.gate) * g.r, z: this.cz + Math.cos(g.gate) * g.r };
+  }
+  // A seat on the stones themselves — SITTING WALL (243): the ring is low and
+  // "wide enough to sit on", an ambiguous boundary. Folk at a moot take places
+  // round the inner precinct, evenly spread so the circle self-arranges.
+  seat(npc){
+    const ring = this.rings[this.rings.length - 1];
+    if (!this._seats) this._seats = new Map();
+    let a = this._seats.get(npc);
+    if (a === undefined){
+      const taken = new Set(this._seats.values());
+      const n = 8;
+      for (let k = 0; k < n; k++) if (!taken.has(k)){ a = k; break; }
+      if (a === undefined) a = 0;
+      this._seats.set(npc, a);
+    }
+    const t = ring.gate + Math.PI * 2 * (a / 8) + 0.4;
+    return { x: this.cx + Math.sin(t) * (ring.r + 0.5), z: this.cz + Math.cos(t) * (ring.r + 0.5) };
+  }
+  releaseSeat(npc){ this._seats?.delete(npc); }
+  ringDone(i){ return this.rings[i].slots.every(s => s.kind); }
+  // nested: the outer precinct must be finished before the inner one is begun
+  nextSlot(){
+    for (let i = 0; i < this.rings.length; i++){
+      if (this.ringDone(i)) continue;
+      return this.rings[i].slots.find(s => !s.kind) || null;
+    }
+    return null;
+  }
+  place(slot, kind){ if (slot && !slot.kind){ slot.kind = kind; this.laid = (this.laid || 0) + 1; this.view?.sync(); return true; } return false; }
+  stones(){ return this.rings.flatMap(r => r.slots.filter(s => s.kind)); }
+  get total(){ return this.rings.reduce((a, r) => a + r.slots.length, 0); }
+}
 
 // ------------------------------------------------------------------ the world
 // Owns the affordances, the campfires, and the shared day/night state the
 // brains read. Attach it to NPCs, feed it the sky + food sources each frame.
 export class AgentWorld {
-  constructor(scene){
+  constructor(scene, { rng = Math.random, makeFireView = null, makeShelterView = null,
+                       makeHutView = null, makeShrineView = null } = {}){
     this.scene = scene;
+    this.rng = rng;        // seeded stream for world-defining draws (see makePersona note)
+    // presentation is injected: the game passes CampfireView/ShelterView factories
+    // (js/campfire-view.js); the headless harness passes nothing and runs mesh-free.
+    this.makeFireView = makeFireView;
+    this.makeShelterView = makeShelterView;
+    this.makeHutView = makeHutView;
+    this.makeShrineView = makeShrineView;
     this.fires = [];
     this.trees = [];      // trunk [x,z] list, used to site hearths in clearings
+    this.shrines = [];    // the great faced trees folk revere & visit (docs/mycelium.md)
     this.shrubs = [];     // choppable shrubs (firewood)
     this.food = [];       // forage plants (visited, not depleted, by NPCs)
     this.valuables = [];  // rare finds people gather & trade (shells/stones/amber/quartz)
@@ -1677,12 +2328,86 @@ export class AgentWorld {
     this.boats = [];      // communal canoes NPCs ferry across the water (docs/boats.md)
     this.threat = null;   // a {x,z} the fauna flee from too (the player), set per frame
     this.day = 1; this.night = 0; this.evening = 0;
+    // social happenings (a talk, a glance, a hand-over) go out here for the game to
+    // show (js/talk-view.js, js/toss.js); null in the headless harness
+    this.onSocial = null;
+    this.cloud = 0;          // sky cloud cover 0..1 (syncSky) — rain sets in past ~0.7
+    this.convos = [];        // conversations under way (js/convo.js)
+    this.projects = [];      // shared plans under way (js/projects.js)
+    this.cookTime = COOK_TIME;   // how long a potful takes (talk answers "how long?")
     this.time = 0;        // in-game day counter (fractional), for sighting memory
     this._nextId = 0;     // hands out stable per-NPC ids (gossip fact keys)
     this.culture = DEFAULT_CULTURE;
+    this.shelters = [];    // lean-tos NPCs raise against rain (docs/shelters.md)
+    this.huts = [];        // the settled shelter: thatched, slept in (docs/camp.md)
+    this._siteClaims = [];  // hut sites spoken for but not yet staked (see siteClear)
+    this.rain = 0;         // current rain intensity, set from main.js each frame
     this._obGrid = new Map();   // spatial hash of obstacle circles {x,z,r}
     this._obstacles = [];       // flat list (also fed to the nav grid)
     this.nav = new NavGrid();   // A* walkability grid (built in buildNav)
+    this._nbrGrid = new Map();  // spatial hash of NPCs, rebuilt each frame (see near())
+    this._socialT = 0;          // accumulator for the throttled sightings/gossip pass
+    this._scratch = [];         // reused result array for near() — the per-frame passes don't allocate
+  }
+
+  // ---- neighbour lookup -------------------------------------------------------
+  // Sightings, gossip and personal space all ask "who is close to me". Done as
+  // nested loops that is O(n²) per frame — fine at 32 folk in a 400u world, but
+  // the world is 800u now and almost every pair in it is half a mile apart. We
+  // bin everyone into NBR_CELL squares once a frame and look only in the 3×3
+  // block around the asker, so those passes cost the same however many folk live
+  // here. Rebuilt every frame because NPCs move every frame.
+  _rebuildNeighbours(){
+    this._nbrGrid.clear();
+    for (const n of this.npcs){
+      const k = Math.floor(n.x / NBR_CELL) + ',' + Math.floor(n.z / NBR_CELL);
+      let a = this._nbrGrid.get(k);
+      if (!a){ a = []; this._nbrGrid.set(k, a); }
+      a.push(n);
+    }
+  }
+
+  // Everyone within `r` of (x,z) — `r` must be <= NBR_CELL, or the 3×3 block
+  // around the point isn't wide enough to contain them all. `out` is reused by
+  // the caller so the per-frame passes don't allocate.
+  _emit(e){ if (this.onSocial) this.onSocial(e); }
+
+  // a gift of food, from a demand-share or offered in talk (convo.js): the goods
+  // move, the giver's standing rises, the hand-over is shown (a toss), and the
+  // kindness is witnessed — seeding the reputation gossip carries
+  // Kin give from anything they carry, the snacks they keep included (that's what
+  // a household's reserve is for), keeping one back; others give only what they
+  // can spare. Returns how much was really handed over.
+  giveFood(giver, a){
+    const kin = !!(giver.group && giver.group === a.group);
+    const give = Math.min(SHARE_QTY, (giver.pack || 0) - (kin ? 1 : SHARE_KEEP));
+    if (give <= 0) return 0;
+    const got = kin ? takeFood(giver, give, this.time) : takeSpare(giver, give, this.time);
+    if (!total(got)) return 0;
+    giveAll(a, got, this.time);
+    giver.esteem = (giver.esteem || 0) + GIVE_ESTEEM;
+    this._emit({ type: 'give', from: giver, to: a, item: 'food', kind: giver.packKind });
+    nudge(a, giver, 0.05, 0.15); nudge(giver, a, 0.05, 0.03);   // a gift is remembered
+    const fact = { kind: 'kind', key: 'kind:' + giver.id, subj: giver, obj: a, x: giver.x, z: giver.z, t: this.time };
+    for (const o of this.npcs)
+      if (o !== giver && Math.hypot(o.x - giver.x, o.z - giver.z) <= SIGHT_RANGE) addNews(o, { ...fact });
+    return total(got);
+  }
+
+  near(x, z, r, out = []){
+    out.length = 0;
+    const cx = Math.floor(x / NBR_CELL), cz = Math.floor(z / NBR_CELL), r2 = r * r;
+    for (let gx = cx - 1; gx <= cx + 1; gx++){
+      for (let gz = cz - 1; gz <= cz + 1; gz++){
+        const a = this._nbrGrid.get(gx + ',' + gz);
+        if (!a) continue;
+        for (const o of a){
+          const dx = o.x - x, dz = o.z - z;
+          if (dx*dx + dz*dz <= r2) out.push(o);
+        }
+      }
+    }
+    return out;
   }
 
   // register the circles people walk around (tree trunks, shrubs)
@@ -1793,13 +2518,33 @@ export class AgentWorld {
 
   // the choppable shrubs (firewood). Records carry .alive and .chop() (flora.js).
   setShrubs(shrubs){ this.shrubs = shrubs || []; }
+  // list: [{ x, z, hear? }] — `hear()` is injected by main.js and returns whatever
+  // the wood is carrying at that tree (a fact from the mycelium), or null. The sim
+  // stays ignorant of the network: it only knows some trees can be listened to.
+  setShrines(list){
+    this.shrines = (list || []).map(s => {
+      const sh = new Shrine(s.x, s.z, this.rng);
+      sh.hear = typeof s.hear === 'function' ? s.hear : null;
+      if (this.makeShrineView) this.makeShrineView(sh);   // sets sh.view (js/shrine-view.js)
+      return sh;
+    });
+  }
   // nearest still-standing shrub to (x,z), within reach, or null
+  // The taboo: nothing is cut inside a sacred glade. The commonest rule at real
+  // sacred trees — a Japanese shinboku is never felled, and sacred groves stand
+  // while the wood around them is worked (docs/sacred-trees.md §F; SACRED SITES 24,
+  // "protect them absolutely"). So the folk simply never see firewood there and go
+  // elsewhere for it, and the glade stays whole.
+  inSacredGlade(x, z){
+    for (const sh of this.shrines) if (Math.hypot(sh.x - x, sh.z - z) < sh.glade) return true;
+    return false;
+  }
   nearestShrub(x, z, range = 45){
     let best = null, bd = range;
     for (const s of this.shrubs){
       if (!s.alive) continue;
       const d = Math.hypot(s.x - x, s.z - z);
-      if (d < bd){ bd = d; best = s; }
+      if (d < bd && !this.inSacredGlade(s.x, s.z)){ bd = d; best = s; }
     }
     return best;
   }
@@ -1825,15 +2570,225 @@ export class AgentWorld {
       const c = this.safeFireSpot(x, z); if (c){ [x, z] = c; }   // build clear of trees & off slopes
     }
     const f = new Campfire(this, x, z, { built });   // built:false => raised as a ritual (see Brain.buildRite)
-    this.fires.push(f); this.scene.add(f.group);
+    if (this.makeFireView) this.makeFireView(f);     // sets f.view + f.group
+    this.fires.push(f);
+    if (f.group) this.scene.add(f.group);
     return f;
   }
   // remove a hearth from the world (e.g. a half-laid one its builder gave up on)
   removeFire(f){
     if (!f) return;
     const i = this.fires.indexOf(f); if (i >= 0) this.fires.splice(i, 1);
-    this.scene.remove(f.group);
+    if (f.group) this.scene.remove(f.group);
     for (const n of this.npcs) if (n.brain) n.brain._blacklist.delete(f);
+  }
+
+  // ---- huts (docs/camp.md) ----------------------------------------------------
+  // Is this ground fit to stand a hut on? Same demands as a hearth (dry, level,
+  // grass, clear of trunks) — a hut is a lighter thing than a fire, but it is a
+  // place people sleep, and nobody sleeps on a slope or in a bog.
+  hutGroundOk(x, z, rad = HUT_RAD[1]){
+    if (Math.hypot(x, z) >= WORLD_R || !walkable(x, z)) return false;
+    if (terrainType(x, z) !== 'grass') return false;
+    if (ringSpread(x, z, rad) > MAX_FIRE_SPREAD) return false;      // not on a hillside, across the whole floor
+    for (const o of this.obstaclesNear(x, z)){
+      if (o.alive === false) continue;
+      const clear = o.r >= 0.85 ? HUT_TREE_CLEAR : HUT_SHRUB_CLEAR;
+      if (Math.hypot(x - o.x, z - o.z) < o.r + rad + clear) return false;   // the whole dome, and a path round it
+    }
+    // nor over anything that grows to eat: an apple tree through the thatch, or a
+    // berry bush nobody can reach again (foragers ground at the wall, flipping)
+    for (const pl of this.foodNear(x, z, rad + 3)){
+      const clear = pl.kind === 'apples' ? 0.9 + HUT_TREE_CLEAR : pl.kind === 'berries' || pl.kind === 'hazelnuts' ? 0.6 + HUT_SHRUB_CLEAR : 0.5;
+      if (Math.hypot(x - pl.x, z - pl.z) < rad + clear) return false;
+    }
+    for (const sh of this.shrines) if (Math.hypot(x - sh.x, z - sh.z) < rad + Math.max(...RING_R) + 1) return false;   // nor on holy ground
+    return true;
+  }
+  // food plants near a point, by a coarse grid built once (plants don't move)
+  foodNear(x, z, r){
+    if (!this._foodGrid || this._foodGridOf !== this.food){
+      this._foodGrid = new Map(); this._foodGridOf = this.food;
+      for (const pl of this.food){ const k = Math.floor(pl.x / 8) + ',' + Math.floor(pl.z / 8); let a = this._foodGrid.get(k); if (!a) this._foodGrid.set(k, a = []); a.push(pl); }
+    }
+    const out = [];
+    for (let cx = Math.floor((x - r) / 8); cx <= Math.floor((x + r) / 8); cx++)
+      for (let cz = Math.floor((z - r) / 8); cz <= Math.floor((z + r) / 8); cz++){
+        const a = this._foodGrid.get(cx + ',' + cz); if (a) for (const pl of a) if (Math.hypot(pl.x - x, pl.z - z) < r) out.push(pl);
+      }
+    return out;
+  }
+  // The huts that ring a hearth — by PROXIMITY, not by which fire object they
+  // were raised at. Cold hearths crumble (FIRE_RECLAIM) and a fire relit on the
+  // same ground is a new object, so identity would let a camp grow a second full
+  // ring of six on top of the first.
+  hutsAt(fire){
+    const far = (fire.ringR || 2.3) + HUT_RAD[1] * 2 + HUT_RING[HUT_RING.length - 1] + HUT_GAP;
+    return this.huts.filter(h => Math.hypot(h.x - fire.x, h.z - fire.z) < far);
+  }
+
+  // Somewhere to cut an armful of thatch: open meadow, near at hand. Grass isn't
+  // a placed object in the Lea (it's a billboard field), so the affordance is the
+  // ground itself — walk to open grass and cut. Returns [x,z] or null.
+  thatchSpot(x, z){
+    for (let k = 0; k < 14; k++){
+      const a = this.rng() * Math.PI * 2, r = 3 + this.rng() * 15;
+      const px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+      if (Math.hypot(px, pz) >= WORLD_R || !walkable(px, pz)) continue;
+      if (terrainType(px, pz) !== 'grass') continue;
+      if (this.inObstacle(px, pz)) continue;
+      return [px, pz];
+    }
+    return null;
+  }
+
+  // Where a hut goes. On the ring OUTSIDE the fire's sitting circle, doorway to
+  // the hearth — and, the part that matters socially, in the arc where this
+  // person's own kin have already settled (Pat. 37 HOUSE CLUSTER). With no kin
+  // here they take the widest gap in the ring, so strangers end up across the
+  // clearing from each other. Returns {x,z,angle} or null if the ring is full.
+  hutSite(fire, npc){
+    const here = this.hutsAt(fire);
+    if (here.length >= HUTS_PER_FIRE) return null;
+    const angOf = h => Math.atan2(h.x - fire.x, h.z - fire.z);
+    let base = null;
+    for (const h of here) if (h.kin && npc.group && h.kin === npc.group){ base = angOf(h); break; }
+    if (base === null){
+      if (!here.length) base = this.rng() * Math.PI * 2;
+      else {                                   // the widest gap between standing huts
+        const angs = here.map(angOf).sort((a, b) => a - b);
+        let widest = -1;
+        for (let i = 0; i < angs.length; i++){
+          const a0 = angs[i];
+          const a1 = i + 1 < angs.length ? angs[i + 1] : angs[0] + Math.PI * 2;
+          if (a1 - a0 > widest){ widest = a1 - a0; base = a0 + (a1 - a0) / 2; }
+        }
+      }
+    }
+    // How big a hut this person will raise: a household's worth. Someone with kin
+    // about them builds for a family; a loner builds for themself.
+    const kin = npc.group ? this.npcs.reduce((c, o) => c + (o.group === npc.group ? 1 : 0), 0) : 1;
+    const want = HUT_RAD[0] + (HUT_RAD[1] - HUT_RAD[0]) * clamp01((kin - 1) / 4);
+    const rad = Math.min(HUT_RAD[1], Math.max(HUT_RAD[0], want + (this.rng() - 0.5) * 0.3));
+
+    for (let k = 0; k < 24; k++){
+      // fan out from the base angle, alternating sides, so we settle as near our
+      // kin as the ground allows — in fine steps, because in the wood the open
+      // ground between trunks comes in narrow wedges a coarse fan steps over
+      const a = base + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 12);
+      for (const gap of HUT_RING){
+        const r = (fire.ringR || 2.3) + rad + gap;   // clear of the seats, whatever its size
+        const x = fire.x + Math.sin(a) * r, z = fire.z + Math.cos(a) * r;
+        if (!this.hutGroundOk(x, z, rad)) continue;
+        if (!this.siteClear(x, z, rad, npc)) continue;
+        return { x, z, rad, angle: Math.atan2(fire.x - x, fire.z - z) };   // doorway to the fire
+      }
+    }
+    return null;
+  }
+
+  // Is there room here for a hut of this size? Walls must clear walls — with huts
+  // of different sizes a fixed centre-to-centre spacing is simply wrong — and a
+  // site someone else is walking toward counts as taken.
+  //
+  // That second half is what stopped huts overlapping. A site used to be judged
+  // only against huts that already STOOD, and a hut did not exist until its
+  // builder arrived and began — so two people could pick neighbouring spots, walk
+  // there, and each raise a hut through the other. The claim closes that window:
+  // choosing a site takes it out of circulation before anyone sets off.
+  siteClear(x, z, rad, npc){
+    for (const h of this.huts)
+      if (Math.hypot(h.x - x, h.z - z) < h.rad + rad + HUT_GAP) return false;
+    for (const c of this._siteClaims)
+      if (c.npc !== npc && Math.hypot(c.x - x, c.z - z) < c.rad + rad + HUT_GAP) return false;
+    return true;
+  }
+  claimSite(npc, site){
+    this.releaseSite(npc);
+    this._siteClaims.push({ npc, x: site.x, z: site.z, rad: site.rad, t: SITE_CLAIM_T });
+  }
+  releaseSite(npc){
+    const i = this._siteClaims.findIndex(c => c.npc === npc);
+    if (i >= 0) this._siteClaims.splice(i, 1);
+  }
+
+  addHut(x, z, angle, owner, fire, rad){
+    const h = new Hut(this, x, z, angle, owner, fire, rad);
+    this.nav?.block(x, z, rad, 1);                    // routes go round it, not through the wall
+    if (this.makeHutView) this.makeHutView(h);       // sets h.view + h.group
+    if (h.group) this.scene.add(h.group);
+    this.huts.push(h); return h;
+  }
+  removeHut(h){
+    if (!h) return;
+    for (const n of this.npcs){        // nobody is left "inside" a hut that is gone
+      if (n.brain && n.brain._buildingHut === h) n.brain._buildingHut = null;
+      if (n._hutIn === h) n._hutIn = null;
+      if (n._hutWant === h) n._hutWant = null;
+      if (n._skirt && n._skirt.h === h) n._skirt = null;
+    }
+    const i = this.huts.indexOf(h); if (i < 0) return;
+    this.huts.splice(i, 1);
+    this.nav?.block(h.x, h.z, h.rad, -1);
+    if (h.group) this.scene.remove(h.group);
+  }
+
+  // place a lean-to near (x,z), open front facing the nearest campfire
+  addShelter(x, z){
+    let angle = Math.random() * Math.PI * 2;
+    let nd = 50;
+    for (const f of this.fires){
+      const d = Math.hypot(f.x - x, f.z - z);
+      if (d < nd){ nd = d; angle = Math.atan2(f.x - x, f.z - z); }
+    }
+    const s = new Shelter(this, x, z, angle);
+    if (this.makeShelterView) this.makeShelterView(s);   // sets s.view + s.group
+    if (s.group) this.scene.add(s.group);
+    this.shelters.push(s); return s;
+  }
+  removeShelter(s){
+    if (!s) return;
+    const i = this.shelters.indexOf(s); if (i >= 0) this.shelters.splice(i, 1);
+    if (s.group) this.scene.remove(s.group);
+  }
+
+  // Keep bodies on the right side of a hut's wall. Called after everything that
+  // can move someone — the brains, and the personal-space pass, which would
+  // otherwise shove an occupant out through the thatch.
+  //
+  // The rule is one rule, applied to everyone: **you may only cross the wall
+  // through the doorway.** `_hutIn` records whose hut you are inside, and is set
+  // only at the moment you cross at the door, so nobody can end up indoors by
+  // drifting through the back.
+  confine(npc){
+    for (const h of this.huts){
+      if (h.frame <= 0) continue;      // no walls yet: nothing to keep anyone out of
+      const dx = npc.x - h.x, dz = npc.z - h.z;
+      const d2 = dx * dx + dz * dz;
+      const W = h.rad;
+      if (d2 >= (W + 0.6) * (W + 0.6)){
+        if (npc._hutIn === h) npc._hutIn = null;      // stepped clear of it
+        continue;
+      }
+      const d = Math.sqrt(d2) || 1e-4;
+      const put = (r) => { npc.x = h.x + dx / d * r; npc.z = h.z + dz / d * r; };
+      if (d >= W){                                    // outside, but close
+        if (npc._hutIn === h) npc._hutIn = null;
+        continue;
+      }
+      if (npc._hutIn === h){
+        // Inside, rightfully. Held off the wall so no body pokes through the
+        // thatch — BUT the doorway is open both ways. Without that exception the
+        // clamp is a cage: it holds everyone inside the wall, so an occupant can
+        // never reach it to be let out again.
+        if (!h.atDoor(npc.x, npc.z) && d > h.inner) put(h.inner);
+        continue;
+      }
+      // crossing the wall: allowed only at the doorway, and only if this is the
+      // hut we're actually making for
+      if (npc._hutWant === h && h.atDoor(npc.x, npc.z)){ npc._hutIn = h; continue; }
+      put(W + HUT_BODY);                              // else the wall stops you
+    }
   }
 
   setFood(plants){ this.food = plants || []; }
@@ -1845,7 +2800,7 @@ export class AgentWorld {
   spawnFauna(n = FAUNA_N){
     for (let i = 0; i < n; i++){
       for (let k = 0; k < 40; k++){
-        const a = Math.random() * Math.PI * 2, r = Math.random() * WORLD_R * 0.85;
+        const a = this.rng() * Math.PI * 2, r = this.rng() * WORLD_R * 0.85;
         const x = Math.cos(a) * r, z = Math.sin(a) * r;
         if (walkable(x, z)){ this.fauna.push(new Quarry(this, x, z)); break; }
       }
@@ -1861,37 +2816,60 @@ export class AgentWorld {
     npc.brain = new Brain(this, npc);
     npc.culture = culture;
     // individual temperament + skill (see makePersona / Brain.choose)
-    const p = npc.persona = makePersona();
+    const p = npc.persona = makePersona(this.rng);
     if (npc.group && npc.group.kind === 'lone') p.company = Math.min(p.company, 0.65);   // loners keep apart
     npc.packMax      = Math.max(3, Math.round(PACK_MAX * p.strength));     // strong → carries more food
     npc.trinketMax   = Math.max(3, Math.round(TRINKET_MAX * p.strength));
     npc.chopTime     = CHOP_TIME / p.strength;                             // strong → fells shrubs faster
     npc.collectRange = COLLECT_RANGE * p.perception;                       // keen-eyed → spots finds further off
     // a name fitting the sprite's race; kin (family/clan) share their group surname
-    const nm = makeName(npc.slug);
+    const nm = makeName(npc.slug, this.rng);
     const surname = (npc.group && npc.group.surname) || nm.surname;
     npc.race = nm.race; npc.given = nm.given; npc.surname = surname; npc.gender = nm.gender;
-    npc.name = composeName({ given: nm.given, surname, full: `${nm.given} ${surname}` }, p);
+    npc.name = composeName({ given: nm.given, surname, full: `${nm.given} ${surname}` }, p, this.rng);
     // comfortable distance: solitary folk keep more room, sociable folk less
-    npc.personalSpace = culture.personalSpace * (1.5 - 0.45 * p.company) * (0.9 + Math.random() * 0.2);
+    npc.personalSpace = culture.personalSpace * (1.5 - 0.45 * p.company) * (0.9 + this.rng() * 0.2);
     npc.seen = new Map();   // groupmate -> { x, z, t } last-sighting memory (kin dialogue)
     npc.id = this._nextId++;   // stable id, so gossip can key facts by subject
     npc.news = new Map();      // small decaying store of facts heard or seen (see gossip)
     npc.esteem = 0;            // social standing — rises by giving, falls by hoarding (sharing)
-    npc.stargazer = Math.random() < STARGAZER_CHANCE;   // some read the stars & spread omens (astrology)
-    npc._omenCd = Math.random() * OMEN_CD[1];
+    npc.stargazer = this.rng() < STARGAZER_CHANCE;   // some read the stars & spread omens (astrology)
+    // and some are root-wise: they can hear what the wood carries at a great tree
+    // and repeat it — the folk's only ear on the mycelium (docs/sacred-trees.md §H)
+    npc.rootwise = this.rng() < ROOTWISE_CHANCE;
+    npc._omenCd = this.rng() * OMEN_CD[1];
     this.npcs.push(npc);
     return npc;
   }
 
-  syncSky(sky){ this.day = sky.day ?? 1; this.night = sky.night ?? 0; this.evening = sky.evening ?? 0; this.time = sky.time ?? this.time;
+  syncSky(sky){ this.day = sky.day ?? 1; this.night = sky.night ?? 0; this.evening = sky.evening ?? 0; this.time = sky.time ?? this.time; this.cloud = sky.cloudCover ?? 0;
     this.moonLon = sky.moonLon ?? 0; this.sunLon = sky.sunLon ?? 0; this.moonIllum = sky.moonIllum ?? 0; }   // for astrology
 
   update(dt){
+    this._rebuildNeighbours();   // bins for near(); everything below asks it instead of scanning everyone
+
+    // The moot (docs/sacred-trees.md §G — the West African palaver tree, where a
+    // village argues out its disputes under the great baobab). Enough folk sitting
+    // the stone ring together turns a solitary devotion into an assembly: company
+    // is sated far more deeply, as at the night fire. The gossip layer needs no
+    // help — sitting a shared ring already puts them in each other's range.
+    for (const sh of this.shrines){
+      // count everyone AT the rite in the glade, not only those already seated —
+      // the approach (gates, circuit, laying a stone) takes longer than the sitting,
+      // so counting seats alone meant two visits could never overlap and no moot
+      // could ever form.
+      let present = 0, seated = 0;
+      for (const n of this.near(sh.x, sh.z, sh.glade, this._scratch)){
+        if (n.actionLabel === 'revere'){ present++; if (n.sitting) seated++; }
+      }
+      sh.present = present; sh.seated = seated;
+      sh.moot = present >= GATHER_MIN;
+    }
+
     const keep = [];
     for (const f of this.fires){
       f.update(dt);
-      const near = this.npcs.some(n => Math.hypot(n.x - f.x, n.z - f.z) < TEND_RADIUS);
+      const near = this.near(f.x, f.z, TEND_RADIUS, this._scratch).length > 0;
       // never leave a fire burning unattended: if nobody is near it, the last to
       // leave damps it (a short grace so brief stepping-away doesn't kill it).
       if (f.lit){
@@ -1907,33 +2885,69 @@ export class AgentWorld {
         const abandoned = f.done && !near && (f.pot.raw + f.pot.ready) <= 0 && f.woodpile <= 0;
         f.deadT = abandoned ? (f.deadT || 0) + dt : 0;
         if (f.deadT > FIRE_RECLAIM){
-          this.scene.remove(f.group);
+          if (f.group) this.scene.remove(f.group);
           for (const n of this.npcs) if (n.brain) n.brain._blacklist.delete(f);
         } else keep.push(f);
       }
     }
     this.fires = keep;
-    // sightings + gossip (cheap O(n²); the world has tens of NPCs, not thousands).
-    // Seeing someone makes a fresh "saw" fact; standing close enough to talk trades
-    // the freshest news both ways, so word of people & food outruns line-of-sight.
-    const now = this.time;
-    for (const n of this.npcs) n._gossipCd = (n._gossipCd || 0) - dt;
-    for (const n of this.npcs){
-      for (const o of this.npcs){
-        if (o === n) continue;
-        const d = Math.hypot(o.x - n.x, o.z - n.z);
-        if (d <= SIGHT_RANGE){                          // saw them with our own eyes
+    // the roofs rot (fast under rain) — mending them is the folk's own business
+    for (const h of this.huts) h.tick(dt, this.rain || 0);
+    // A raising nobody has come back to is given up on and the ground cleared —
+    // otherwise a builder who wanders off (or starves) leaves a ring of stakes
+    // standing for ever, and the site stays blocked for everyone else.
+    for (let i = this.huts.length - 1; i >= 0; i--){
+      const h = this.huts[i];
+      if (!h.done){                       // a raising nobody came back to
+        h.idleT += dt;
+        if (h.idleT > ABANDON_T) this.removeHut(h);
+      } else if (h.unusedT > ROT_T){      // a derelict nobody thought worth salvaging
+        this.removeHut(h);                // ...falls in on itself, and the wood is lost
+      }
+    }
+    // a site nobody came back to stake goes back on the market
+    for (let i = this._siteClaims.length - 1; i >= 0; i--)
+      if ((this._siteClaims[i].t -= dt) <= 0) this._siteClaims.splice(i, 1);
+    if (this.huts.length) for (const n of this.npcs) this.confine(n);   // walls are solid
+    // Sightings + gossip. Seeing someone makes a fresh "saw" fact; standing close
+    // enough to talk trades the freshest news both ways, so word of people & food
+    // outruns line-of-sight. Only the folk actually within SIGHT_RANGE are looked
+    // at (near()), and the whole pass runs on the SOCIAL_DT clock rather than per
+    // frame — it used to compare every pair every frame, which is what made a
+    // crowded world crawl.
+    this._socialT += dt;
+    if (this._socialT >= SOCIAL_DT){
+      const sdt = this._socialT; this._socialT = 0;
+      const now = this.time;
+      for (const n of this.npcs){ n._gossipCd = (n._gossipCd || 0) - sdt; n._glanceCd = (n._glanceCd || 0) - sdt; }
+      const seen = [];
+      for (const n of this.npcs){
+        for (const o of this.near(n.x, n.z, SIGHT_RANGE, seen)){
+          if (o === n) continue;
           addNews(n, { kind: 'saw', key: 'saw:' + o.id, subj: o, x: o.x, z: o.z, t: now });
           if (n.group && o.group === n.group && n.seen) n.seen.set(o, { x: o.x, z: o.z, t: now });
+          const d = Math.hypot(o.x - n.x, o.z - n.z);
+          if (d <= GOSSIP_RANGE && n._gossipCd <= 0 && o._gossipCd <= 0 && !n.convo && !n.sleeping && !o.sleeping && !parted(n, o, now)){
+            // close enough to talk. Someone already talking isn't interrupted: you ask to
+            // join theirs, and the talk's culture says how that goes (convo.js offerJoin)
+            if (o.convo) o.convo.offerJoin(n);
+            else if (Conversation.worthIt(this, n, o)) this.convos.push(new Conversation(this, n, o));
+            else n._gossipCd = o._gossipCd = GOSSIP_CD;   // nothing to say: a nod will do
+          } else if (d <= GOSSIP_RANGE * 2 && n._glanceCd <= 0 && n.ties){  // passing by: a glimpse of how they feel
+            const t = n.ties.get(o);
+            if (t && t.fam > GLANCE_FAM && Math.abs(t.reg) > GLANCE_REG){
+              this._emit({ type: 'glance', who: n, at: o, like: t.reg > 0 });
+              n._glanceCd = GLANCE_CD;
+            }
+          }
         }
-        if (d <= GOSSIP_RANGE && n._gossipCd <= 0 && o._gossipCd <= 0){   // close enough to chat
-          shareNews(n, o); shareNews(o, n);
-          n._gossipCd = GOSSIP_CD; o._gossipCd = GOSSIP_CD;
-        }
+        pruneNews(n, now);
       }
-      pruneNews(n, now);
     }
     for (const q of this.fauna) q.update(dt);          // rabbits roam / flee / respawn
+    for (const c of this.convos) c.update(dt);         // talk, a turn at a time (convo.js)
+    if (this.projects.length) this.projects = this.projects.filter(p => !p.tick(this.time));   // deadlines (projects.js)
+    if (this.convos.some(c => c.done)) this.convos = this.convos.filter(c => !c.done);
   }
 
   // Personal-space pass (Pattern 127, INTIMACY GRADIENT). After everyone has
@@ -1943,6 +2957,7 @@ export class AgentWorld {
   // while open ground stays roomy. Comfort is culture-driven (npc.personalSpace).
   separate(dt){
     if (dt <= 0) return;
+    this._rebuildNeighbours();   // everyone has moved since update() binned them
     const list = this.npcs, n = list.length;
     for (let i = 0; i < n; i++){
       const a = list[i];
@@ -1951,14 +2966,17 @@ export class AgentWorld {
       // the seat while this pass pushes them out, so they micro-slide in place —
       // invisible when seated read as standing, but obvious with a sitting sprite.
       if (a.talking || a.sitting) continue;
-      const aSpace = (a.personalSpace || 1.3) * (a.sitting ? INTIMATE : 1);
+      // Indoors people stand closer — a hut is 3.2m across and holds a household,
+      // so full open-ground personal space would press them into the walls.
+      const aSpace = (a.personalSpace || 1.3) * (a.sitting ? INTIMATE : a._hutIn ? INTIMATE : 1);
       let px = 0, pz = 0;
-      for (let j = 0; j < n; j++){
-        if (j === i) continue;
-        const b = list[j];
+      // only the folk actually within crowding distance can push us (SEP_R is
+      // comfortably wider than any personal space), not the whole population
+      for (const b of this.near(a.x, a.z, SEP_R, this._scratch)){
+        if (b === a) continue;
         const dx = a.x - b.x, dz = a.z - b.z;
         const d = Math.hypot(dx, dz);
-        const bSpace = (b.personalSpace || 1.3) * (b.sitting ? INTIMATE : 1);
+        const bSpace = (b.personalSpace || 1.3) * (b.sitting || b._hutIn ? INTIMATE : 1);
         const want = Math.max(HARD_R, (aSpace + bSpace) * 0.5);
         if (d > want) continue;
         if (d < 1e-3){ const r = Math.random() * Math.PI*2; px += Math.cos(r); pz += Math.sin(r); continue; }
@@ -1973,6 +2991,7 @@ export class AgentWorld {
         const nx = a.x + px * sc, nz = a.z + pz * sc;
         if (walkable(nx, nz) && Math.hypot(nx, nz) < WORLD_R){ a.x = nx; a.z = nz; }
       }
+      this.confine(a);       // ...and nobody gets pushed out through a wall
     }
   }
 
@@ -1984,7 +3003,9 @@ export class AgentWorld {
       (f.pot.ready > 0 ? `/stew ${f.pot.ready}` : '')).join('  ');
     const standing = this.shrubs.reduce((s, x) => s + (x.alive ? 1 : 0), 0);
     const finds = this.valuables.reduce((s, x) => s + (x.ripe ? 1 : 0), 0);
-    const lines = [`day ${this.day.toFixed(2)}  night ${this.night.toFixed(2)}  ${fires || 'no fire'}  shrubs ${standing}  finds ${finds}`];
+    const huts = this.huts.length
+      ? `  huts ${this.huts.length}/thatch ${(this.huts.reduce((s, h) => s + h.thatch, 0) / this.huts.length * 100 | 0)}%` : '';
+    const lines = [`day ${this.day.toFixed(2)}  night ${this.night.toFixed(2)}  ${fires || 'no fire'}  shrubs ${standing}  finds ${finds}${this.shelters.length ? `  shelters ${this.shelters.length}` : ''}${huts}  rain ${(this.rain * 100 | 0)}%`];
     const near = this.npcs
       .map(n => ({ n, d: Math.hypot(n.x - px, n.z - pz) }))
       .sort((a, b) => a.d - b.d).slice(0, 7);
@@ -1992,7 +3013,7 @@ export class AgentWorld {
       const q = n.needs;
       lines.push(`W${bar(q.warmth)} F${bar(q.food)} C${bar(q.company)} R${bar(q.rest)}` +
         `  ${(n.actionLabel || '?').padEnd(7)} d${d.toFixed(0)}` +
-        `${n.sitting ? ' sit' : ''}${n.chopping ? ' chop' : ''}${n.firewood ? ' w' + n.firewood : ''}${n.pack ? ' p' + n.pack : ''}${n.raw ? ' r' + n.raw : ''}${n.trinkets ? ' t' + n.trinkets : ''}${n.news && n.news.size ? ' n' + n.news.size : ''}${n.esteem > 0.5 ? ' e' + n.esteem.toFixed(0) : ''}`);
+        `${n.sleeping ? ' zzz' : n.sitting ? ' sit' : ''}${n.chopping ? ' chop' : ''}${n.thatchArms ? ' th' + n.thatchArms : ''}${n.firewood ? ' w' + n.firewood : ''}${n.pack ? ' p' + n.pack : ''}${n.raw ? ' r' + n.raw : ''}${n.trinkets ? ' t' + n.trinkets : ''}${n.news && n.news.size ? ' n' + n.news.size : ''}${n.esteem > 0.5 ? ' e' + n.esteem.toFixed(0) : ''}`);
     }
     return lines.join('\n');
   }

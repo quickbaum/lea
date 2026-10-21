@@ -81,6 +81,8 @@ export class Rain {
 
   setSky(sky) { this._sky = sky; }
 
+  setFogBase(near, far){ this._fogN0 = near; this._fogF0 = far; }
+
   update(camX, camY, camZ, dt, cloudCover, wind) {
     // ── auto rain cycle ──
     if (this._sky) {
@@ -123,7 +125,8 @@ export class Rain {
     const ambient = Math.min(1, skyDay + moonI * 3);
     this._mat.opacity = (0.18 + I * 0.45) * (0.08 + 0.92 * ambient);
 
-    // fog: tighten and darken when raining.
+    // fog: tighten and darken when raining (from the base distances — which the
+    // settings panel's draw distance moves, via setFogBase).
     // sky.update() already set fog.color correctly for current time-of-day;
     // we nudge it slightly toward storm grey rather than replacing it wholesale,
     // so the rain haze stays dark at night instead of glowing light-grey.
@@ -181,6 +184,12 @@ export class Rain {
     if (!this._sky) return;
     this._rainLeft  = CYCLE_DURATION[0] + Math.random() * (CYCLE_DURATION[1] - CYCLE_DURATION[0]);
     this._rainCover = RAIN_COVER[0] + Math.random() * (RAIN_COVER[1] - RAIN_COVER[0]);
+    this._prevCover = this._sky.cloudCover;
+  }
+  heavyRain() {
+    if (!this._sky) return;
+    this._rainLeft  = CYCLE_DURATION[1];   // full duration at max intensity
+    this._rainCover = 1.0;
     this._prevCover = this._sky.cloudCover;
   }
   stopRain() {

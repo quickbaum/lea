@@ -1,18 +1,40 @@
 import * as THREE from 'three';
-import { PERSON_H, WORLD_R } from './config.js';
+import { PERSON_H, WORLD_R, UNITS_PER_M } from './config.js';
 import { height, walkable, randomLand } from './terrain.js';
 import { makeLabel } from './label.js';
 import { makePackTexture } from './textures.js';
+import { KIN_DYES, kinMark, patternMask } from './kin-mark.js';
+import { scanAtlas } from './headscan.js';
 
 const WHITE = new THREE.Color(1, 1, 1);
+const FACE_CARD_FALLBACK_TOP = 0.035;   // crown row / frameH if a frame's scan fails
 
-// Cache pack textures by their contents so identical packs share one texture.
+// Cache pack textures by their contents (and their household's mark) so
+// identical packs share one texture.
 const PACK_CACHE = new Map();
-function packTexture(food, wood, kind, trinkets){
+const PACK_MARK_N = 28;            // px per pattern repeat: one across the sack (fewer and the finer figures turn to noise)
+function packKey(food, wood, kind, trinkets, group){
   food = Math.min(food, 6); wood = Math.min(wood, 4); trinkets = Math.min(trinkets, 2);   // match the texture's draw caps
-  const key = food + '|' + wood + '|' + kind + '|' + trinkets;
+  let key = food + '|' + wood + '|' + kind + '|' + trinkets;
+  if (group && Number.isFinite(group.id)){
+    const m = kinMark(group.id);
+    // until the pattern has decoded the pack is drawn plain; the key changes once
+    // it is ready, so the next frame swaps in the marked one
+    key += '|' + m.key + '|' + m.dye + (patternMask(m.key, PACK_MARK_N) ? '' : '|plain');
+  }
+  return key;
+}
+function packTexture(food, wood, kind, trinkets, group, key){
   let t = PACK_CACHE.get(key);
-  if (!t){ t = makePackTexture(food, wood, kind, trinkets); PACK_CACHE.set(key, t); }
+  if (!t){
+    let mark = null;
+    if (group && Number.isFinite(group.id)){
+      const m = kinMark(group.id), mask = patternMask(m.key, PACK_MARK_N);
+      if (mask) mark = { mask, n: PACK_MARK_N, dye: KIN_DYES[m.dye] };
+    }
+    t = makePackTexture(Math.min(food, 6), Math.min(wood, 4), kind, Math.min(trinkets, 2), mark);
+    PACK_CACHE.set(key, t);
+  }
   return t;
 }
 
@@ -88,6 +110,23 @@ function tintSprite(img, pal, m, roles){
   return { tex: t, idleCol: m.walkStart };   // never the pre-coloured stand frame
 }
 
+// Painted-face card placement. The card is a small billboard held over the baked
+// sprite head — but WHERE the head is comes from scanning the sprite's pixels per
+// frame (js/headscan.js), so it tracks the character's height and its walk-sway
+// automatically. These are only the global art constants relating the painted
+// overlay to a detected head box; tuned live in face-placement.html →
+// face_params.json (defaults below apply if the file is missing).
+//   size — card height as a fraction of body height
+//   drop — card centre below the detected crown, as a fraction of body height
+//   x    — fine horizontal nudge, as a fraction of body width
+//   fwd  — nudge toward camera so the card draws in front of the sprite plane
+// The crown (head top) and head-centre-x are read from the sprite per frame, so
+// the card follows the sway and the character's height; these globals relate the
+// painted overlay to that crown and are the same for every Lea (they share a skull).
+let FACE_CARD = { size: 0.16, drop: 0.075, x: 0.0, fwd: 0.05 };
+try { FACE_CARD = { ...FACE_CARD, ...(await (await fetch('face_params.json')).json()) }; }
+catch (_) { /* no params file — defaults stand */ }
+
 class AnimNPC {
   constructor(base, x, z, label = null){
     this.x = x; this.z = z; this.m = base.m; this.h = PERSON_H * raceScale(base.slug) * (base.heightScale || 1); this.label = label;
@@ -116,6 +155,24 @@ class AnimNPC {
       new THREE.MeshBasicMaterial({ alphaTest:0.5, transparent:true, fog:true })
     );
     this.packMesh.visible = false; this._packKey = '';
+    this.faceMesh = null;   // optional painted-face card over the head (setFace)
+  }
+  // Give this NPC a painted-face card (js/face.js) shown over the baked head when
+  // facing the camera. `tex` is a head-crop texture, `aspect` its width/height.
+  // Scans the sprite atlas for the head box per front-facing frame (so placement
+  // tracks height + sway) and sizes the card to the detected head width.
+  // Returns the mesh so the caller can add it to the scene.
+  setFace(tex, aspect){
+    this._headBoxes = scanAtlas(this._baseTex.image, this.m, [0, 1]);
+    // Card sized off body height (all Leas share a skull, so one size fits all);
+    // it's positioned per frame from the detected crown + sway in _updateFace.
+    const h = this._billboardH * FACE_CARD.size, w = h * aspect;
+    this.faceMesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(w, h),
+      new THREE.MeshBasicMaterial({ map: tex, transparent: true, alphaTest: 0.35, fog: true, depthWrite: false })
+    );
+    this.faceMesh.renderOrder = 1;   // draw after the body sprite so it sits on top
+    return this.faceMesh;
   }
   setCell(row, col, flip){
     const C = this.m.cols, R = this.m.rows, t = this.tex;
@@ -138,6 +195,42 @@ class AnimNPC {
     }
     this.mesh.material.map = this.tex; this.mesh.material.needsUpdate = true;
     this.frame = 0; this.frameT = 0;
+  }
+  // Replace the base atlas with one baked on this machine (js/avatar-bake.js). It has
+  // its own frame size, and its own HEIGHT: the billboard spans `frameM` metres of
+  // world, so a tall body is a tall sprite. Pose atlases don't apply to it.
+  setAtlas(image, m, frameM){
+    const t = new THREE.Texture(image);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    t.needsUpdate = true;
+    this.tex.dispose?.();
+    this.tex = t; this._baseTex = t; this.m = m; this._baseM = m;
+    this.poses = null; this._poseTex = {}; this._curPose = null; this._headBoxes = null;
+    this.idleCol = m.standCol; this._baseAspect = m.frameW / m.frameH;
+    this.h = this._billboardH = frameM * UNITS_PER_M;
+    const gy = height(this.x, this.z);
+    this.mesh.geometry.dispose();
+    this.mesh.geometry = new THREE.PlaneGeometry(this._billboardH * this._baseAspect, this._billboardH);
+    this.mesh.position.set(this.x, gy + this._billboardH / 2, this.z);
+    if (this.label) this.label.position.set(this.x, gy + this._billboardH + 0.6, this.z);
+    this.mesh.material.map = t; this.mesh.material.needsUpdate = true;
+    this.setCell(0, this.idleCol, false);
+    this.baked = true;
+  }
+  // a pose atlas baked on this machine (avatar-bake.js bakeSitAtlas): same frame
+  // height and world scale as the walk atlas, its own width
+  setPoseAtlas(pose, image, m){
+    const t = new THREE.Texture(image);
+    t.colorSpace = THREE.SRGBColorSpace;
+    t.magFilter = t.minFilter = THREE.NearestFilter;
+    t.generateMipmaps = false;
+    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
+    t.needsUpdate = true;
+    (this.poses ??= {})[pose] = { tex: t, m };
+    this._poseTex[pose] = null; this._curPose = null;
   }
   // swap this NPC's atlas for one tinted to `palette`, and move idle/chop onto a
   // tintable frame if the stand frame is a pre-coloured variant. Keeps the current
@@ -279,7 +372,9 @@ class AnimNPC {
     this._lastX = this.x; this._lastZ = this.z;
     // boat crossing counts as planted for pose selection even though position changes
     const planted = speed < 0.15 || !!this._inBoat;
-    this._usePose(null); // sit sprites disabled — walk atlas used in all states
+    // only the baked villagers' seated sheets (avatar-bake.js) — the older painted
+    // sitting sheets stay off, as they have been since July
+    this._usePose(this.baked && this.sitting && planted && this.poses?.sitting ? 'sitting' : null);
     // NPCs in boats with no sitting sprite: show only the top half of the walk sprite
     // so their legs don't appear below the waterline. rideY is set to the gunwale.
     const boatClip = !!this._inBoat && !this._curPose;
@@ -316,6 +411,7 @@ class AnimNPC {
     }
     if (this.hopGait) col = this.idleCol;              // legs-together frame reads as a bound
     this.setCell(row, col, flip);
+    if (this.faceMesh) this._updateFace(row, col, flip, toCam, gy, hopOff + swayBob - chopDip, lean + sway, tint);
     if (boatClip) {
       // crop to the top half of the current cell so only torso+head shows above the gunwale
       this.tex.repeat.y = 0.5 / this.m.rows;
@@ -331,20 +427,54 @@ class AnimNPC {
   _updatePack(toCam, sy = 1, tint, hopOff = 0){
     const food = this.pack | 0, wood = this.firewood | 0, trink = this.trinkets | 0;
     if (food <= 0 && wood <= 0 && trink <= 0){ this.packMesh.visible = false; return; }
-    const kind = this.packKind || 'food';
-    const key = food + '|' + wood + '|' + kind + '|' + trink;
+    // the morsels poking out are what's actually carried (larder.js), a few of each kind
+    const kind = this.larder && this.larder.length
+      ? this.larder.flatMap(b => Array(Math.min(b.n, 3)).fill(b.kind)).slice(0, 6).join(',') : (this.packKind || 'food');
+    const key = packKey(food, wood, kind, trink, this.group);
     if (key !== this._packKey){
       this._packKey = key;
-      this.packMesh.material.map = packTexture(food, wood, kind, trink);
+      this.packMesh.material.map = packTexture(food, wood, kind, trink, this.group, key);
       this.packMesh.material.needsUpdate = true;
     }
     const back = 0.18, fx = Math.sin(this.heading), fz = Math.cos(this.heading);
     const gy = this.rideY != null ? this.rideY : height(this.x, this.z);   // ride the gunwale over water
-    this.packMesh.position.set(
+    if (this._curPose === 'sitting'){
+      // seated: the pack is off, resting on the ground at their side
+      const side = this.h * 0.32, behind = this.h * 0.06, half = this.packMesh.geometry.parameters.height / 2;
+      const px = this.x - fz*side - fx*behind, pz = this.z + fx*side - fz*behind;
+      this.packMesh.position.set(px, (this.rideY != null ? this.rideY : height(px, pz)) + half, pz);
+    } else this.packMesh.position.set(
       this.x - fx*back, gy + this.h*0.6*sy + hopOff, this.z - fz*back);
     this.packMesh.rotation.set(0, toCam, 0, 'YXZ');
     this.packMesh.material.color.copy(tint || WHITE);
     this.packMesh.visible = true;
+  }
+
+  // Hold the painted-face card over the head, facing the camera. Only shown when
+  // the NPC is facing us (front sectors) — the painted face is frontal, so it
+  // hides as they turn away and the baked head takes over. The head position is
+  // read from the current frame's detected head box, so the card tracks the
+  // walk-sway and the character's height. Lit with the body.
+  _updateFace(row, col, flip, toCam, gy, yOff, rotZ, tint){
+    const fm = this.faceMesh;
+    fm.visible = (row === 0 || row === 1) && !this._inBoat;
+    if (!fm.visible) return;
+    const fh = this.m.frameH, fw = this.m.frameW;
+    const hb = this._headBoxes?.[row]?.[col] || this._headBoxes?.[0]?.[0];
+    // Anchor to the detected crown, dropped down to the face; centre-x follows sway.
+    const topFrac = hb ? hb.top / fh : FACE_CARD_FALLBACK_TOP;
+    let cxFrac = hb ? hb.cx / fw - 0.5 : 0;
+    if (flip) cxFrac = -cxFrac;                                    // mirrored 3/4 view
+    const bodyW = this._billboardH * (fw / fh);
+    const ox = (cxFrac + FACE_CARD.x) * bodyW;                     // horizontal in the billboard plane
+    const fx = Math.sin(toCam), fz = Math.cos(toCam);             // toward camera
+    fm.position.set(
+      this.x + fx * FACE_CARD.fwd + Math.cos(toCam) * ox,
+      gy + this._billboardH * (1 - topFrac - FACE_CARD.drop) + yOff,
+      this.z + fz * FACE_CARD.fwd - Math.sin(toCam) * ox);
+    fm.rotation.set(0, toCam, rotZ, 'YXZ');
+    fm.material.color.copy(tint || WHITE);
+    if (this.fireGlow) fm.material.color.lerp(FIRE_GLOW, this.fireGlow);
   }
 }
 

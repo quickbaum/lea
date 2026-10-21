@@ -6,7 +6,12 @@
 // only on actual grass (not on trodden paths), and fade out at the radius edge,
 // so there's no hard pop as you walk.
 //
-// It rides the world's low internal resolution (PIXEL=3 in main.js): a 1px line
+// The sway and the edge fade run in the vertex shader. The blade buffers are
+// rewritten only when a blade wraps to the far side or the trail under it wears;
+// recomputing all 60k blades on the CPU and re-uploading ~5 MB every frame you
+// walked was what made walking-while-looking-around stutter.
+//
+// It rides the world's low internal resolution (PIXEL in main.js): a 1px line
 // in the render buffer upscales to a chunky pixel blade, matching the look.
 
 import * as THREE from 'three';
@@ -31,6 +36,12 @@ function grassLength(x, z){
 // Half-width of a blade quad in world units. At PIXEL=3 upscale, ~0.05 reads as
 // 2–3 pixels wide up close, thinning naturally with distance.
 const BLADE_HALF_W = 0.05;
+// Blades that wrap to the far edge land where the fade has them invisible, so
+// their upload can wait: flush at most every FLUSH_EVERY frames while walking.
+const FLUSH_EVERY = 4;
+// Trail wear (paths thinning the grass) changes slowly; refresh 1/TRAIL_FRAMES of
+// the blades each frame, as one contiguous upload.
+const TRAIL_FRAMES = 30;
 
 export class GrassDetail {
   constructor(scene, { count = 14000, radius = 12, trail = null, fade = 'alpha' } = {}){
@@ -39,7 +50,7 @@ export class GrassDetail {
     this.trail = trail;
     this.fadeMode = fade;
     this._lcx = Infinity; this._lcz = Infinity;
-    this._frame = 0;
+    this._frame = 0; this._lastFlush = 0; this._dirty = false; this._ti = 0;
     // per-blade state
     this.bx = new Float32Array(count);
     this.bz = new Float32Array(count);
@@ -57,6 +68,8 @@ export class GrassDetail {
     // 3 verts per blade (base-left, base-right, tip) — one triangle
     this.pos = new Float32Array(count * 3 * 3);
     this.col = new Float32Array(count * 3 * 4);
+    // per vertex (phase, sway height): the tip carries the blade height, the base 0
+    this.sway = new Float32Array(count * 3 * 2);
 
     // static index buffer: 1 triangle per blade
     const idx = new Uint32Array(count * 3);
@@ -80,9 +93,36 @@ export class GrassDetail {
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     geo.setAttribute('position', new THREE.BufferAttribute(this.pos, 3));
     geo.setAttribute('color',    new THREE.BufferAttribute(this.col, 4));
+    geo.setAttribute('aSway',    new THREE.BufferAttribute(this.sway, 2));
     this.geo = geo;
     const mat = new THREE.MeshBasicMaterial({
       vertexColors: true, transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide });
+    this._u = {
+      uTime: { value: 0 }, uGust: { value: 1 }, uWind: { value: new THREE.Vector2(1, 0) },
+      uCam: { value: new THREE.Vector2() }, uR: { value: radius },
+      uFadeIn: { value: 1 / (radius * 0.35) }, uFadeOn: { value: fade ? 1 : 0 },
+    };
+    mat.onBeforeCompile = sh => {
+      Object.assign(sh.uniforms, this._u);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', `#include <common>
+          attribute vec2 aSway;
+          uniform float uTime, uGust, uR, uFadeIn, uFadeOn;
+          uniform vec2 uWind, uCam;
+          varying float vFade;`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>
+          // bend = (steady gust + flutter) * blade height * tip-exaggeration; only the tip moves
+          float bend = (uGust * 0.03 + sin(uTime * 1.9 + aSway.x) * 0.013) * aSway.y * 4.0;
+          transformed.xz += uWind * bend;
+          float df = clamp((uR - distance(transformed.xz, uCam)) * uFadeIn, 0.0, 1.0);
+          vFade = mix(1.0, df, uFadeOn);`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', `#include <common>
+          varying float vFade;`)
+        .replace('#include <color_fragment>', `#include <color_fragment>
+          diffuseColor.a *= vFade;`);
+    };
+    mat.customProgramCacheKey = () => 'grass-detail-sway';
     this.mesh = new THREE.Mesh(geo, mat);
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
@@ -106,47 +146,71 @@ export class GrassDetail {
     this.col[o]   = bR; this.col[o+1] = bG; this.col[o+2] = bB;
     this.col[o+4] = bR; this.col[o+5] = bG; this.col[o+6] = bB;
     this.col[o+8] = tR; this.col[o+9] = tG; this.col[o+10] = tB;
+    this._alpha(i);
+    // static triangle — base-left, base-right, tip; the shader sways the tip
+    const by = this.by[i], h = this.bh[i], px = this.pw[i*2], pz = this.pw[i*2+1];
+    const pos = this.pos, o9 = i * 9;
+    pos[o9]   = x - px;           pos[o9+1] = by;     pos[o9+2] = z - pz;
+    pos[o9+3] = x + px;           pos[o9+4] = by;     pos[o9+5] = z + pz;
+    pos[o9+6] = x + this.lx[i];   pos[o9+7] = by + h; pos[o9+8] = z + this.lz[i];
+    const sw = this.sway, o6 = i * 6, ph = this.ph[i];
+    sw[o6] = ph; sw[o6+1] = 0; sw[o6+2] = ph; sw[o6+3] = 0; sw[o6+4] = ph; sw[o6+5] = h;
+  }
+
+  // vertex alpha = grows here × not worn away by a trail (the edge fade is the shader's)
+  _alpha(i){
+    let a = this.on[i] ? 1 : 0;
+    if (a && this.trail){
+      const w = this.trail.wearAt(this.bx[i], this.bz[i]);
+      if (w > 0.05){ const tf = 1 - (w - 0.05) / 0.18; a *= tf < 0 ? 0 : tf; }
+    }
+    const o12 = i * 12;
+    this.col[o12+3] = this.col[o12+7] = this.col[o12+11] = a;
   }
 
   update(camX, camZ, t, tint){
     if (tint) this.mesh.material.color.copy(tint);
-    const swayFrame = (this._frame++ % 2) === 0;   // recompute sway every other frame
-    const R = this.R, R2 = R * 2, pos = this.pos, col = this.col, trail = this.trail;
-    const camMoved = camX !== this._lcx || camZ !== this._lcz;
-    this._lcx = camX; this._lcz = camZ;
-    if (!swayFrame && !camMoved) return;            // nothing to do this frame
-    const wAng = t * 0.13, wx = Math.cos(wAng), wz = Math.sin(wAng);
-    const gust = 0.6 + 0.4 * Math.sin(t * 0.7);
-    const fadeIn = 1 / (R * 0.35);
-    for (let i = 0; i < this.n; i++){
-      let x = this.bx[i], z = this.bz[i], moved = false;
-      if (x - camX >  R){ x -= R2; moved = true; } else if (x - camX < -R){ x += R2; moved = true; }
-      if (z - camZ >  R){ z -= R2; moved = true; } else if (z - camZ < -R){ z += R2; moved = true; }
-      if (moved){ this.bx[i] = x; this.bz[i] = z; this._sample(i); }
+    const u = this._u, wAng = t * 0.13;
+    if (this.swayOn !== false){                     // the settings panel can freeze the wind
+      u.uTime.value = t; u.uGust.value = 0.6 + 0.4 * Math.sin(t * 0.7);
+      u.uWind.value.set(Math.cos(wAng), Math.sin(wAng));
+    }
+    u.uCam.value.set(camX, camZ);
 
-      const by = this.by[i], h = this.bh[i];
-      const flutter = Math.sin(t * 1.9 + this.ph[i]);
-      // bend = (steady gust fraction + flutter fraction) * blade height * tip-exaggeration
-      const bend = (gust * 0.03 + flutter * 0.013) * h * 4;
-      const tipX = x + this.lx[i] + wx * bend;
-      const tipZ = z + this.lz[i] + wz * bend;
-      const pw = this.pw, px = pw[i*2], pz = pw[i*2+1];
-      const o9 = i * 9;
-      // base-left, base-right, tip (single point)
-      pos[o9]   = x    - px; pos[o9+1] = by;   pos[o9+2] = z    - pz;
-      pos[o9+3] = x    + px; pos[o9+4] = by;   pos[o9+5] = z    + pz;
-      pos[o9+6] = tipX;      pos[o9+7] = by+h; pos[o9+8] = tipZ;
-
-      if (camMoved){
-        let a = this.on[i] ? 1 : 0;
-        if (a && this.fadeMode){ const d = Math.hypot(x - camX, z - camZ); let df = (R - d) * fadeIn; a = df < 0 ? 0 : df > 1 ? 1 : df; }
-        if (a && trail){ const w = trail.wearAt(x, z); if (w > 0.05){ const tf = 1 - (w - 0.05) / 0.18; a *= tf < 0 ? 0 : tf; } }
-        const o12 = i * 12;
-        col[o12+3] = col[o12+7] = col[o12+11] = a;
+    // wrap blades that fell behind to the far side of the patch (toroidally)
+    if (camX !== this._lcx || camZ !== this._lcz){
+      this._lcx = camX; this._lcz = camZ;
+      const R = this.R, R2 = R * 2;
+      for (let i = 0; i < this.n; i++){
+        let x = this.bx[i], z = this.bz[i], moved = false;
+        if (x - camX >  R){ x -= R2; moved = true; } else if (x - camX < -R){ x += R2; moved = true; }
+        if (z - camZ >  R){ z -= R2; moved = true; } else if (z - camZ < -R){ z += R2; moved = true; }
+        if (moved){ this.bx[i] = x; this.bz[i] = z; this._sample(i); this._dirty = true; }
       }
     }
-    if (swayFrame) this.geo.attributes.position.needsUpdate = true;
-    if (camMoved)  this.geo.attributes.color.needsUpdate = true;
+
+    const a = this.geo.attributes;
+    this._frame++;
+    if (this._dirty && this._frame - this._lastFlush >= FLUSH_EVERY){
+      // wrapped blades are scattered through the buffers — send them whole
+      this._dirty = false; this._lastFlush = this._frame;
+      a.color.clearUpdateRanges();
+      a.position.needsUpdate = a.color.needsUpdate = a.aSway.needsUpdate = true;
+      return;
+    }
+    // otherwise refresh the trail wear on one slice, uploading just that slice
+    if (!this.trail) return;
+    const len = Math.ceil(this.n / TRAIL_FRAMES);
+    for (let k = 0; k < len; k++){
+      const i = this._ti; this._alpha(i);
+      if (k === 0) this._sliceStart = i;
+      this._ti = (i + 1) % this.n;
+      if (this._ti === 0 || k === len - 1){        // close a contiguous range at wrap or end
+        a.color.addUpdateRange(this._sliceStart * 12, (i - this._sliceStart + 1) * 12);
+        this._sliceStart = this._ti;
+      }
+    }
+    a.color.needsUpdate = true;
   }
 }
 

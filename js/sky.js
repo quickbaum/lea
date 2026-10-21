@@ -135,7 +135,7 @@ function makeCloudFieldTexture(){
 // stacked front-to-back (nearest lowest & darkest, farthest highest & palest),
 // each outline jagged from integer harmonics so it wraps seamlessly. The red
 // channel is a 0..1 depth/shade value — high at each crest, fading toward the
-// valley below — which the shader turns into the sky colour, darkened by depth,
+// valley below — which the shader turns into a mix of horizon haze and fog colour,
 // so the ranges read as receding gradient layers of haze (real aerial
 // perspective) rather than flat cut-outs.
 function makeMountainTexture(){
@@ -221,6 +221,10 @@ export class Sky {
   }
 
   // ── sky dome (gradient + sun glow) ──
+  // The dome and mountain ring are raw ShaderMaterials, which three does NOT
+  // convert to the sRGB output the way it does lit/fogged materials — so both end
+  // with <colorspace_fragment>. Without it the sky showed its linear values raw,
+  // darker than the fog the land fades into, and distant land glowed against it.
   _buildDome(){
     this.domeU = {
       uDay:        { value: 1 },
@@ -291,6 +295,7 @@ export class Sky {
             col = mix(col, ccol, thick * hf * uCloudOpacity);
           }
           gl_FragColor = vec4(col, 1.0);
+          #include <colorspace_fragment>
         }`,
     });
     this.dome = new THREE.Mesh(new THREE.SphereGeometry(380, 32, 16), mat);
@@ -303,31 +308,33 @@ export class Sky {
     this.mtnU = {
       uTex:      { value: makeMountainTexture() },
       uSkyHoriz: { value: new THREE.Color(0xbcd6ee) },
-      uSkyZen:   { value: new THREE.Color(0x2a6bc4) },
+      // the scene fog's own Color, shared by reference — so rain darkening it
+      // after sky.update() reaches the mountains too
+      uFog:      { value: this.scene.fog ? this.scene.fog.color : new THREE.Color(0x9fc6e8) },
       uDoomMode: { value: 0.0 },   // mirrors domeU — cylinder just discards when >0
     };
     const mat = new THREE.ShaderMaterial({
       uniforms: this.mtnU, transparent: true, depthWrite: true, depthTest: true,
       fog: false, side: THREE.BackSide,
       vertexShader: `
-        varying vec2 vUv; varying vec3 vDir;
+        varying vec2 vUv;
         void main(){
           vUv = uv;
-          vec4 wp = modelMatrix * vec4(position, 1.0);
-          vDir = wp.xyz - cameraPosition;
-          gl_Position = projectionMatrix * viewMatrix * wp;
+          gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
         }`,
       fragmentShader: `
-        uniform sampler2D uTex; uniform vec3 uSkyHoriz, uSkyZen;
+        uniform sampler2D uTex; uniform vec3 uSkyHoriz, uFog;
         uniform float uDoomMode;
-        varying vec2 vUv; varying vec3 vDir;
+        varying vec2 vUv;
         void main(){
           if (uDoomMode > 0.5) discard;  // dome handles doom sky
           vec4 t = texture2D(uTex, vUv);
           if (t.a < 0.5) discard;
-          vec3 d = normalize(vDir);
-          vec3 sky = mix(uSkyHoriz, uSkyZen, pow(clamp(d.y, 0.0, 1.0), 0.5));
-          gl_FragColor = vec4(sky * mix(0.97, 0.40, t.r), 1.0);
+          // Aerial perspective: the ranges stand beyond the fog's far wall, so none
+          // may be darker than the fog the land fades into. The nearest crest settles
+          // at the fog colour; valleys and farther ranges thin toward the horizon haze.
+          gl_FragColor = vec4(mix(uSkyHoriz, uFog, t.r), 1.0);
+          #include <colorspace_fragment>
         }`,
     });
     const R = 330, Hgt = 230;
@@ -598,12 +605,10 @@ export class Sky {
 
     const sunset = smooth(0.30, 0.0, Math.abs(sunAlt)) * smooth(-0.22, 0.08, sunAlt);
 
-    // The sky gradient as colours (horizon + zenith), blended day/night and
-    // tinted warm at sunset. The horizon band is the bright haze everything in
-    // the distance fades toward; the zenith is the deeper sky overhead.
+    // The horizon sky colour, blended day/night and tinted warm at sunset — the
+    // bright haze everything in the distance fades toward.
     const skyHoriz = this.domeU.uNightHoriz.value.clone().lerp(this.domeU.uHorizon.value, day)
       .lerp(this.domeU.uSunColor.value, sunset * 0.35);
-    const skyZen = this.domeU.uNightZenith.value.clone().lerp(this.domeU.uZenith.value, day);
     this.scene.background = skyHoriz;
 
     // Distant land settles a bit below the horizon haze (real aerial perspective:
@@ -615,10 +620,7 @@ export class Sky {
     const fogCol = skyHoriz.clone().multiplyScalar(fogMul);
     if (this.scene.fog) this.scene.fog.color.copy(fogCol);
 
-    if (this.mtnU){
-      this.mtnU.uSkyHoriz.value.copy(skyHoriz);
-      this.mtnU.uSkyZen.value.copy(skyZen);
-    }
+    if (this.mtnU) this.mtnU.uSkyHoriz.value.copy(skyHoriz);
 
     // Illumination tint for unlit billboards (people, Puck): bright by day, dim
     // and cool by night (lifted a little on bright-moon nights), warm at sunset —

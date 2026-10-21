@@ -8,7 +8,7 @@
 // overland, and fishing from the water. This module is just the vessel + riding.
 
 import * as THREE from 'three';
-import { WATER } from './config.js';
+import { WATER, WORLD_R, AREA } from './config.js';
 import { height } from './terrain.js';
 
 const HULL = 0x6b4a2b;     // bark-brown
@@ -144,9 +144,9 @@ export class Boats {
 
   // Scatter a few moored boats at lake edges: stand on a shore point, look for
   // water nearby, and beach a canoe at the waterline with its bow facing out.
-  scatter(rng, n = 4, radius = 90){
+  scatter(rng, n = Math.round(16 * AREA), radius = WORLD_R){
     let placed = 0, tries = 0;
-    while (placed < n && tries++ < 3000){
+    while (placed < n && tries++ < 750 * n){   // shoreline is a thin target — budget tries per boat
       const x = (rng() - 0.5) * radius * 2, z = (rng() - 0.5) * radius * 2;
       if (Math.hypot(x, z) > radius) continue;
       const h = height(x, z);

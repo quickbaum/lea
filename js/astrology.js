@@ -32,7 +32,11 @@ const DOMAIN = {
 
 // a portent grounded in the real phase + the moon's current house. `rnd` lets a
 // caller seed the interpretation (so a given stargazer reads it their own way).
-export function makeOmen({ moonLon, sunLon, illum }, rnd = Math.random){
+export function makeOmen(sky, rnd = Math.random){ return readOmen(sky, rnd).text; }
+
+// the same reading in parts, so it can be told a piece at a time in talk
+// ("The moon's in the House of the Hearth." "Meaning?" "Fortune runs high.")
+export function readOmen({ moonLon, sunLon, illum }, rnd = Math.random){
   const pick = arr => arr[Math.floor(rnd() * arr.length)];
   const waxing = Math.sin(moonLon - sunLon) > 0;
   const house = houseName(moonLon), phase = phaseName(illum, waxing);
@@ -41,9 +45,10 @@ export function makeOmen({ moonLon, sunLon, illum }, rnd = Math.random){
     : waxing ? pick(['things are on the grow', 'set to your work — it will prosper', 'the tide is coming in'])
     : pick(['it is a time to mend, not to begin', 'hold fast and waste nothing', 'the tide is going out']);
   const dom = DOMAIN[house];
-  return pick([
+  const text = pick([
     `The ${phase} rides in the House of the ${house} — ${tenor}, and ${dom}.`,
     `${cap(phase)} in the ${house}: ${tenor}.`,
     `With the moon in the House of the ${house}, ${tenor} — ${dom}.`,
   ]);
+  return { text, house, phase, tenor, dom };
 }

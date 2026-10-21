@@ -33,7 +33,8 @@ const OAK_AUTUMN = ['#8a5a2a','#7a4420','#9c6a2e','#6e3c1c'];
 const CONIFER_GREENS = ['#1a4226','#1e4a2a','#224e2e','#183c22','#265830'];
 
 const SHAPES = {
-  maple:   { R: MAPLE_R, tips: MAPLE_TIPS, greens: GREENS,        autumn: AUTUMN,     vein: 'rgba(20,50,15,0.5)' },
+  // maples stay green: an orange card in every fifth slot speckled every crown
+  maple:   { R: MAPLE_R, tips: MAPLE_TIPS, greens: GREENS,        autumn: null,       vein: 'rgba(20,50,15,0.5)' },
   oak:     { R: OAK_R,   tips: OAK_TIPS,   greens: OAK_GREENS,    autumn: OAK_AUTUMN, vein: 'rgba(30,48,16,0.55)' },
   conifer: { greens: CONIFER_GREENS },
 };
@@ -53,7 +54,7 @@ function leafPath(g, x0, y0, s, R){
 }
 
 function drawLeaf(g, x0, y0, s, rng, shape){
-  const autumn = rng() < 0.22;
+  const autumn = rng() < 0.22 && !!shape.autumn;    // rng drawn either way: the atlas's other cells stay put
   const base = autumn ? pick(rng, shape.autumn) : pick(rng, shape.greens);
   const { X, Y } = leafPath(g, x0, y0, s, shape.R);
   g.save(); g.clip();

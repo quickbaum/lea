@@ -21,12 +21,17 @@ export class NavGrid {
     this.cols = Math.ceil(SIZE / CELL);
     const N = this.cols * this.cols;
     this.walk = new Uint8Array(N);
+    this.held = new Uint8Array(N);          // how many huts stand on each cell (block)
     this.came = new Int32Array(N);
     this.g    = new Float32Array(N);
     this.seen = new Int32Array(N);          // search id a cell's g/came belongs to
     this.searchId = 0;
-    this.heap = new Int32Array(N * 4);      // min-heap of cell indices (lazy decrease-key)
-    this.hf   = new Float32Array(N * 4);    // their f-scores
+    // min-heap of cell indices (lazy decrease-key) and their f-scores. A search
+    // stops at maxExpand (6000) expansions, each pushing at most 8 neighbours,
+    // so 64k entries is plenty — sizing it by the grid (4 per cell) was 52 MB
+    // at 3200u. push() already refuses to overflow.
+    this.heap = new Int32Array(65536);
+    this.hf   = new Float32Array(65536);
     this.hn = 0;
   }
 
@@ -35,7 +40,22 @@ export class NavGrid {
   cxOf(c){ return -this.half + (c + 0.5) * this.cell; }
   czOf(r){ return -this.half + (r + 0.5) * this.cell; }
   inb(c, r){ return c >= 0 && r >= 0 && c < this.cols && r < this.cols; }
-  walkAt(c, r){ return this.inb(c, r) && this.walk[r * this.cols + c] === 1; }
+  walkAt(c, r){ const i = r * this.cols + c; return this.inb(c, r) && this.walk[i] === 1 && this.held[i] === 0; }
+
+  // Huts come and go, unlike trees: stamp one in (+1) or lift it (-1). A counter,
+  // not a flag, so lifting one hut never reopens ground another still stands on.
+  // Only cells whose centre is inside the wall — the doorway and the walk round
+  // are left to local steering.
+  block(x, z, rad, delta){
+    const c0 = this.col(x - rad), c1 = this.col(x + rad);
+    const r0 = this.row(z - rad), r1 = this.row(z + rad);
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+      if (!this.inb(c, r)) continue;
+      if (Math.hypot(this.cxOf(c) - x, this.czOf(r) - z) >= rad) continue;
+      const i = r * this.cols + c;
+      this.held[i] = Math.max(0, this.held[i] + delta);
+    }
+  }
 
   // Build the walkable grid. `blockers` = obstacle circles {x,z,r}; only the large
   // static ones (trees) are stamped out — small choppable shrubs are left to local

@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { WATER, WORLD_R } from '../config.js';
-import { height, terrainType, soilRichness, groundSink } from '../terrain.js';
+import { WATER, WORLD_R, AREA } from '../config.js';
+import { height, terrainType, soilRichness, groundSink, treeCover, habitat } from '../terrain.js';
 import { rand, randint, fork } from '../rng.js';
-import { makeGrassTexture, makePussywillowTexture, makeCattailTexture, makeAcornTexture, makeMushroomTexture, makeTrinketTexture, makeVineTexture, makeFernTexture, makeRedwoodFoliageTexture } from '../textures.js';
+import { makeGrassTexture, makePussywillowTexture, makeCattailTexture, makeAcornTexture, makeMushroomTexture, makeTrinketTexture, makeVineTexture, makeFernTexture, makeRedwoodFoliageTexture, makeSedgeTexture, makeCottonGrassTexture, makeHeatherTexture } from '../textures.js';
 import { makeLeafAtlas } from './leaf.js';
 import { makeBark, makeBirchBark, makeRedwoodBark, makeRowanBark } from './bark.js';
-import { generateTree, TREE_SPECIES, SHRUB_SPECIES, REDWOOD_SPECIES, OAK_SPECIES, BIRCH_SPECIES, ROWAN_SPECIES } from './tree.js';
+import { generateTree, leafMaterial, TREE_SPECIES, SHRUB_SPECIES, REDWOOD_SPECIES, OAK_SPECIES, BIRCH_SPECIES, ROWAN_SPECIES, PINE_SPECIES, ALDER_SPECIES } from './tree.js';
 
 // plantWorld — scatter trees & shrubs across the terrain. We generate a few
 // detailed archetypes once, then GPU-instance each across many positions, so
@@ -22,8 +22,220 @@ const _fEuler = new THREE.Euler();
 const _fQ    = new THREE.Quaternion();
 const _yAxis  = new THREE.Vector3(0, 1, 0);
 
+// ---- spatial tiling ---------------------------------------------------------
+// Each kind of tree used to be ONE world-spanning InstancedMesh with
+// frustumCulled = false, so every trunk and every leaf card in the world was
+// submitted to the GPU on every frame — bearable in a 400u world, ruinous once
+// it doubled. Instead we cut each set into CHUNK-sized tiles and draw only the
+// tiles you can see: fog closes at ~130u, so you are looking at a couple of
+// percent of the Lea, and that is all that gets drawn.
+//
+// A tile is NOT a mesh. At 3200u a mesh per tile per species meant ~80k
+// Object3Ds (~1.2 KB each before any geometry) and a culling pass that tested
+// 31k tiles a frame. So a tile holds a TileBatch — its instances' matrices,
+// with the setMatrixAt/instanceMatrix API chop() and trails already use — and
+// drawing goes through one pooled InstancedMesh per (geometry, material),
+// refilled from the visible tiles only when what's visible changes. Tiles are
+// also grouped into CELL-sized blocks, tested first, so the per-frame pass only
+// looks inside blocks that are in view.
+const CHUNK = 50;     // 100 culled too coarsely: a tile drew whole if any corner was in range
+const CELL = 400;     // culling blocks
+// Trees whose nearest trunk in the tile is past lodDist draw their far version
+// (generateTree's branchGeoFar/leafGeoFar) — by then the fog has a quarter of them.
+let lodDist = 55;
+export function setFloraLod(d){ lodDist = d; }   // the settings panel's tree-detail slider
+const floraTiles = [];   // { batches, plain, sphere, reach, vis, isFar }
+const cells = new Map(); // CELL block key -> { tiles, sphere }
+let cellsDirty = true;
+let poolScene = null;
+
+// Group entries (each `[x, z, …]`) into CHUNK-sized tiles, keyed by tile corner.
+function tileEntries(list){
+  const tiles = new Map();
+  for (const e of list){
+    const k = Math.floor(e[0] / CHUNK) + ',' + Math.floor(e[1] / CHUNK);
+    let a = tiles.get(k);
+    if (!a){ a = []; tiles.set(k, a); }
+    a.push(e);
+  }
+  return tiles;
+}
+
+// One tile's instances of one (geometry, material): a stand-in for a per-tile
+// InstancedMesh with just the part of its API the rest of the code uses.
+class TileBatch {
+  constructor(geometry, material, count){
+    this.isTileBatch = true;
+    this.geometry = geometry; this.material = material; this.count = count;
+    this.instanceMatrix = new THREE.InstancedBufferAttribute(new Float32Array(count * 16), 16);
+    this._v = -1;          // instanceMatrix.version last copied into the pool
+  }
+  setMatrixAt(i, m){ m.toArray(this.instanceMatrix.array, i * 16); }
+  getMatrixAt(i, m){ m.fromArray(this.instanceMatrix.array, i * 16); }
+}
+
+// The drawn side: one InstancedMesh per (geometry, material), sized to hold
+// every instance of it, of which only the visible tiles' are copied in.
+const pools = new Map();
+function poolFor(geometry, material){
+  const k = geometry.uuid + '|' + material.uuid;
+  let p = pools.get(k);
+  if (!p){ p = { geometry, material, members: [], mesh: null, dirty: true }; pools.set(k, p); }
+  return p;
+}
+// Sized to what's drawn, not to every instance in the world (that was 35 MB at
+// 3200u): starts small and grows by half again whenever a refill needs more.
+function buildPool(p, need){
+  if (p.mesh){ poolScene.remove(p.mesh); p.mesh.dispose(); }
+  p.mesh = new THREE.InstancedMesh(p.geometry, p.material, Math.max(64, Math.ceil(need * 1.5)));
+  p.mesh.frustumCulled = false;       // we chose its instances; the bounds would be stale
+  p.mesh.count = 0;
+  poolScene.add(p.mesh);
+}
+// refill a pool from its members whose tile currently draws them
+const drawn = (m) => { const t = m.tile; return t.vis && !(m.mode === 'near' && t.isFar) && !(m.mode === 'far' && !t.isFar); };
+function fillPool(p){
+  let need = 0;
+  for (const m of p.members) if (drawn(m)) need += m.batch.count;
+  if (!p.mesh || p.mesh.instanceMatrix.count < need) buildPool(p, need);
+  const dst = p.mesh.instanceMatrix.array;
+  let n = 0;
+  for (const m of p.members){
+    if (!drawn(m)) continue;
+    const b = m.batch;
+    dst.set(b.instanceMatrix.array.subarray(0, b.count * 16), n * 16);
+    n += b.count;
+  }
+  p.mesh.count = n;
+  p.mesh.instanceMatrix.clearUpdateRanges();
+  p.mesh.instanceMatrix.addUpdateRange(0, n * 16);
+  p.mesh.instanceMatrix.needsUpdate = true;
+  p.dirty = false;
+}
+
+// Register a tile for culling. The bounding sphere is built from the spread of
+// the entries plus the tallest thing standing on them, so it covers the canopy
+// and not just the ground positions.
+// `meshes` are TileBatches (pooled) or plain Meshes (shown/hidden as a whole,
+// e.g. the merged redwood shadows). `farGeos` (parallel) gives each batch a
+// far-LOD geometry drawn from the same matrices (so chop() hides both). A null
+// entry means "hide at distance" (acorns); undefined means no LOD for it.
+function registerTile(scene, meshes, entries, geos, farGeos = []){
+  poolScene = scene;
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity, maxSc = 0;
+  let y0 = Infinity, y1 = -Infinity;            // the ground under the entries — on a hillside
+  for (const e of entries){                     // a tile's plants span tens of units of height
+    if (e[0] < x0) x0 = e[0]; if (e[0] > x1) x1 = e[0];
+    if (e[1] < z0) z0 = e[1]; if (e[1] > z1) z1 = e[1];
+    const gy = height(e[0], e[1]);
+    if (gy < y0) y0 = gy; if (gy > y1) y1 = gy;
+    const sc = typeof e[3] === 'number' ? e[3] : 1;
+    if (sc > maxSc) maxSc = sc;
+  }
+  let geoR = 0;
+  for (const g of geos){
+    if (!g) continue;
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    geoR = Math.max(geoR, g.boundingSphere.radius);
+  }
+  // enclose the box of ground points, grown by the tallest thing standing on them
+  const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, cy = (y0 + y1) / 2;
+  const r = Math.hypot(x1 - x0, y1 - y0, z1 - z0) / 2 + geoR * Math.max(maxSc, 1) + 2;
+  const sphere = new THREE.Sphere(new THREE.Vector3(cx, cy, cz), r);
+  // how far the tile's trunks reach from its centre — LOD goes by the nearest trunk
+  const reach = Math.hypot(x1 - x0, z1 - z0) / 2;
+  const tile = { batches: [], plain: [], sphere, reach, vis: false, isFar: false };
+  meshes.forEach((m, i) => {
+    if (!m) return;
+    if (!m.isTileBatch){ m.frustumCulled = false; m.visible = false; tile.plain.push(m); return; }
+    // member modes: 'near' draws when close, 'far' when distant, 'always' either way
+    const fg = farGeos[i];
+    const near = poolFor(m.geometry, m.material);
+    near.members.push({ tile, batch: m, mode: fg === undefined ? 'always' : 'near' });
+    const ps = [near];
+    if (fg){                                       // far twin: same matrices, cheaper geometry
+      const far = poolFor(fg, m.material);
+      far.members.push({ tile, batch: m, mode: 'far' });
+      ps.push(far);
+    }
+    tile.batches.push({ batch: m, pools: ps });
+  });
+  floraTiles.push(tile);
+  const ck = Math.floor(cx / CELL) + ',' + Math.floor(cz / CELL);
+  let c = cells.get(ck);
+  if (!c){ c = { tiles: [], sphere: new THREE.Sphere() }; cells.set(ck, c); }
+  c.tiles.push(tile);
+  cellsDirty = true;
+}
+
+// each block's sphere encloses its tiles' spheres (built once, after planting)
+function buildCells(){
+  for (const c of cells.values()){
+    const b = new THREE.Box3();
+    for (const t of c.tiles) b.union(new THREE.Box3().setFromCenterAndSize(t.sphere.center,
+      new THREE.Vector3(1, 1, 1).multiplyScalar(t.sphere.radius * 2)));
+    b.getBoundingSphere(c.sphere);
+  }
+  cellsDirty = false;
+}
+
+const _cullFrustum = new THREE.Frustum();
+const _cullMtx = new THREE.Matrix4();
+
+// how many flora tiles survived the last cull, out of how many exist (perf probe)
+export function floraTilesDrawn(){
+  let vis = 0, far = 0;
+  for (const t of floraTiles) if (t.vis){ vis++; if (t.isFar) far++; }
+  return `${vis}/${floraTiles.length} (${far} far)`;
+}
+// for tools/probes: the tiles and what they hold
+export function floraDebug(){ return { tiles: floraTiles, pools: [...pools.values()], cells: [...cells.values()] }; }
+
+// set a tile's state; mark the pools that must refill if it changed
+function setTile(t, vis, isFar){
+  if (t.vis === vis && t.isFar === isFar){
+    if (vis) for (const tb of t.batches)             // chop()/trails changed its matrices?
+      if (tb.batch.instanceMatrix.version !== tb.batch._v){ tb.batch._v = tb.batch.instanceMatrix.version; for (const p of tb.pools) p.dirty = true; }
+    return;
+  }
+  t.vis = vis; t.isFar = isFar;
+  for (const tb of t.batches){ tb.batch._v = tb.batch.instanceMatrix.version; for (const p of tb.pools) p.dirty = true; }
+  for (const m of t.plain) m.visible = vis;
+}
+
+// Decide which flora tiles draw, and at which LOD. Called once a frame from
+// main.js with the fog's far distance.
+export function cullFlora(camera, maxDist, enabled = true){
+  if (cellsDirty) buildCells();
+  if (!enabled){    // dev: show the whole world's flora, to measure what culling saves
+    for (const t of floraTiles) setTile(t, true, false);
+  } else {
+    // the camera has already been moved for this frame but three.js only refreshes
+    // these during render, so bring them up to date or we'd cull last frame's view
+    camera.updateMatrixWorld();
+    camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+    _cullMtx.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _cullFrustum.setFromProjectionMatrix(_cullMtx);
+    const cx = camera.position.x, cz = camera.position.z;
+    for (const c of cells.values()){
+      const cc = c.sphere.center;
+      const cvis = Math.hypot(cc.x - cx, cc.z - cz) - c.sphere.radius < maxDist && _cullFrustum.intersectsSphere(c.sphere);
+      for (const t of c.tiles){
+        if (!cvis){ if (t.vis) setTile(t, false, false); continue; }
+        const s = t.sphere.center;
+        const d = Math.hypot(s.x - cx, s.z - cz);
+        const vis = d - t.sphere.radius < maxDist && _cullFrustum.intersectsSphere(t.sphere);
+        setTile(t, vis, vis && d - t.reach > lodDist);
+      }
+    }
+  }
+  for (const p of pools.values()) if (p.dirty) fillPool(p);
+}
+
 function buildArchetypes(rng, speciesList, atlas){
-  return speciesList.map(sp => generateTree(fork(rng), sp, atlas));
+  // carry the species name through: the mycelium layer needs to know what kind of
+  // tree stands where (guilds differ by species — see js/mycelium.js)
+  return speciesList.map(sp => ({ ...generateTree(fork(rng), sp, atlas), name: sp.name }));
 }
 
 // Place `count` instances on allowed terrain, bucketed by archetype.
@@ -32,53 +244,61 @@ function buildArchetypes(rng, speciesList, atlas){
 // beneath them and keep grass from growing under the canopy).
 const ZERO_MTX = new THREE.Matrix4().makeScale(0, 0, 0);
 
-function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scaleRange, choose, extraMat, collect, flareR = 1.4){
+// `allowed` is a Set of surface types, or a (x, z) => bool for anything finer.
+// `coverK` (0..1) is how much the habitat's tree cover decides where they take
+// hold: 1 puts nearly all of them in woodland and carr, 0 ignores it.
+function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scaleRange, choose, extraMat, collect, flareR = 1.4, coverK = 0.95){
   const buckets = archetypes.map(() => []);
   const placed = [];
   for (let i = 0; i < count; i++){
     let x, z, ok = false;
     for (let t = 0; t < 60 && !ok; t++){
       x = (rng() - 0.5) * WORLD_R * 2; z = (rng() - 0.5) * WORLD_R * 2;
-      if (Math.hypot(x, z) < WORLD_R && allowed.has(terrainType(x, z))) ok = true;
+      if (Math.hypot(x, z) < WORLD_R && (typeof allowed === 'function' ? allowed(x, z) : allowed.has(terrainType(x, z)))
+          && (!coverK || rng() < 1 - coverK * (1 - treeCover(x, z)))) ok = true;
     }
     if (!ok) continue;
     const ai = choose ? choose(x, z, rng) : Math.floor(rng() * archetypes.length);
-    buckets[ai].push([x, z, rand(rng, 0, Math.PI*2), rand(rng, scaleRange[0], scaleRange[1])]);
-    placed.push([x, z]);
+    const sc = rand(rng, scaleRange[0], scaleRange[1]);
+    buckets[ai].push([x, z, rand(rng, 0, Math.PI*2), sc]);
+    // entries stay [x, z, …]: every consumer destructures the first two, so the
+    // trailing scale + species + trunk metrics ride along for the mycelium/face layer
+    placed.push([x, z, sc, archetypes[ai].name, archetypes[ai].trunkR, archetypes[ai].trunkH]);
   }
 
   const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3();
   buckets.forEach((list, ai) => {
     if (!list.length) return;
     const { branchGeo, leafGeo, acornGeo } = archetypes[ai];
-    const trunks = new THREE.InstancedMesh(branchGeo, barkMat, list.length);
-    const leaves = leafGeo ? new THREE.InstancedMesh(leafGeo, leafMat, list.length) : null;
-    const nuts = (acornGeo && extraMat) ? new THREE.InstancedMesh(acornGeo, extraMat, list.length) : null;
-    trunks.frustumCulled = false; if (leaves) leaves.frustumCulled = false; if (nuts) nuts.frustumCulled = false;
-    list.forEach(([x, z, yaw, sc], i) => {
-      q.setFromAxisAngle(UP, yaw);
-      // sink the base into a slope so the downhill root flare reaches soil rather
-      // than floating (and the uphill side buries into the bank) — 60% of the
-      // measured drop, so gentle ground is barely touched. Flat ground => 0.
-      const sink = groundSink(x, z, flareR * sc) * 0.6;
-      v.set(x, height(x, z) - sink, z);
-      mtx.compose(v, q, new THREE.Vector3(sc, sc, sc));
-      trunks.setMatrixAt(i, mtx);
-      if (leaves) leaves.setMatrixAt(i, mtx);
-      if (nuts) nuts.setMatrixAt(i, mtx);
-      if (collect){            // a removable record: chop() hides this instance
-        collect.push({ x, z, r: 0.7, alive: true,
-          chop(){
-            if (!this.alive) return; this.alive = false;
-            trunks.setMatrixAt(i, ZERO_MTX); trunks.instanceMatrix.needsUpdate = true;
-            if (leaves){ leaves.setMatrixAt(i, ZERO_MTX); leaves.instanceMatrix.needsUpdate = true; }
-          } });
-      }
-    });
-    trunks.instanceMatrix.needsUpdate = true;
-    scene.add(trunks);
-    if (leaves){ leaves.instanceMatrix.needsUpdate = true; scene.add(leaves); }
-    if (nuts){ nuts.instanceMatrix.needsUpdate = true; scene.add(nuts); }
+    // one set of meshes per spatial tile rather than one for the whole world, so
+    // the trees you are nowhere near never reach the GPU (see cullFlora)
+    for (const tile of tileEntries(list).values()){
+      const trunks = new TileBatch(branchGeo, barkMat, tile.length);
+      const leaves = leafGeo ? new TileBatch(leafGeo, leafMat, tile.length) : null;
+      const nuts = (acornGeo && extraMat) ? new TileBatch(acornGeo, extraMat, tile.length) : null;
+      tile.forEach(([x, z, yaw, sc], i) => {
+        q.setFromAxisAngle(UP, yaw);
+        // sink the base into a slope so the downhill root flare reaches soil rather
+        // than floating (and the uphill side buries into the bank) — 60% of the
+        // measured drop, so gentle ground is barely touched. Flat ground => 0.
+        const sink = groundSink(x, z, flareR * sc) * 0.6;
+        v.set(x, height(x, z) - sink, z);
+        mtx.compose(v, q, new THREE.Vector3(sc, sc, sc));
+        trunks.setMatrixAt(i, mtx);
+        if (leaves) leaves.setMatrixAt(i, mtx);
+        if (nuts) nuts.setMatrixAt(i, mtx);
+        if (collect){            // a removable record: chop() hides this instance
+          collect.push({ x, z, r: 0.7, alive: true,
+            chop(){
+              if (!this.alive) return; this.alive = false;
+              trunks.setMatrixAt(i, ZERO_MTX); trunks.instanceMatrix.needsUpdate = true;
+              if (leaves){ leaves.setMatrixAt(i, ZERO_MTX); leaves.instanceMatrix.needsUpdate = true; }
+            } });
+        }
+      });
+      registerTile(scene, [trunks, leaves, nuts], tile, [branchGeo, leafGeo, acornGeo],
+        [archetypes[ai].branchGeoFar, archetypes[ai].leafGeoFar, null]);
+    }
   });
   return placed;
 }
@@ -109,19 +329,16 @@ function spotGrid(spots, cell = 8){
 
 // Paint the ground beneath trees a leaf-litter brown — the canopy shades out the
 // grass, so the duff shows instead. `influence` comes from spotGrid.
-function shadeGroundUnderTrees(geo, influence){
-  const pos = geo.attributes.position, col = geo.attributes.color;
-  const duff = [0.30, 0.25, 0.16];
-  for (let i = 0; i < pos.count; i++){
-    const t = influence(pos.getX(i), pos.getZ(i));
+function shadeGroundUnderTrees(ground, influence){
+  const col = ground.color, n = col.length / 3;
+  const duff = [0.30 * 255, 0.25 * 255, 0.16 * 255];   // ground.color is bytes
+  for (let i = 0; i < n; i++){
+    const t = influence(ground.x(i), ground.z(i));
     if (t <= 0) continue;
     const k = Math.min(1, t * 1.25);                  // fully duff a touch inside the edge
-    col.setXYZ(i,
-      lerp(col.getX(i), duff[0], k),
-      lerp(col.getY(i), duff[1], k),
-      lerp(col.getZ(i), duff[2], k));
+    for (let j = 0; j < 3; j++) col[i*3+j] = lerp(col[i*3+j], duff[j], k);
   }
-  col.needsUpdate = true;
+  ground.touchAll(); ground.upload();
 }
 
 // crossed quads (an "X" from above) so a tuft reads from every angle, base at y=0
@@ -138,28 +355,30 @@ function vineCard(w, h){
   return mergeGeometries([a, b], false);
 }
 
-// Scatter grass tufts where `place(rng)` returns a spot, GPU-instanced.
-// Returns { inst, items } where items[k] = { x, z, m } is the world position and
-// original matrix of instance k — so trails can hide tufts on worn ground.
+// Scatter grass tufts where `place(rng)` returns a spot, GPU-instanced and cut
+// into flora tiles so they cull with the trees (world-spanning, they were ~120k
+// triangles drawn wherever you looked once the world reached 1600u).
+// Returns [{ inst, items }], one per tile, where items[k] = { x, z, m } is the
+// world position and original matrix of instance k — so trails can hide tufts
+// on worn ground.
 function scatterGrass(scene, rng, geo, mat, count, place){
-  const inst = new THREE.InstancedMesh(geo, mat, count);
-  inst.frustumCulled = false;
-  const items = [];
   const q = new THREE.Quaternion();
-  let n = 0;
+  const spots = [];
   for (let i = 0; i < count; i++){
     const spot = place(rng); if (!spot) continue;
     const [x, z, sc] = spot;
     q.setFromAxisAngle(UP, rng() * Math.PI*2);
     const m = new THREE.Matrix4().compose(new THREE.Vector3(x, height(x, z), z), q, new THREE.Vector3(sc, sc, sc));
-    inst.setMatrixAt(n, m);
-    items.push({ x, z, m });
-    n++;
+    spots.push([x, z, m, sc]);
   }
-  inst.count = n;
-  inst.instanceMatrix.needsUpdate = true;
-  scene.add(inst);
-  return { inst, items };
+  const groups = [];
+  for (const tile of tileEntries(spots).values()){
+    const inst = new TileBatch(geo, mat, tile.length);
+    const items = tile.map(([x, z, m], k) => { inst.setMatrixAt(k, m); return { x, z, m }; });
+    registerTile(scene, [inst], tile, [geo]);
+    groups.push({ inst, items });
+  }
+  return groups;
 }
 
 // random points within a canopy bbox, between lowFrac..highFrac of its height
@@ -177,9 +396,9 @@ function fruitPositions(bb, n, lowFrac, highFrac, rng){
 
 // Camera-facing InstancedMesh for fruit/berries — one unit plane per spot,
 // matrices updated each frame by billboard(camQ) to always face the player.
+const FRUIT_CARD = new THREE.PlaneGeometry(1, 1);   // shared by every fruit cluster
 function makeFruitInst(mat, spots, size){
-  const geo = new THREE.PlaneGeometry(1, 1);
-  const inst = new THREE.InstancedMesh(geo, mat, spots.length);
+  const inst = new THREE.InstancedMesh(FRUIT_CARD, mat, spots.length);
   inst.frustumCulled = false;
   const _m = new THREE.Matrix4();
   const _s = new THREE.Vector3(size, size, size);
@@ -200,6 +419,7 @@ function forageable(scene, grp, harvest, { x, z, kind, yieldRange, regrow, rng, 
   scene.add(grp);
   return {
     x, z, kind, ripe: true, timer: 0,
+    grp,                                      // so the per-frame pass can hide the whole plant when it's out of sight
     mat: basicMat ? harvest.material : null,  // non-null only for MeshBasicMaterial items that need sky tinting
     tick(dt){ if (!this.ripe){ this.timer -= dt; if (this.timer <= 0){ this.ripe = true; harvest.visible = true; } } },
     collect(){
@@ -248,19 +468,21 @@ function makeGroundFood(scene, rng, { x, z, n, size, spread, mat, kind, yieldRan
   return forageable(scene, grp, harvest, { x, z, kind, yieldRange, regrow, rng, fruitSpots: spots, fruitSize: size });
 }
 
-export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 460, redwoods = 45,
-                                         oaks = 80, grass = 2400, reeds = 1000, bushes = 20, fruitTrees = 8,
-                                         pussywillows = 420, cattails = 520,
-                                         hazels = 14, daisies = 30, roots = 18, mushrooms = 20, acornPatches = 16,
-                                         cattailRoots = 12,
-                                         shells = 24, stones = 30, ambers = 10, quartzes = 12 } = {}){
+// Counts are per 800u world (where they were tuned); D() scales them by AREA so
+// density holds whatever SIZE is.
+const D = (n) => Math.round(n * AREA);
+export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs = D(1840), redwoods = D(180),
+                                         oaks = D(320), grass = D(9600), reeds = D(4000), bushes = D(80), fruitTrees = D(32),
+                                         pussywillows = D(1680), cattails = D(2080),
+                                         hazels = D(56), daisies = D(120), roots = D(72), mushrooms = D(80), acornPatches = D(64),
+                                         cattailRoots = D(48),
+                                         shells = D(96), stones = D(120), ambers = D(40), quartzes = D(48),
+                                         pines = D(150), alders = D(120), sedges = D(6000), cottongrass = D(2500), heather = D(9000) } = {}){
   const atlas = makeLeafAtlas(fork(rng));
   const bark  = makeBark(fork(rng));
 
   const barkMat = new THREE.MeshLambertMaterial({ map: bark });
-  const leafMat = new THREE.MeshLambertMaterial({
-    map: atlas.texture, alphaTest: 0.5, side: THREE.DoubleSide,
-  });
+  const leafMat = leafMaterial({ map: atlas.texture });   // crown-lit (see tree.js)
 
   const treeArch    = buildArchetypes(rng, TREE_SPECIES, atlas);   // [rich, mid, lean]
   const shrubArch   = buildArchetypes(rng, SHRUB_SPECIES, atlas);
@@ -268,7 +490,7 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
 
   // oaks have their own round-lobed leaves, acorns, and a broad gnarled form
   const oakAtlas   = makeLeafAtlas(fork(rng), { kind: 'oak' });
-  const oakLeafMat = new THREE.MeshLambertMaterial({ map: oakAtlas.texture, alphaTest: 0.5, side: THREE.DoubleSide });
+  const oakLeafMat = leafMaterial({ map: oakAtlas.texture });
   const acornMat   = new THREE.MeshLambertMaterial({ map: makeAcornTexture(), alphaTest: 0.5, side: THREE.DoubleSide });
   const oakArch    = buildArchetypes(rng, OAK_SPECIES, oakAtlas);
 
@@ -279,19 +501,21 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   // giants) rather than clustering around each archetype's set height
   const treePos = scatter(scene, fork(rng), treeArch,    barkMat, leafMat, trees,    new Set(['grass','mud']),        [0.55, 1.55], bySoil);
   const shrubRecs = [];   // removable: each shrub can be chopped down for firewood
-  scatter(scene, fork(rng), shrubArch,   barkMat, leafMat, shrubs,   new Set(['grass','mud','sand']), [0.65, 1.5], null, null, shrubRecs, 0.6);
+  scatter(scene, fork(rng), shrubArch,   barkMat, leafMat, shrubs,   new Set(['grass','mud','sand']), [0.65, 1.5], null, null, shrubRecs, 0.6, 0.6);   // shrubs edge out into the open
   const redwoodBarkMat  = new THREE.MeshLambertMaterial({ map: makeRedwoodBark(fork(rng)) });
   // flat horizontal disc foliage — leafStyle:'flat' ignores the atlas entirely,
   // so pass a dummy; the material uses the blob texture directly.
   const redwoodFoliageMat = new THREE.MeshLambertMaterial({ map: makeRedwoodFoliageTexture({ seed: fork(rng) }), alphaTest: 0.35, side: THREE.DoubleSide });
   const dummyAtlas      = { texture: null, cols: 1, rows: 1, count: 1 };
   const redwoodArch     = buildArchetypes(rng, REDWOOD_SPECIES, dummyAtlas);
-  const redwoodPos = scatter(scene, fork(rng), redwoodArch, redwoodBarkMat, redwoodFoliageMat, redwoods, new Set(['grass','mud']), [0.7, 1.35], null, null, null, 3.0);
+  const redwoodPos = scatter(scene, fork(rng), redwoodArch, redwoodBarkMat, redwoodFoliageMat, redwoods,
+    (x, z) => habitat(x, z) === 'grove', [0.7, 1.35], null, null, null, 3.0, 0);   // only in the old-growth stands
 
   // blob shadows: terrain-conforming shadow patches under each redwood.
   // Each blob is a subdivided grid whose vertices are displaced to the terrain
   // height, so the shadow hugs uneven ground instead of clipping through it.
-  // All blobs are merged into one geometry — one draw call total.
+  // Blobs are merged per flora tile and culled with the trees: one merged mesh
+  // for the whole world was 144k triangles drawn wherever you looked.
   {
     const bc = document.createElement('canvas'); bc.width = bc.height = 64;
     const bg = bc.getContext('2d');
@@ -302,42 +526,63 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
     gr.addColorStop(1,    'rgba(0,0,0,0)');
     bg.fillStyle = gr; bg.fillRect(0, 0, 64, 64);
     const blobTex = new THREE.CanvasTexture(bc);
+    const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false });
+    const blobFoot = new THREE.PlaneGeometry(19, 19);   // the widest blob, for the tile's cull sphere
 
     const SEGS = 10, N = SEGS + 1;   // 10×10 quad grid per blob
-    const allPos = [], allUV = [], allIdx = [];
-    let vOff = 0;
-    for (const [cx, cz] of redwoodPos){
-      const R = (12 + rng() * 7) * 0.5;   // half-width
-      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++){
-        const u = i / SEGS, v = j / SEGS;
-        const wx = cx + (u - 0.5) * R * 2, wz = cz + (v - 0.5) * R * 2;
-        allPos.push(wx, height(wx, wz) + 0.06, wz);
-        allUV.push(u, v);
+    // radii drawn in planting order, so the rng stream (and the rest of the world) is unchanged
+    const blobs = redwoodPos.map(([cx, cz]) => [cx, cz, (12 + rng() * 7) * 0.5]);   // R = half-width
+    for (const tile of tileEntries(blobs).values()){
+      const allPos = [], allUV = [], allIdx = [];
+      let vOff = 0;
+      for (const [cx, cz, R] of tile){
+        for (let j = 0; j < N; j++) for (let i = 0; i < N; i++){
+          const u = i / SEGS, v = j / SEGS;
+          const wx = cx + (u - 0.5) * R * 2, wz = cz + (v - 0.5) * R * 2;
+          allPos.push(wx, height(wx, wz) + 0.06, wz);
+          allUV.push(u, v);
+        }
+        for (let j = 0; j < SEGS; j++) for (let i = 0; i < SEGS; i++){
+          const a = vOff + j*N+i, b = vOff + j*N+i+1, c = vOff + (j+1)*N+i, d = vOff + (j+1)*N+i+1;
+          allIdx.push(a, c, b,  b, c, d);
+        }
+        vOff += N * N;
       }
-      for (let j = 0; j < SEGS; j++) for (let i = 0; i < SEGS; i++){
-        const a = vOff + j*N+i, b = vOff + j*N+i+1, c = vOff + (j+1)*N+i, d = vOff + (j+1)*N+i+1;
-        allIdx.push(a, c, b,  b, c, d);
-      }
-      vOff += N * N;
+      const blobGeo = new THREE.BufferGeometry();
+      blobGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(allPos), 3));
+      blobGeo.setAttribute('uv',       new THREE.BufferAttribute(new Float32Array(allUV),  2));
+      blobGeo.setIndex(allIdx);
+      const blobMesh = new THREE.Mesh(blobGeo, blobMat);
+      blobMesh.renderOrder = 1;
+      registerTile(scene, [blobMesh], tile, [blobFoot]);
+      scene.add(blobMesh);
     }
-    const blobGeo = new THREE.BufferGeometry();
-    blobGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(allPos), 3));
-    blobGeo.setAttribute('uv',       new THREE.BufferAttribute(new Float32Array(allUV),  2));
-    blobGeo.setIndex(new THREE.BufferAttribute(new Uint32Array(allIdx), 1));
-    const blobMesh = new THREE.Mesh(blobGeo, new THREE.MeshBasicMaterial({
-      map: blobTex, transparent: true, depthWrite: false,
-    }));
-    blobMesh.renderOrder = 1;
-    scene.add(blobMesh);
   }
   const oakPos     = scatter(scene, fork(rng), oakArch,     barkMat, oakLeafMat, oaks,  new Set(['grass','mud']),        [0.6, 1.45], null, acornMat, null, 2.4);
+
+  // Scots pine on the heath, alder in the carr — each only in its own habitat.
+  // Pine needles reuse the redwood foliage disc, tinted to a pine's grey-green;
+  // its bark is the redwood's, warmed toward the orange of an old pine's top.
+  const pineArch = buildArchetypes(rng, PINE_SPECIES, dummyAtlas);
+  const pineBarkMat = new THREE.MeshLambertMaterial({ map: makeRedwoodBark(fork(rng)), color: new THREE.Color(0.95, 0.80, 0.66) });
+  const pineFoliageMat = new THREE.MeshLambertMaterial({ map: makeRedwoodFoliageTexture({ seed: fork(rng) }),
+    color: new THREE.Color(0.70, 0.86, 0.80), alphaTest: 0.35, side: THREE.DoubleSide });
+  const pinePos = scatter(scene, fork(rng), pineArch, pineBarkMat, pineFoliageMat, pines,
+    (x, z) => habitat(x, z) === 'heath', [0.7, 1.25], null, null, null, 1.6, 0);
+  const alderArch = buildArchetypes(rng, ALDER_SPECIES, atlas);
+  const alderBarkMat = new THREE.MeshLambertMaterial({ map: makeBark(fork(rng)), color: new THREE.Color(0.55, 0.53, 0.52) });
+  const alderLeafMat = leafMaterial({ map: atlas.texture, color: new THREE.Color(0.55, 0.72, 0.48) });
+  const alderPos = scatter(scene, fork(rng), alderArch, alderBarkMat, alderLeafMat, alders,
+    (x, z) => habitat(x, z) === 'carr', [0.7, 1.3], null, null, null, 1.6, 0);
 
   // litter footprint per tree (big trees cast a wider duff ring than maples)
   const litter = [...treePos.map(([x,z]) => [x, z, 3.6]),
                   ...redwoodPos.map(([x,z]) => [x, z, 5.5]),
-                  ...oakPos.map(([x,z]) => [x, z, 4.8])];
+                  ...oakPos.map(([x,z]) => [x, z, 4.8]),
+                  ...pinePos.map(([x,z]) => [x, z, 3.2]),
+                  ...alderPos.map(([x,z]) => [x, z, 3.6])];
   const underTree = spotGrid(litter);
-  if (ground) shadeGroundUnderTrees(ground.geometry, underTree);
+  if (ground) shadeGroundUnderTrees(ground, underTree);
 
   // --- birch: pioneer species, grow in tight clumps on open/disturbed ground ---
   // Placed AFTER underTree is computed so we can actively avoid existing canopy shade.
@@ -345,11 +590,8 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   // around each centre with a uniform-disc distribution (sqrt for even spread).
   const birchArch    = buildArchetypes(rng, BIRCH_SPECIES, atlas);
   const birchBarkMat = new THREE.MeshLambertMaterial({ map: makeBirchBark(fork(rng)) });
-  const birchLeafMat = new THREE.MeshLambertMaterial({
-    map: atlas.texture, color: new THREE.Color(0.82, 1.0, 0.68),
-    alphaTest: 0.5, side: THREE.DoubleSide,
-  });
-  const BIRCH_CLUSTERS = 14, CLUSTER_R = 9;
+  const birchLeafMat = leafMaterial({ map: atlas.texture, color: new THREE.Color(0.82, 1.0, 0.68) });
+  const BIRCH_CLUSTERS = D(56), CLUSTER_R = 9;
   const birchCenters = [];
   for (let i = 0; i < BIRCH_CLUSTERS * 8 && birchCenters.length < BIRCH_CLUSTERS; i++){
     const x = (rng() - 0.5) * WORLD_R * 2, z = (rng() - 0.5) * WORLD_R * 2;
@@ -375,24 +617,27 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   // instance the birch groves
   {
     const bkts = birchArch.map(() => []);
-    for (const [x, z] of birchPos){
-      bkts[rng() * birchArch.length | 0].push([x, z, rand(rng, 0, Math.PI*2), rand(rng, 0.6, 1.3)]);
+    for (const rec of birchPos){
+      const [x, z] = rec;
+      const sc = rand(rng, 0.6, 1.3);
+      rec[2] = sc;                       // record the age alongside the position
+      bkts[rng() * birchArch.length | 0].push([x, z, rand(rng, 0, Math.PI*2), sc]);
     }
     const bm = new THREE.Matrix4(), bq = new THREE.Quaternion(), bv = new THREE.Vector3(), bs = new THREE.Vector3();
     for (let ai = 0; ai < birchArch.length; ai++){
       const list = bkts[ai]; if (!list.length) continue;
-      const { branchGeo, leafGeo } = birchArch[ai];
-      const trunks = new THREE.InstancedMesh(branchGeo, birchBarkMat, list.length);
-      const leaves = leafGeo ? new THREE.InstancedMesh(leafGeo, birchLeafMat, list.length) : null;
-      trunks.frustumCulled = false; if (leaves) leaves.frustumCulled = false;
-      list.forEach(([x, z, yaw, sc], i) => {
-        bq.setFromAxisAngle(UP, yaw);
-        bv.set(x, height(x, z) - groundSink(x, z, 1.2 * sc) * 0.6, z);
-        bm.compose(bv, bq, bs.setScalar(sc));
-        trunks.setMatrixAt(i, bm); if (leaves) leaves.setMatrixAt(i, bm);
-      });
-      trunks.instanceMatrix.needsUpdate = true; scene.add(trunks);
-      if (leaves){ leaves.instanceMatrix.needsUpdate = true; scene.add(leaves); }
+      const { branchGeo, leafGeo, branchGeoFar, leafGeoFar } = birchArch[ai];
+      for (const tile of tileEntries(list).values()){
+        const trunks = new TileBatch(branchGeo, birchBarkMat, tile.length);
+        const leaves = leafGeo ? new TileBatch(leafGeo, birchLeafMat, tile.length) : null;
+        tile.forEach(([x, z, yaw, sc], i) => {
+          bq.setFromAxisAngle(UP, yaw);
+          bv.set(x, height(x, z) - groundSink(x, z, 1.2 * sc) * 0.6, z);
+          bm.compose(bv, bq, bs.setScalar(sc));
+          trunks.setMatrixAt(i, bm); if (leaves) leaves.setMatrixAt(i, bm);
+        });
+        registerTile(scene, [trunks, leaves], tile, [branchGeo, leafGeo], [branchGeoFar, leafGeoFar]);
+      }
     }
   }
 
@@ -401,37 +646,35 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   // clearings edges. Greyer and lighter than maple; no prominent surface roots.
   const rowanArch    = buildArchetypes(rng, ROWAN_SPECIES, atlas);
   const rowanBarkMat = new THREE.MeshLambertMaterial({ map: makeRowanBark(fork(rng)) });
-  const rowanLeafMat = new THREE.MeshLambertMaterial({
-    map: atlas.texture, color: new THREE.Color(0.78, 0.95, 0.60),
-    alphaTest: 0.5, side: THREE.DoubleSide,
-  });
+  const rowanLeafMat = leafMaterial({ map: atlas.texture, color: new THREE.Color(0.78, 0.95, 0.60) });
   const rowanPos = [];
   {
     const rm = new THREE.Matrix4(), rq = new THREE.Quaternion(), rv = new THREE.Vector3(), rs = new THREE.Vector3();
     const bkts = rowanArch.map(() => []);
-    for (let i = 0; i < 320; i++){     // try 320 times to place ~100 rowans
+    for (let i = 0; i < D(1280); i++){    // try 1280 times (per 800u world) to place ~400 rowans
       const x = (rng() - 0.5) * WORLD_R * 2, z = (rng() - 0.5) * WORLD_R * 2;
       if (Math.hypot(x, z) >= WORLD_R) continue;
       if (!['grass','mud','rock'].includes(terrainType(x, z))) continue;
       const u = underTree(x, z);
       if (u < 0.08 || u > 0.42) continue;   // forest edge — partial light
-      rowanPos.push([x, z]);
-      bkts[rng() * rowanArch.length | 0].push([x, z, rand(rng, 0, Math.PI*2), rand(rng, 0.65, 1.2)]);
+      const rsc = rand(rng, 0.65, 1.2);
+      rowanPos.push([x, z, rsc]);
+      bkts[rng() * rowanArch.length | 0].push([x, z, rand(rng, 0, Math.PI*2), rsc]);
     }
     for (let ai = 0; ai < rowanArch.length; ai++){
       const list = bkts[ai]; if (!list.length) continue;
-      const { branchGeo, leafGeo } = rowanArch[ai];
-      const trunks = new THREE.InstancedMesh(branchGeo, rowanBarkMat, list.length);
-      const leaves = leafGeo ? new THREE.InstancedMesh(leafGeo, rowanLeafMat, list.length) : null;
-      trunks.frustumCulled = false; if (leaves) leaves.frustumCulled = false;
-      list.forEach(([x, z, yaw, sc], i) => {
-        rq.setFromAxisAngle(UP, yaw);
-        rv.set(x, height(x, z) - groundSink(x, z, sc) * 0.6, z);
-        rm.compose(rv, rq, rs.setScalar(sc));
-        trunks.setMatrixAt(i, rm); if (leaves) leaves.setMatrixAt(i, rm);
-      });
-      trunks.instanceMatrix.needsUpdate = true; scene.add(trunks);
-      if (leaves){ leaves.instanceMatrix.needsUpdate = true; scene.add(leaves); }
+      const { branchGeo, leafGeo, branchGeoFar, leafGeoFar } = rowanArch[ai];
+      for (const tile of tileEntries(list).values()){
+        const trunks = new TileBatch(branchGeo, rowanBarkMat, tile.length);
+        const leaves = leafGeo ? new TileBatch(leafGeo, rowanLeafMat, tile.length) : null;
+        tile.forEach(([x, z, yaw, sc], i) => {
+          rq.setFromAxisAngle(UP, yaw);
+          rv.set(x, height(x, z) - groundSink(x, z, sc) * 0.6, z);
+          rm.compose(rv, rq, rs.setScalar(sc));
+          trunks.setMatrixAt(i, rm); if (leaves) leaves.setMatrixAt(i, rm);
+        });
+        registerTile(scene, [trunks, leaves], tile, [branchGeo, leafGeo], [branchGeoFar, leafGeoFar]);
+      }
     }
   }
 
@@ -449,14 +692,12 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
       ...oakPos.map(([x, z])     => [x, z, 0.9]),
       ...treePos.filter(() => rng() < 0.28).map(([x, z]) => [x, z, 0.75]),
     ];
-    const maxV = hosts.length * 2;
-    const vInst = new THREE.InstancedMesh(vGeo, vineMat, maxV);
-    vInst.frustumCulled = false;
-    const vm = new THREE.Matrix4(), vq = new THREE.Quaternion(), vv = new THREE.Vector3(), vs = new THREE.Vector3();
-    let vn = 0;
+    // placed in one pass (same rng order as ever), then cut into flora tiles
+    const vines = [];   // [x, z, matrix, scale]
+    const vq = new THREE.Quaternion(), vv = new THREE.Vector3(), vs = new THREE.Vector3();
     for (const [tx, tz, baseSc] of hosts){
       const clusters = 1 + (rng() < 0.55 ? 1 : 0);   // 1–2 clusters per host
-      for (let c = 0; c < clusters && vn < maxV; c++){
+      for (let c = 0; c < clusters; c++){
         const a = rng() * Math.PI * 2, r = 0.15 + rng() * 0.55;
         const vx = tx + Math.cos(a) * r, vz = tz + Math.sin(a) * r;
         const vy = height(vx, vz) + 3.8 + rng() * 2.2;   // attach near branch level
@@ -464,13 +705,14 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
         vv.set(vx, vy, vz);
         const sc = baseSc * (0.75 + rng() * 0.5);
         vs.set(sc, sc * (0.8 + rng() * 0.45), sc);        // vary drop length more than width
-        vm.compose(vv, vq, vs);
-        vInst.setMatrixAt(vn++, vm);
+        vines.push([vx, vz, new THREE.Matrix4().compose(vv, vq, vs), sc]);
       }
     }
-    vInst.count = vn;
-    vInst.instanceMatrix.needsUpdate = true;
-    scene.add(vInst);
+    for (const tile of tileEntries(vines).values()){
+      const vInst = new TileBatch(vGeo, vineMat, tile.length);
+      tile.forEach(([, , m], k) => vInst.setMatrixAt(k, m));
+      registerTile(scene, [vInst], tile, [vGeo]);
+    }
   }
 
   // --- ferns: carpet the dappled shade under tree canopies ---
@@ -489,7 +731,7 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
     }
     return null;
   };
-  const ferns = scatterGrass(scene, fork(rng), fernGeo, fernMat, 1400, inShade);
+  const ferns = scatterGrass(scene, fork(rng), fernGeo, fernMat, D(1400), inShade);
 
   // --- ground cover: reeds in the swampy mud (meadow grass is drawn by GrassDetail in grass.js) ---
   const reedMat = new THREE.MeshLambertMaterial({
@@ -508,6 +750,25 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   };
 
   const reedGrass = scatterGrass(scene, fork(rng), reedGeo, reedMat, reeds, inSwamp);
+
+  // --- habitat ground cover: sedge in the fen and carr, cotton grass in the
+  // fen, heather on the heath. Placed by habitat, tiled and culled like reeds.
+  const inHabitat = (kinds, s0, s1, tries = 10) => (rng) => {
+    for (let t = 0; t < tries; t++){
+      const x = (rng()-0.5)*WORLD_R*2, z = (rng()-0.5)*WORLD_R*2;
+      if (Math.hypot(x, z) > WORLD_R) continue;
+      if (!kinds.includes(habitat(x, z))) continue;
+      return [x, z, s0 + rng() * (s1 - s0)];
+    }
+    return null;
+  };
+  const cardMat = (map) => new THREE.MeshLambertMaterial({ map, alphaTest: 0.5, side: THREE.DoubleSide });
+  const sedgeGroups = scatterGrass(scene, fork(rng), grassCard(1.5, 1.1), cardMat(makeSedgeTexture({ seed: fork(rng) })),
+    sedges, inHabitat(['fen', 'carr'], 0.7, 1.4));
+  const cottonGroups = scatterGrass(scene, fork(rng), grassCard(0.9, 1.2), cardMat(makeCottonGrassTexture({ seed: fork(rng) })),
+    cottongrass, inHabitat(['fen'], 0.7, 1.2));
+  const heatherGroups = scatterGrass(scene, fork(rng), grassCard(2.1, 1.0), cardMat(makeHeatherTexture({ seed: fork(rng) })),
+    heather, inHabitat(['heath'], 0.7, 1.5));   // ~one cushion per 3 m² of heath
 
   // --- waterside plants: pussywillows & cattails right along the shoreline ---
   const pussyMat = new THREE.MeshLambertMaterial({
@@ -562,10 +823,18 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
     return null;
   };
 
+  // Bodies come from a few shared variants per kind: generating one per plant
+  // was ~2,700 unique meshes at 3200u (and most of the boot's tree-growing).
+  const VARIANTS = 6;
+  const variants = (spec) => Array.from({ length: VARIANTS }, () => {
+    const b = generateTree(fork(frng), spec, atlas); b.leafGeo.computeBoundingBox(); return b; });
+  const pickBody = (vs) => vs[frng() * vs.length | 0];
+  const bushBodies = variants({ ...SHRUB_SPECIES[0], targetHeight: 1.5 });
+  const appleBodies = variants({ ...TREE_SPECIES[1], targetHeight: 6, leavesPerTip: 14 });
+  const hazelBodies = variants({ ...SHRUB_SPECIES[0], targetHeight: 1.7 });
   for (let i = 0; i < bushes; i++){                          // waist-high berry bushes
     const s = landSpot(new Set(['grass','mud'])); if (!s) continue;
-    const body = generateTree(fork(frng), { ...SHRUB_SPECIES[0], targetHeight: 1.5 }, atlas);
-    body.leafGeo.computeBoundingBox();
+    const body = pickBody(bushBodies);
     const berryMat = frng() < 0.5 ? fruitMats.red : fruitMats.blue;
     const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 12, 0.2, 0.95, frng);
     plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat,
@@ -573,8 +842,7 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   }
   for (let i = 0; i < fruitTrees; i++){                      // small apple trees
     const s = landSpot(new Set(['grass','mud'])); if (!s) continue;
-    const body = generateTree(fork(frng), { ...TREE_SPECIES[1], targetHeight: 6, leavesPerTip: 14 }, atlas);
-    body.leafGeo.computeBoundingBox();
+    const body = pickBody(appleBodies);
     const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 10, 0.45, 0.95, frng);
     plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat,
       fruitMat: fruitMats.apple, fruitSpots, fruitSize: 0.5, kind: 'apples', yieldRange: [1, 2], regrow: 40 }));
@@ -589,8 +857,7 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
 
   for (let i = 0; i < hazels; i++){                          // hazelnut bushes (woodland)
     const s = landSpot(new Set(['grass','mud'])); if (!s) continue;
-    const body = generateTree(fork(frng), { ...SHRUB_SPECIES[0], targetHeight: 1.7 }, atlas);
-    body.leafGeo.computeBoundingBox();
+    const body = pickBody(hazelBodies);
     const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 9, 0.25, 0.9, frng);
     plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat,
       fruitMat: hazelMat, fruitSpots, fruitSize: 0.18, kind: 'hazelnuts', yieldRange: [2, 4], regrow: 60 }));
@@ -689,8 +956,8 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
   const flowers = [];   // individual pickable flowers for NPC agents
   {
     const fwrng = fork(rng);
-    const PATCHES_PER = 2;    // patch centres per species
-    const PER_SPECIES = 60;   // flowers per species
+    const PATCHES_PER = D(2); // patch centres per species
+    const PER_SPECIES = D(60); // flowers per species
     const PATCH_R     = 4.0;  // patch radius (world units)
     const FLOWER_REGROW = 120; // seconds until a picked flower regrows
 
@@ -773,10 +1040,23 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
     plants,
     valuables,                                        // rare finds: shells, stones, amber, quartz
     flowers,                                          // individually-pickable wildflowers (for elf crown agents)
-    trees: [...treePos, ...redwoodPos, ...oakPos, ...birchPos, ...rowanPos],
+    trees: [...treePos, ...redwoodPos, ...oakPos, ...birchPos, ...rowanPos, ...pinePos, ...alderPos],
+    // the same trunks, but with identity: species and age. The mycelium network is
+    // built over these (js/mycelium.js) — guild membership follows species, and the
+    // link graph follows position, so this is all it needs.
+    // scale is the per-instance size; trunkR/trunkH are the archetype's base trunk
+    // radius and height (so actual = ×scale) — the face shells fit the real trunk.
+    treeRecords: [
+      ...treePos   .map(([x, z, sc, sp, tr, th]) => ({ x, z, scale: sc || 1, species: sp || 'maple',   trunkR: tr, trunkH: th })),
+      ...redwoodPos.map(([x, z, sc, sp, tr, th]) => ({ x, z, scale: sc || 1, species: sp || 'redwood', trunkR: tr, trunkH: th })),
+      ...oakPos    .map(([x, z, sc, sp, tr, th]) => ({ x, z, scale: sc || 1, species: sp || 'oak',     trunkR: tr, trunkH: th })),
+      ...birchPos  .map(([x, z, sc])             => ({ x, z, scale: sc || 1, species: 'birch', trunkR: birchArch[0].trunkR, trunkH: birchArch[0].trunkH })),
+      ...rowanPos  .map(([x, z, sc])             => ({ x, z, scale: sc || 1, species: 'rowan', trunkR: rowanArch[0].trunkR, trunkH: rowanArch[0].trunkH })),
+    ],
     grass: null,
-    reeds: reedGrass,                                 // { inst, items } — tall swamp grass, also hidden along trails
-    ferns,                                            // { inst, items } — woodland ferns, hidden along trails
+    reeds: reedGrass,                                 // [{ inst, items }] per tile — tall swamp grass, also hidden along trails
+    ferns,                                            // [{ inst, items }] per tile — woodland ferns, hidden along trails
+    groundCover: [...sedgeGroups, ...cottonGroups, ...heatherGroups],   // also worn away by paths
     shrubs: shrubRecs,                                // choppable shrubs (firewood) — see agents.js
     // obstacles people walk around: trunks, plus shrubs (which vanish when chopped:
     // the shrub records carry .alive, and the avoidance code skips dead ones)
@@ -786,16 +1066,30 @@ export function plantWorld(scene, rng, { ground = null, trees = 320, shrubs = 46
       ...oakPos.map(([x, z])     => ({ x, z, r: 1.0 })),
       ...birchPos.map(([x, z])   => ({ x, z, r: 0.6 })),
       ...rowanPos.map(([x, z])   => ({ x, z, r: 0.5 })),
+      ...pinePos.map(([x, z])    => ({ x, z, r: 0.85 })),   // (pines and alders were missing: walked through, built over)
+      ...alderPos.map(([x, z])   => ({ x, z, r: 0.85 })),
       ...shrubRecs,
     ],
     update(dt){ for (const p of plants) p.tick(dt); for (const v of valuables) v.tick(dt); for (const f of flowers) f.tick(dt); },
-    billboardFruits(cam, flowerTint){
+    // Turn the fruit/berry cards to face the camera. Every ripe plant rewrites its
+    // instance matrices here and re-uploads them, so plants past the fog are hidden
+    // and skipped outright — a thousand tiny buffer uploads a frame for berries
+    // nobody can see was a large part of what made the doubled world drag.
+    billboardFruits(cam, flowerTint, maxDist = Infinity){
       const q = cam.quaternion;
+      const cx = cam.position.x, cz = cam.position.z, far2 = maxDist * maxDist;
+      const inSight = (o) => {
+        const dx = o.x - cx, dz = o.z - cz;
+        const vis = dx*dx + dz*dz < far2;
+        if (o.grp) o.grp.visible = vis;
+        return vis;
+      };
       for (const p of plants){
+        if (!inSight(p)) continue;
         if (flowerTint && p.mat) p.mat.color.copy(flowerTint);
         p.billboard(q);
       }
-      for (const v of valuables) v.billboard(q);
+      for (const v of valuables) if (inSight(v)) v.billboard(q);
       // flowers: Y-only rotation so they stay upright (just turn to face the camera)
       if (_flowerBillboards.length){
         _fEuler.setFromQuaternion(q, 'YXZ');

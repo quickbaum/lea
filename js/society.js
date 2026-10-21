@@ -11,15 +11,19 @@ import { WORLD_R } from './config.js';
 import { surnameFor } from './names.js';
 
 // sprites available per folk (dwarves only have a male sheet — so a dwarf group
-// reads as brothers / a warrior clan)
+// reads as brothers / a warrior clan). Humans are the Lea sheets: each one is
+// replaced at load by a character baked for them (folk-avatars.js); the sheet only
+// shows if that bake is off (?bakedfolk=0) or fails. The M&M human sheets are retired.
 const SLUGS = {
-  human:  ['male-peasant-human-a', 'female-peasant-human-a', 'male-peasant-human-b'],
+  human:  ['male-lea-1', 'male-lea-2', 'male-lea-3', 'female-lea-1', 'female-lea-2', 'female-lea-3'],
   elf:    ['male-peasant-elf', 'female-peasant-elf'],
   dwarf:  ['male-peasant-dwarf'],
   goblin: ['male-peasant-goblin', 'female-peasant-goblin'],
 };
-const FAMILY_RACES = ['human', 'human', 'elf', 'goblin', 'goblin', 'dwarf'];   // weighted to human, goblins boosted
-const ALL_RACES = Object.keys(SLUGS);
+// mostly human (they're the ones with characters of their own), the other folk a
+// minority: ~65% of villagers come out human (was ~31% before 2026-10-20)
+const RACES = ['human', 'human', 'human', 'human', 'human', 'human', 'human', 'elf', 'goblin', 'goblin', 'dwarf'];
+const FAMILY_RACES = RACES, ALL_RACES = RACES;
 const BAND_ADJ  = ['Grey', 'Iron', 'Wandering', 'Golden', 'Silent', 'Red', 'Free', 'Bramble', 'North', 'Ember', 'Stone', 'Wild'];
 const BAND_NOUN = ['Company', 'Wolves', 'Wardens', 'Banners', 'Striders', 'Foxes', 'Vagabonds', 'Kindred', 'Company', 'Hands'];
 

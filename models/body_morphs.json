@@ -1,0 +1,165 @@
+{
+ "scale": 0.0001,
+ "f": {
+  "base": {
+   "gender": 1.0,
+   "age": 0.67,
+   "height": 0.36,
+   "weight": 0.5,
+   "muscle": 0.5,
+   "proportions": 0.5,
+   "cupsize": 0.5
+  },
+  "nVerts": 14898,
+  "nBones": 163,
+  "axes": {
+   "age": {
+    "lo": {
+     "value": 0.6,
+     "offset": 0,
+     "maxMm": 77.2
+    },
+    "hi": {
+     "value": 0.97,
+     "offset": 90366,
+     "maxMm": 72.8
+    }
+   },
+   "height": {
+    "lo": {
+     "value": 0.26,
+     "offset": 180732,
+     "maxMm": 108.7
+    },
+    "hi": {
+     "value": 0.46,
+     "offset": 271098,
+     "maxMm": 108.7
+    }
+   },
+   "weight": {
+    "lo": {
+     "value": 0.08,
+     "offset": 361464,
+     "maxMm": 22.9
+    },
+    "hi": {
+     "value": 0.95,
+     "offset": 451830,
+     "maxMm": 18.7
+    }
+   },
+   "muscle": {
+    "lo": {
+     "value": 0.08,
+     "offset": 542196,
+     "maxMm": 28.1
+    },
+    "hi": {
+     "value": 0.95,
+     "offset": 632562,
+     "maxMm": 24.0
+    }
+   },
+   "proportions": {
+    "lo": {
+     "value": 0.15,
+     "offset": 722928,
+     "maxMm": 24.2
+    },
+    "hi": {
+     "value": 0.88,
+     "offset": 813294,
+     "maxMm": 26.3
+    }
+   },
+   "cupsize": {
+    "lo": {
+     "value": 0.15,
+     "offset": 903660,
+     "maxMm": 12.4
+    },
+    "hi": {
+     "value": 0.95,
+     "offset": 994026,
+     "maxMm": 77.8
+    }
+   }
+  }
+ },
+ "m": {
+  "base": {
+   "gender": 0.0,
+   "age": 0.67,
+   "height": 0.4,
+   "weight": 0.5,
+   "muscle": 0.5,
+   "proportions": 0.5,
+   "cupsize": 0.0
+  },
+  "nVerts": 14898,
+  "nBones": 163,
+  "axes": {
+   "age": {
+    "lo": {
+     "value": 0.6,
+     "offset": 1084392,
+     "maxMm": 86.3
+    },
+    "hi": {
+     "value": 0.97,
+     "offset": 1174758,
+     "maxMm": 44.0
+    }
+   },
+   "height": {
+    "lo": {
+     "value": 0.3,
+     "offset": 1265124,
+     "maxMm": 108.7
+    },
+    "hi": {
+     "value": 0.5,
+     "offset": 1355490,
+     "maxMm": 108.7
+    }
+   },
+   "weight": {
+    "lo": {
+     "value": 0.08,
+     "offset": 1445856,
+     "maxMm": 20.3
+    },
+    "hi": {
+     "value": 0.95,
+     "offset": 1536222,
+     "maxMm": 21.0
+    }
+   },
+   "muscle": {
+    "lo": {
+     "value": 0.08,
+     "offset": 1626588,
+     "maxMm": 35.4
+    },
+    "hi": {
+     "value": 0.95,
+     "offset": 1716954,
+     "maxMm": 36.0
+    }
+   },
+   "proportions": {
+    "lo": {
+     "value": 0.15,
+     "offset": 1807320,
+     "maxMm": 23.1
+    },
+    "hi": {
+     "value": 0.88,
+     "offset": 1897686,
+     "maxMm": 25.1
+    }
+   }
+  }
+ }
+}

@@ -72,99 +72,120 @@
       "frameH": 256
     },
     {
-      "slug": "female-lea-1",
-      "file": "sprites/npc/female-lea-1.png",
-      "frameW": 164,
-      "frameH": 256
-    },
-    {
-      "slug": "female-lea-1-sitting",
-      "file": "sprites/npc/female-lea-1-sitting.png",
-      "frameW": 428,
-      "frameH": 256
-    },
-    {
-      "slug": "female-lea-2",
-      "file": "sprites/npc/female-lea-2.png",
-      "frameW": 164,
-      "frameH": 256
-    },
-    {
-      "slug": "female-lea-2-sitting",
-      "file": "sprites/npc/female-lea-2-sitting.png",
-      "frameW": 429,
-      "frameH": 256
-    },
-    {
-      "slug": "female-lea-3",
-      "file": "sprites/npc/female-lea-3.png",
-      "frameW": 163,
-      "frameH": 256
-    },
-    {
-      "slug": "female-lea-3-sitting",
-      "file": "sprites/npc/female-lea-3-sitting.png",
-      "frameW": 400,
-      "frameH": 256
-    },
-    {
-      "slug": "male-lea-1",
-      "file": "sprites/npc/male-lea-1.png",
-      "frameW": 161,
-      "frameH": 256
-    },
-    {
-      "slug": "male-lea-1-sitting",
-      "file": "sprites/npc/male-lea-1-sitting.png",
-      "frameW": 407,
-      "frameH": 256
-    },
-    {
-      "slug": "male-lea-2",
-      "file": "sprites/npc/male-lea-2.png",
-      "frameW": 161,
-      "frameH": 256
-    },
-    {
-      "slug": "male-lea-2-sitting",
-      "file": "sprites/npc/male-lea-2-sitting.png",
-      "frameW": 432,
-      "frameH": 256
-    },
-    {
-      "slug": "male-lea-3",
-      "file": "sprites/npc/male-lea-3.png",
-      "frameW": 162,
-      "frameH": 256
-    },
-    {
-      "slug": "male-lea-3-sitting",
-      "file": "sprites/npc/male-lea-3-sitting.png",
-      "frameW": 403,
-      "frameH": 256
+      "slug": "female-peasant-elf-flower-crown",
+      "file": "sprites/npc/female-peasant-elf-flower-crown.png",
+      "frameW": 177,
+      "frameH": 291,
+      "topPad": 100
     },
     {
       "slug": "female-peasant-goblin",
       "file": "sprites/npc/female-peasant-goblin.png",
       "frameW": 238,
-      "frameH": 256
+      "frameH": 256,
+      "modelMtime": 1782320589.0,
+      "animMtime": 1782320589.0
     },
     {
       "slug": "female-peasant-goblin-sitting",
       "file": "sprites/npc/female-peasant-goblin-sitting.png",
       "frameW": 238,
-      "frameH": 256
+      "frameH": 256,
+      "modelMtime": 1782320520.0,
+      "animMtime": 1782320520.0
     },
     {
       "slug": "male-peasant-goblin",
       "file": "sprites/npc/male-peasant-goblin.png",
       "frameW": 308,
-      "frameH": 256
+      "frameH": 256,
+      "modelMtime": 1782797211.7205942,
+      "animMtime": 1782797211.7205942
     },
     {
       "slug": "male-peasant-goblin-sitting",
       "file": "sprites/npc/male-peasant-goblin-sitting.png",
       "frameW": 308,
+      "frameH": 256,
+      "modelMtime": 1782320543.0,
+      "animMtime": 1782320543.0
+    },
+    {
+      "slug": "female-lea-1",
+      "file": "sprites/npc/female-lea-1.png",
+      "frameW": 158,
+      "frameH": 256
+    },
+    {
+      "slug": "female-lea-1-sitting",
+      "file": "sprites/npc/female-lea-1-sitting.png",
+      "frameW": 384,
+      "frameH": 256
+    },
+    {
+      "slug": "female-lea-2",
+      "file": "sprites/npc/female-lea-2.png",
+      "frameW": 158,
+      "frameH": 256
+    },
+    {
+      "slug": "female-lea-2-sitting",
+      "file": "sprites/npc/female-lea-2-sitting.png",
+      "frameW": 401,
+      "frameH": 256
+    },
+    {
+      "slug": "female-lea-3",
+      "file": "sprites/npc/female-lea-3.png",
+      "frameW": 159,
+      "frameH": 256
+    },
+    {
+      "slug": "female-lea-3-sitting",
+      "file": "sprites/npc/female-lea-3-sitting.png",
+      "frameW": 385,
+      "frameH": 256
+    },
+    {
+      "slug": "male-lea-1",
+      "file": "sprites/npc/male-lea-1.png",
+      "frameW": 173,
+      "frameH": 256
+    },
+    {
+      "slug": "male-lea-1-sitting",
+      "file": "sprites/npc/male-lea-1-sitting.png",
+      "frameW": 427,
+      "frameH": 256
+    },
+    {
+      "slug": "male-lea-2",
+      "file": "sprites/npc/male-lea-2.png",
+      "frameW": 171,
+      "frameH": 256
+    },
+    {
+      "slug": "male-lea-2-sitting",
+      "file": "sprites/npc/male-lea-2-sitting.png",
+      "frameW": 416,
+      "frameH": 256
+    },
+    {
+      "slug": "male-lea-3",
+      "file": "sprites/npc/male-lea-3.png",
+      "frameW": 174,
+      "frameH": 256
+    },
+    {
+      "slug": "male-lea-3-sitting",
+      "file": "sprites/npc/male-lea-3-sitting.png",
+      "frameW": 420,
+      "frameH": 256
+    },
+    {
+      "slug": "female-lea-1-idle",
+      "file": "sprites/npc/female-lea-1-idle.png",
+      "frameW": 158,
       "frameH": 256
     }
   ]

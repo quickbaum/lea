@@ -1,0 +1,888 @@
+{
+ "credit": "Hávamál tr. H. A. Bellows (1923); Proverbs, JPS 1917; traditional songs. All public domain.",
+ "sayings": [
+  {
+   "id": "hav3",
+   "src": "havamal",
+   "ref": "Hávamál 3",
+   "kind": "saying",
+   "tags": [
+    "cold",
+    "fire",
+    "hunger",
+    "guest"
+   ],
+   "parts": [
+    "Fire he needs\nwho with frozen knees\nHas come from the cold without;",
+    "Food and clothes\nmust the farer have,\nThe man from the mountains come."
+   ]
+  },
+  {
+   "id": "hav4",
+   "src": "havamal",
+   "ref": "Hávamál 4",
+   "kind": "saying",
+   "tags": [
+    "guest"
+   ],
+   "parts": [
+    "Water and towels\nand welcoming speech\nShould he find who comes to the feast;",
+    "If renown he would get,\nand again be greeted,\nWisely and well must he act."
+   ]
+  },
+  {
+   "id": "hav5",
+   "src": "havamal",
+   "ref": "Hávamál 5",
+   "kind": "saying",
+   "tags": [
+    "travel",
+    "home"
+   ],
+   "parts": [
+    "Wits must he have\nwho wanders wide,\nBut all is easy at home;",
+    "At the witless man\nthe wise shall wink\nWhen among such men he sits."
+   ]
+  },
+  {
+   "id": "hav10",
+   "src": "havamal",
+   "ref": "Hávamál 10",
+   "kind": "saying",
+   "tags": [
+    "travel"
+   ],
+   "parts": [
+    "A better burden\nmay no man bear\nFor wanderings wide than wisdom;",
+    "It is better than wealth\non unknown ways,\nAnd in grief a refuge it gives."
+   ]
+  },
+  {
+   "id": "hav20",
+   "src": "havamal",
+   "ref": "Hávamál 20",
+   "kind": "saying",
+   "tags": [
+    "food"
+   ],
+   "parts": [
+    "The greedy man,\nif his mind be vague,\nWill eat till sick he is;",
+    "The vulgar man,\nwhen among the wise,\nTo scorn by his belly is brought."
+   ]
+  },
+  {
+   "id": "hav21",
+   "src": "havamal",
+   "ref": "Hávamál 21",
+   "kind": "saying",
+   "tags": [
+    "food",
+    "hunger"
+   ],
+   "parts": [
+    "The herds know well\nwhen home they shall fare,\nAnd then from the grass they go;",
+    "But the foolish man\nhis belly's measure\nShall never know aright."
+   ]
+  },
+  {
+   "id": "hav23",
+   "src": "havamal",
+   "ref": "Hávamál 23",
+   "kind": "saying",
+   "tags": [
+    "rest",
+    "night"
+   ],
+   "parts": [
+    "The witless man\nis awake all night,\nThinking of many things;",
+    "Care-worn he is\nwhen the morning comes,\nAnd his woe is just as it was."
+   ]
+  },
+  {
+   "id": "hav28",
+   "src": "havamal",
+   "ref": "Hávamál 28",
+   "kind": "saying",
+   "tags": [
+    "talk"
+   ],
+   "parts": [
+    "Wise shall he seem\nwho well can question,\nAnd also answer well;",
+    "Nought is concealed\nthat men may say\nAmong the sons of men."
+   ]
+  },
+  {
+   "id": "hav34",
+   "src": "havamal",
+   "ref": "Hávamál 34",
+   "kind": "saying",
+   "tags": [
+    "friend",
+    "travel"
+   ],
+   "parts": [
+    "Crooked and far\nis the road to a foe,\nThough his house on the highway be;",
+    "But wide and straight\nis the way to a friend,\nThough far away he fare."
+   ]
+  },
+  {
+   "id": "hav36",
+   "src": "havamal",
+   "ref": "Hávamál 36",
+   "kind": "saying",
+   "tags": [
+    "hut",
+    "home"
+   ],
+   "parts": [
+    "Better a house,\nthough a hut it be,\nA man is master at home;",
+    "A pair of goats\nand a patched-up roof\nAre better far than begging."
+   ]
+  },
+  {
+   "id": "hav37",
+   "src": "havamal",
+   "ref": "Hávamál 37",
+   "kind": "saying",
+   "tags": [
+    "hut",
+    "hunger"
+   ],
+   "parts": [
+    "Better a house,\nthough a hut it be,\nA man is master at home;",
+    "His heart is bleeding\nwho needs must beg\nWhen food he fain would have."
+   ]
+  },
+  {
+   "id": "hav41",
+   "src": "havamal",
+   "ref": "Hávamál 41",
+   "kind": "saying",
+   "tags": [
+    "gift",
+    "friend"
+   ],
+   "parts": [
+    "Friends shall gladden each other\nwith arms and garments,\nAs each for himself can see;",
+    "Gift-givers' friendships\nare longest found,\nIf fair their fates may be."
+   ]
+  },
+  {
+   "id": "hav42",
+   "src": "havamal",
+   "ref": "Hávamál 42",
+   "kind": "saying",
+   "tags": [
+    "gift",
+    "friend"
+   ],
+   "parts": [
+    "To his friend a man\na friend shall prove,\nAnd gifts with gifts requite;",
+    "But men shall mocking\nwith mockery answer,\nAnd fraud with falsehood meet."
+   ]
+  },
+  {
+   "id": "hav47",
+   "src": "havamal",
+   "ref": "Hávamál 47",
+   "kind": "saying",
+   "tags": [
+    "friend",
+    "guest",
+    "travel",
+    "alone"
+   ],
+   "parts": [
+    "Young was I once,\nand wandered alone,\nAnd nought of the road I knew;",
+    "Rich did I feel\nwhen a comrade I found,\nFor man is man's delight."
+   ]
+  },
+  {
+   "id": "hav52",
+   "src": "havamal",
+   "ref": "Hávamál 52",
+   "kind": "saying",
+   "tags": [
+    "gift",
+    "food",
+    "friend"
+   ],
+   "parts": [
+    "No great thing needs\na man to give,\nOft little will purchase praise;",
+    "With half a loaf\nand a half-filled cup\nA friend full fast I made."
+   ]
+  },
+  {
+   "id": "hav57",
+   "src": "havamal",
+   "ref": "Hávamál 57",
+   "kind": "saying",
+   "tags": [
+    "fire",
+    "talk"
+   ],
+   "parts": [
+    "A brand from a brand\nis kindled and burned,\nAnd fire from fire begotten;",
+    "And man by his speech\nis known to men,\nAnd the stupid by their stillness."
+   ]
+  },
+  {
+   "id": "hav58",
+   "src": "havamal",
+   "ref": "Hávamál 58",
+   "kind": "saying",
+   "tags": [
+    "hunger",
+    "work",
+    "rest"
+   ],
+   "parts": [
+    "The wolf that lies idle\nshall win little meat,\nOr the sleeping man success."
+   ]
+  },
+  {
+   "id": "hav59",
+   "src": "havamal",
+   "ref": "Hávamál 59",
+   "kind": "saying",
+   "tags": [
+    "rest",
+    "work"
+   ],
+   "parts": [
+    "Much remains undone\nfor the morning-sleeper,\nFor the swift is wealth half won."
+   ]
+  },
+  {
+   "id": "hav63",
+   "src": "havamal",
+   "ref": "Hávamál 63",
+   "kind": "saying",
+   "tags": [
+    "talk",
+    "news"
+   ],
+   "parts": [
+    "Tell one thy thoughts,\nbut beware of two,—\nAll know what is known to three."
+   ]
+  },
+  {
+   "id": "hav68",
+   "src": "havamal",
+   "ref": "Hávamál 68",
+   "kind": "saying",
+   "tags": [
+    "fire",
+    "weather"
+   ],
+   "parts": [
+    "Fire for men\nis the fairest gift,\nAnd power to see the sun;",
+    "Health as well,\nif a man may have it,\nAnd a life not stained with sin."
+   ]
+  },
+  {
+   "id": "hav74",
+   "src": "havamal",
+   "ref": "Hávamál 74",
+   "kind": "saying",
+   "tags": [
+    "weather",
+    "rain"
+   ],
+   "parts": [
+    "Full oft does the weather\nchange in a week,\nAnd more in a month's time."
+   ]
+  },
+  {
+   "id": "hav77",
+   "src": "havamal",
+   "ref": "Hávamál 77",
+   "kind": "saying",
+   "tags": [
+    "fate"
+   ],
+   "parts": [
+    "Cattle die,\nand kinsmen die,\nAnd so one dies one's self;",
+    "But a noble name\nwill never die,\nIf good renown one gets."
+   ]
+  },
+  {
+   "id": "hav116",
+   "src": "havamal",
+   "ref": "Hávamál 116",
+   "kind": "saying",
+   "tags": [
+    "travel",
+    "food"
+   ],
+   "parts": [
+    "If o'er mountains or gulfs\nthou fain wouldst go,\nLook well to thy food for the way."
+   ]
+  },
+  {
+   "id": "hav119",
+   "src": "havamal",
+   "ref": "Hávamál 119",
+   "kind": "saying",
+   "tags": [
+    "friend",
+    "travel"
+   ],
+   "parts": [
+    "If a friend thou hast\nwhom thou fully wilt trust,\nThen fare to find him oft;",
+    "For brambles grow\nand waving grass\nOn the rarely trodden road."
+   ]
+  },
+  {
+   "id": "hav133",
+   "src": "havamal",
+   "ref": "Hávamál 133",
+   "kind": "saying",
+   "tags": [
+    "guest",
+    "talk"
+   ],
+   "parts": [
+    "Oft scarcely he knows\nwho sits in the house\nWhat kind is the man who comes;",
+    "None so good is found\nthat faults he has not,\nNor so wicked that nought he is worth."
+   ]
+  },
+  {
+   "id": "hav135",
+   "src": "havamal",
+   "ref": "Hávamál 135",
+   "kind": "saying",
+   "tags": [
+    "gift",
+    "guest",
+    "hunger"
+   ],
+   "parts": [
+    "Curse not thy guest,\nnor show him thy gate,\nDeal well with a man in want."
+   ]
+  },
+  {
+   "id": "pro6_6",
+   "src": "proverbs",
+   "ref": "Proverbs 6:6",
+   "kind": "saying",
+   "tags": [
+    "work",
+    "rest"
+   ],
+   "parts": [
+    "Go to the ant, thou sluggard;",
+    "Consider her ways, and be wise;"
+   ]
+  },
+  {
+   "id": "pro6_10",
+   "src": "proverbs",
+   "ref": "Proverbs 6:10",
+   "kind": "saying",
+   "tags": [
+    "rest"
+   ],
+   "parts": [
+    "’Yet a little sleep, a little slumber,",
+    "A little folding of the hands to sleep’—"
+   ]
+  },
+  {
+   "id": "pro10_4",
+   "src": "proverbs",
+   "ref": "Proverbs 10:4",
+   "kind": "saying",
+   "tags": [
+    "work"
+   ],
+   "parts": [
+    "He becometh poor that dealeth with a slack hand;",
+    "But the hand of the diligent maketh rich."
+   ]
+  },
+  {
+   "id": "pro10_5",
+   "src": "proverbs",
+   "ref": "Proverbs 10:5",
+   "kind": "saying",
+   "tags": [
+    "work",
+    "food",
+    "rest"
+   ],
+   "parts": [
+    "A wise son gathereth in summer;",
+    "But a son that doeth shamefully sleepeth in harvest."
+   ]
+  },
+  {
+   "id": "pro10_19",
+   "src": "proverbs",
+   "ref": "Proverbs 10:19",
+   "kind": "saying",
+   "tags": [
+    "talk",
+    "bye"
+   ],
+   "parts": [
+    "In the multitude of words there wanteth not transgression;",
+    "But he that refraineth his lips is wise."
+   ]
+  },
+  {
+   "id": "pro11_25",
+   "src": "proverbs",
+   "ref": "Proverbs 11:25",
+   "kind": "saying",
+   "tags": [
+    "gift"
+   ],
+   "parts": [
+    "The beneficent soul shall be made rich,",
+    "And he that satisfieth abundantly shall be satisfied also himself."
+   ]
+  },
+  {
+   "id": "pro12_11",
+   "src": "proverbs",
+   "ref": "Proverbs 12:11",
+   "kind": "saying",
+   "tags": [
+    "food",
+    "work"
+   ],
+   "parts": [
+    "He that tilleth his ground shall have plenty of bread;",
+    "But he that followeth after vain things is void of understanding."
+   ]
+  },
+  {
+   "id": "pro12_25",
+   "src": "proverbs",
+   "ref": "Proverbs 12:25",
+   "kind": "saying",
+   "tags": [
+    "talk",
+    "cold",
+    "hunger",
+    "rest"
+   ],
+   "parts": [
+    "Care in the heart of a man boweth it down;",
+    "But a good word maketh it glad."
+   ]
+  },
+  {
+   "id": "pro13_12",
+   "src": "proverbs",
+   "ref": "Proverbs 13:12",
+   "kind": "saying",
+   "tags": [
+    "later"
+   ],
+   "parts": [
+    "Hope deferred maketh the heart sick;",
+    "But desire fulfilled is a tree of life."
+   ]
+  },
+  {
+   "id": "pro13_20",
+   "src": "proverbs",
+   "ref": "Proverbs 13:20",
+   "kind": "saying",
+   "tags": [
+    "friend",
+    "travel"
+   ],
+   "parts": [
+    "He that walketh with wise men shall be wise;",
+    "But the companion of fools shall smart for it."
+   ]
+  },
+  {
+   "id": "pro15_1",
+   "src": "proverbs",
+   "ref": "Proverbs 15:1",
+   "kind": "saying",
+   "tags": [
+    "talk"
+   ],
+   "parts": [
+    "A soft answer turneth away wrath;",
+    "But a grievous word stirreth up anger."
+   ]
+  },
+  {
+   "id": "pro15_15",
+   "src": "proverbs",
+   "ref": "Proverbs 15:15",
+   "kind": "saying",
+   "tags": [
+    "hunger",
+    "merry"
+   ],
+   "parts": [
+    "All the days of the poor are evil;",
+    "But he that is of a merry heart hath a continual feast."
+   ]
+  },
+  {
+   "id": "pro15_17",
+   "src": "proverbs",
+   "ref": "Proverbs 15:17",
+   "kind": "saying",
+   "tags": [
+    "food",
+    "friend"
+   ],
+   "parts": [
+    "Better is a dinner of herbs where love is,",
+    "Than a stalled ox and hatred therewith."
+   ]
+  },
+  {
+   "id": "pro15_23",
+   "src": "proverbs",
+   "ref": "Proverbs 15:23",
+   "kind": "saying",
+   "tags": [
+    "talk",
+    "news"
+   ],
+   "parts": [
+    "A man hath joy in the answer of his mouth;",
+    "And a word in due season, how good is it!"
+   ]
+  },
+  {
+   "id": "pro17_1",
+   "src": "proverbs",
+   "ref": "Proverbs 17:1",
+   "kind": "saying",
+   "tags": [
+    "food",
+    "hut"
+   ],
+   "parts": [
+    "Better is a dry morsel and quietness therewith,",
+    "Than a house full of feasting with strife."
+   ]
+  },
+  {
+   "id": "pro17_17",
+   "src": "proverbs",
+   "ref": "Proverbs 17:17",
+   "kind": "saying",
+   "tags": [
+    "friend"
+   ],
+   "parts": [
+    "A friend loveth at all times,",
+    "And a brother is born for adversity."
+   ]
+  },
+  {
+   "id": "pro17_22",
+   "src": "proverbs",
+   "ref": "Proverbs 17:22",
+   "kind": "saying",
+   "tags": [
+    "merry",
+    "rest"
+   ],
+   "parts": [
+    "A merry heart is a good medicine;",
+    "But a broken spirit drieth the bones."
+   ]
+  },
+  {
+   "id": "pro17_28",
+   "src": "proverbs",
+   "ref": "Proverbs 17:28",
+   "kind": "saying",
+   "tags": [
+    "talk"
+   ],
+   "parts": [
+    "Even a fool, when he holdeth his peace, is counted wise;",
+    "And he that shutteth his lips is esteemed as a man of understanding."
+   ]
+  },
+  {
+   "id": "pro18_24",
+   "src": "proverbs",
+   "ref": "Proverbs 18:24",
+   "kind": "saying",
+   "tags": [
+    "friend"
+   ],
+   "parts": [
+    "There are friends that one hath to his own hurt;",
+    "But there is a friend that sticketh closer than a brother."
+   ]
+  },
+  {
+   "id": "pro19_15",
+   "src": "proverbs",
+   "ref": "Proverbs 19:15",
+   "kind": "saying",
+   "tags": [
+    "rest",
+    "hunger"
+   ],
+   "parts": [
+    "Slothfulness casteth into a deep sleep;",
+    "And the idle soul shall suffer hunger."
+   ]
+  },
+  {
+   "id": "pro20_4",
+   "src": "proverbs",
+   "ref": "Proverbs 20:4",
+   "kind": "saying",
+   "tags": [
+    "work",
+    "cold"
+   ],
+   "parts": [
+    "The sluggard will not plow when winter setteth in;",
+    "Therefore he shall beg in harvest, and have nothing."
+   ]
+  },
+  {
+   "id": "pro20_13",
+   "src": "proverbs",
+   "ref": "Proverbs 20:13",
+   "kind": "saying",
+   "tags": [
+    "rest",
+    "food"
+   ],
+   "parts": [
+    "Love not sleep, lest thou come to poverty;",
+    "Open thine eyes, and thou shalt have bread in plenty."
+   ]
+  },
+  {
+   "id": "pro20_14",
+   "src": "proverbs",
+   "ref": "Proverbs 20:14",
+   "kind": "saying",
+   "tags": [
+    "trade"
+   ],
+   "parts": [
+    "’It is bad, it is bad’, saith the buyer;",
+    "But when he is gone his way, then he boasteth."
+   ]
+  },
+  {
+   "id": "pro22_9",
+   "src": "proverbs",
+   "ref": "Proverbs 22:9",
+   "kind": "saying",
+   "tags": [
+    "gift"
+   ],
+   "parts": [
+    "He that hath a bountiful eye shall be blessed;",
+    "For he giveth of his bread to the poor."
+   ]
+  },
+  {
+   "id": "pro25_11",
+   "src": "proverbs",
+   "ref": "Proverbs 25:11",
+   "kind": "saying",
+   "tags": [
+    "talk"
+   ],
+   "parts": [
+    "A word fitly spoken",
+    "Is like apples of gold in settings of silver."
+   ]
+  },
+  {
+   "id": "pro25_16",
+   "src": "proverbs",
+   "ref": "Proverbs 25:16",
+   "kind": "saying",
+   "tags": [
+    "food"
+   ],
+   "parts": [
+    "Hast thou found honey? eat so much as is sufficient for thee,",
+    "Lest thou be filled therewith, and vomit it."
+   ]
+  },
+  {
+   "id": "pro25_17",
+   "src": "proverbs",
+   "ref": "Proverbs 25:17",
+   "kind": "saying",
+   "tags": [
+    "guest",
+    "bye"
+   ],
+   "parts": [
+    "Let thy foot be seldom in thy neighbour’s house;",
+    "Lest he be sated with thee, and hate thee."
+   ]
+  },
+  {
+   "id": "pro25_23",
+   "src": "proverbs",
+   "ref": "Proverbs 25:23",
+   "kind": "saying",
+   "tags": [
+    "rain",
+    "weather",
+    "talk"
+   ],
+   "parts": [
+    "The north wind bringeth forth rain,",
+    "And a backbiting tongue an angry countenance."
+   ]
+  },
+  {
+   "id": "pro25_25",
+   "src": "proverbs",
+   "ref": "Proverbs 25:25",
+   "kind": "saying",
+   "tags": [
+    "news",
+    "travel"
+   ],
+   "parts": [
+    "As cold waters to a faint soul,",
+    "So is good news from a far country."
+   ]
+  },
+  {
+   "id": "pro26_14",
+   "src": "proverbs",
+   "ref": "Proverbs 26:14",
+   "kind": "saying",
+   "tags": [
+    "rest"
+   ],
+   "parts": [
+    "The door is turning upon its hinges,",
+    "And the sluggard is still upon his bed."
+   ]
+  },
+  {
+   "id": "pro26_20",
+   "src": "proverbs",
+   "ref": "Proverbs 26:20",
+   "kind": "saying",
+   "tags": [
+    "fire",
+    "talk"
+   ],
+   "parts": [
+    "Where no wood is, the fire goeth out;",
+    "And where there is no whisperer, contention ceaseth."
+   ]
+  },
+  {
+   "id": "pro27_1",
+   "src": "proverbs",
+   "ref": "Proverbs 27:1",
+   "kind": "saying",
+   "tags": [
+    "later",
+    "fate"
+   ],
+   "parts": [
+    "Boast not thyself of to-morrow;",
+    "For thou knowest not what a day may bring forth."
+   ]
+  },
+  {
+   "id": "pro27_17",
+   "src": "proverbs",
+   "ref": "Proverbs 27:17",
+   "kind": "saying",
+   "tags": [
+    "friend"
+   ],
+   "parts": [
+    "Iron sharpeneth iron;",
+    "So a man sharpeneth the countenance of his friend."
+   ]
+  },
+  {
+   "id": "pro28_27",
+   "src": "proverbs",
+   "ref": "Proverbs 28:27",
+   "kind": "saying",
+   "tags": [
+    "gift"
+   ],
+   "parts": [
+    "He that giveth unto the poor shall not lack;",
+    "But he that hideth his eyes shall have many a curse."
+   ]
+  },
+  {
+   "id": "pro30_25",
+   "src": "proverbs",
+   "ref": "Proverbs 30:25",
+   "kind": "saying",
+   "tags": [
+    "food",
+    "work"
+   ],
+   "parts": [
+    "The ants are a people not strong,",
+    "Yet they provide their food in the summer;"
+   ]
+  },
+  {
+   "id": "song_greensleeves",
+   "src": "song",
+   "ref": "Greensleeves",
+   "kind": "song",
+   "tags": [
+    "sing",
+    "night",
+    "merry"
+   ],
+   "parts": [
+    "Greensleeves was all my joy,\nGreensleeves was my delight,",
+    "Greensleeves was my heart of gold,\nand who but my Lady Greensleeves."
+   ]
+  },
+  {
+   "id": "song_thomas-the-rhymer",
+   "src": "song",
+   "ref": "Thomas the Rhymer",
+   "kind": "song",
+   "tags": [
+    "sing",
+    "night",
+    "fate"
+   ],
+   "parts": [
+    "True Thomas lay on Huntlie bank,\nA ferlie he spied wi’ his e’e;",
+    "And there he saw a ladye bright\nCome riding down by the Eildon Tree."
+   ]
+  },
+  {
+   "id": "song_robin-hood-and-the-peddler",
+   "src": "song",
+   "ref": "Robin Hood and the Pedlar",
+   "kind": "song",
+   "tags": [
+    "sing",
+    "travel"
+   ],
+   "parts": [
+    "It's of a pedlar, a pedlar bold\nA pedlar bold there chanced to be",
+    "He took his pack all on his back\nAnd merrily trudged over the lea"
+   ]
+  }
+ ]
+}
