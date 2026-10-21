@@ -14,7 +14,8 @@ const TRACKS = {
   rock:  '12 - Wasteland Theme.flac',
 };
 
-const SOUNDS   = '/sounds/';
+// relative to the page, so the public build (served from /lea/) finds its own sounds/
+const SOUNDS   = 'sounds/';
 const VOL      = 0.5;
 const FADE_MS  = 4000;  // crossfade duration
 const DWELL_S  = 3;     // seconds on new terrain before committing
@@ -64,14 +65,17 @@ export class MusicPlayer {
   }
 
   _switch(key) {
-    const file = TRACKS[key] ?? TRACKS.grass;
+    const k = TRACKS[key] ? key : 'grass', file = TRACKS[k];
     const next = 1 - this._cur;
     const na   = this._els[next];
     const ca   = this._els[this._cur];
 
     this._fade(ca, 0);
 
-    na.src = SOUNDS + encodeURIComponent(file);
+    // The public build ships short mp3s (sounds/grass.mp3); bub serves the original
+    // flacs (sounds/18 - Grass Theme.flac, from ~/sounds). Try the mp3, then the flac.
+    na.onerror = () => { na.onerror = null; na.src = SOUNDS + encodeURIComponent(file); na.play().catch(() => {}); };
+    na.src = SOUNDS + k + '.mp3';
     na.volume = 0;
     na.play().catch(() => {});
     this._fade(na, this._gain);
