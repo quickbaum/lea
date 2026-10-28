@@ -16,7 +16,7 @@
 
 import { RECIPES, RAW_KINDS } from './recipes.js';
 import { addPlan, dropPlan, plansOf } from './plans.js';
-import { countOf, takeFood } from './larder.js';
+import { countOf, takeFood, rawOf, takeRaw } from './larder.js';
 
 let NEXT = 1;
 const GRACE = 0.05;                 // days after the deadline before a done-or-not project is cleared
@@ -78,7 +78,7 @@ export class Project {
     }
     let got = 0;
     for (const k of t.item){
-      if (RAW_KINDS.has(k)){ if (n.rawKind === k && n.raw > 0){ const m = Math.min(n.raw, t.n - got); n.raw -= m; got += m; if (n.raw <= 0) n.rawKind = null; this.put(k, m); } }
+      if (RAW_KINDS.has(k)){ const m = takeRaw(n, k, t.n - got); if (m > 0){ got += m; this.put(k, m); } }
       else { const have = countOf(n, k); if (have > 0){ const m = Math.min(have, t.n - got); takeFood(n, m, this.w.time, k); got += m; this.put(k, m); } }
       if (got >= t.n) break;
     }
@@ -136,7 +136,7 @@ export class Project {
   }
 }
 
-const carriesAny = (n, items) => items.some(k => k === 'wood' ? (n.firewood || 0) > 0 : k === 'thatch' ? (n.thatchArms || 0) > 0 : countOf(n, k) > 0 || (n.rawKind === k && n.raw > 0));
+const carriesAny = (n, items) => items.some(k => k === 'wood' ? (n.firewood || 0) > 0 : k === 'thatch' ? (n.thatchArms || 0) > 0 : countOf(n, k) > 0 || rawOf(n, k) > 0);
 // n owes the other members news of this; told in talk (convo.js projectNewsChain)
 function owe(p, n, news){
   if (!n.owes) n.owes = [];

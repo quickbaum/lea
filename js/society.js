@@ -88,3 +88,23 @@ function assignRoles(g){
     g.members[0].role = 'lone';
   }
 }
+
+// The villagers: one household to each village dwelling (gen/settle.js), living
+// there rather than camping. A household is a family of 2–4 sharing a surname —
+// a couple, or a couple and their children (75 THE FAMILY) — all human, so each
+// gets a character of their own. `homes` is [{ x, z }] (the door mouths) in the
+// order AgentWorld.setHouses made the houses; each group carries `house`, its
+// index there. They come on top of the folk count chosen on the start screen.
+export function makeHouseholds(rng, homes, firstId){
+  const ri = (a, b) => a + Math.floor(rng() * (b - a + 1));
+  const pick = a => a[Math.floor(rng() * a.length)];
+  return homes.map((h, i) => {
+    const size = ri(2, 4), surname = surnameFor('human', rng);
+    const g = { id: firstId + i, kind: 'family', village: true, house: i, race: 'human', surname,
+                name: `the ${surname} family`, members: [], npcs: [], cx: h.x, cz: h.z, spread: 2.5 };
+    g.members.push({ slug: pick(SLUGS.human.filter(s => s.startsWith('male'))), role: 'father' });
+    g.members.push({ slug: pick(SLUGS.human.filter(s => s.startsWith('female'))), role: 'mother' });
+    for (let k = 2; k < size; k++) g.members.push({ slug: pick(SLUGS.human), role: 'child' });
+    return g;
+  });
+}

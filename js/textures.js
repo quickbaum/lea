@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { COLORS } from './ingredients.js';
 
 // Render a canvas into a THREE texture. Nearest filtering keeps the crisp,
 // grainy, pixel look across the whole world.
@@ -596,10 +597,7 @@ export function makeTrinketTexture(kind = 'stone'){
 // A backpack carried on an NPC's back, with its contents poking out the top:
 // wood sticks, little food items (coloured by what's stowed), and any glinting
 // valuables. Cached per (food, wood, kind, trinkets) by the caller.
-const PACK_FOOD_COLOR = {
-  berries: '#6e1f4c', apples: '#ce3c2c', mushrooms: '#b0623c', acorns: '#9c6b35',
-  hazelnuts: '#8a6438', roots: '#6f8f3a', 'cattail root': '#6f8f3a', chamomile: '#e6dea0', food: '#b5643a',
-};
+const PACK_FOOD_COLOR = { ...COLORS, food: '#b5643a' };   // (ingredients.js `color`)
 // `mark` (optional): { mask, n, dye } — the household's pattern (js/kin-mark.js),
 // woven into the sack body in their dye, the same mark as their huts' thatch.
 export function makePackTexture(food = 0, wood = 0, kind = 'food', trinkets = 0, mark = null){

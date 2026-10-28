@@ -3,7 +3,8 @@
 //   { root, speaker, portrait, nodes: { id: { text, choices:[{label, next, action}] } } }
 // next:null ends the talk; next omitted on an `action` choice re-renders the same
 // node (so e.g. "Gather more clouds" can be tapped repeatedly). text may contain
-// [[node]] or [[node|label]] inline links. `action` names a function supplied by
+// [[node]] or [[node|label]] inline links. A tree built at runtime may give a
+// choice `run`, a function called when it's picked (before moving to `next`). `action` names a function supplied by
 // the caller in opts.actions — that's how Claude actually changes the weather.
 
 const cache = {};
@@ -107,6 +108,7 @@ function open(tree, opts){
       const b = document.createElement('div'); b.className = 'dlg-choice'; b.textContent = c.label;
       b.onclick = () => {
         if (c.action && actions[c.action]) actions[c.action]();
+        if (c.run) c.run();                               // (a runtime tree's choice can act directly)
         if (c.next === null) close();
         else if (c.next === undefined) go(cur, false);   // action with no target: stay, repeatable
         else go(c.next);
@@ -127,6 +129,9 @@ function load(name){
 export function talk(name, opts = {}){
   return load(name).then(t => open(t, opts)).catch(e => console.warn('dialog:', e));
 }
+
+// loadTree('lea') — a /dialogs tree itself, to add to before it's opened (Puck's guide branch)
+export const loadTree = load;
 
 // talkTree(tree, opts) — open a conversation from an in-memory tree (no fetch),
 // for dialogue assembled at runtime (e.g. a peasant reporting its current state).

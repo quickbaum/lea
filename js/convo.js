@@ -19,7 +19,8 @@ import { tie, regard, nudge, chemistry } from './ties.js';
 import { addPlan, dropPlan, firstPlan, inAHurry, plansOf, boostCraving, craving, CRAVED } from './plans.js';
 import { Project, projectOf } from './projects.js';
 import { foresight } from './larder.js';
-import { RECIPES, stepsKnown, learnRecipe, carries, potNeeds, potHelp, potLeft, potStep } from './recipes.js';
+import { lack } from './trade.js';
+import { RECIPES, stepsKnown, learnRecipe, carries, potNeeds, potHelp, potLeft, potStep, potDish } from './recipes.js';
 
 const PART_R     = 9;       // apart further than this, someone has left the talk
 const JOIN_R     = 5;       // close enough to ask to join
@@ -50,7 +51,8 @@ const HOLD_MAX   = 5;
 export const INTENT = { chop: 'wood', stack: 'wood', 'cut-thatch': 'hut', 'stake-hut': 'hut', 'build-shel': 'hut',
   build: 'fire', tend: 'fire', fire: 'fire', food: 'food', getfood: 'pot', sup: 'pot', cook: 'pot',
   store: 'food', hunt: 'meat', sleep: 'sleepy', indoors: 'sleepy', shelter: 'rain', 'tree-shelter': 'rain',
-  collect: 'gems', revere: 'tree', 'gather-flower': 'flower', 'plan-food': 'food', 'plan-cook': 'pot', help: 'pot', bring: 'food' };
+  collect: 'gems', revere: 'tree', fish: 'food', 'gather-flower': 'flower', 'plan-food': 'food', 'plan-cook': 'pot', help: 'pot', bring: 'food',
+  'peel-bark': 'tree', 'canoe-work': 'wood', 'canoe-bring': 'wood' };
 const FOOD_ICON = { berries: 'berries', apples: 'apples', acorns: 'nuts', hazelnuts: 'nuts',
   chamomile: 'flower', roots: 'roots', 'cattail root': 'roots', mushrooms: 'mushrooms', morels: 'mushrooms' };
 
@@ -77,7 +79,7 @@ function wordsOf(w, m){
 const M = (who, to, key, icon, extra) => ({ who, to, key, icon, ...extra });
 
 export function factIcon(f){
-  return f.kind === 'saw' ? 'person' : f.kind === 'kind' ? 'gift' : f.kind === 'food' ? (FOOD_ICON[f.foodKind] || 'food') : 'omen';
+  return f.kind === 'dish' ? 'food' : f.kind === 'saw' ? 'person' : f.kind === 'kind' ? 'gift' : f.kind === 'food' ? (FOOD_ICON[f.foodKind] || 'food') : f.kind === 'market' ? 'trade' : f.kind === 'boat' ? 'place' : 'omen';
 }
 
 // ---- sayings: what folk know by heart ----------------------------------------
@@ -115,7 +117,7 @@ const KIND_WORDS = new Set(['proj-ack-good', 'proj-yes', 'proj-claim', 'praise-c
 
 // what a move is about, for answering it with a saying
 const THEME = {
-  'tell-food': 'food', 'q-food': 'hunger', 's-pot': 'hunger', 'a-food-hungry': 'hunger', 'give-food': 'gift',
+  'tell-food': 'food', 'tell-dish': 'food', 'q-teach': 'food', 'q-food': 'hunger', 's-pot': 'hunger', 'a-food-hungry': 'hunger', 'give-food': 'gift',
   'thanks-food': 'gift', 'tell-kind': 'gift', 'kind-warm': 'gift', 'go-now': 'travel', 'yes-go': 'travel',
   'go-later': 'later', 'q-fire': 'fire', 's-fire': 'cold', 'a-fire-tired': 'rest', 'no-tired': 'rest', 'i-chop': 'work',
   'i-stack': 'work', 's-rain': 'rain', 'a-rain-yes': 'weather', 'a-rain-maybe': 'weather', 's-sleepy': 'rest',
@@ -195,6 +197,15 @@ export class Conversation {
     this.theme = null; this.saidLore = new Set(); this.lore = 0;   // sayings (sayingAfter)
     this.mode = new Map(); this._steerT = 0;
     a.convo = b.convo = this;
+  }
+
+  // A trade at a village door (agents.js callAt): a talk that opens with the
+  // haggle, and holds both of them there till it's done (see _steer).
+  static haggle(w, a, b, h){
+    for (const n of [a, b]) if (n.convo) n.convo.leave(n);
+    const c = new Conversation(w, a, b);
+    c.chain = c.trading = (function*(){ yield* opening(c, a, b); yield* haggleChain(c, a, b, h); })();
+    return c;
   }
 
   // has either of them anything to say? (else they don't start)
@@ -337,6 +348,7 @@ export class Conversation {
   // sociable they are, how they feel about the other) against what's pulling them
   // away (their worst need, a job they're committed to, a plan to go now).
   _steer(){
+    if (this.trading && this.trading === this.chain){ for (const m of this.members) this.mode.set(m, 'halt'); return; }   // mid-haggle: nobody walks off
     const stay = new Map();
     for (const m of this.members) stay.set(m, this._engage(m) - this._urgency(m));
     for (const m of this.members){
@@ -426,6 +438,12 @@ function pickTopic(w, sp, to, c){
   const raising = kin(sp, to) && !projectOf(w, sp.group) && !busy(to) && quiet(sp, 'ph:*', now, ASK_GAP)
     && w.huts.find(h => !h.done && h.staked >= 1 && (h.owner === sp || (h.kin && h.kin === sp.group)) && quiet(sp, 'ph:' + w.huts.indexOf(h), now, ASK_GAP));
   if (raising) return hutChain2(w, sp, to, raising);
+  // a canoe of ours on the bed: ask for a hand with it (docs/boats.md, "Making canoes")
+  const bed = !to.home && !busy(to) && quiet(sp, 'cn:*', now, ASK_GAP) && (w.canoeBuilds || []).find(b =>
+    (b.owner === sp || (sp.plans || []).some(q => q.build === b)) && !(to.plans || []).some(q => q.build === b));
+  if (bed) return canoeChain(w, sp, to, bed);
+  // wanting a canoe and knowing none: ask before setting about making one
+  if (!sp.home && sp.brain && sp.brain._canoeWish > 0 && !(to.home) && ask('canoe')) return canoeAskChain(w, sp, to);
   const want = firstPlan(sp, 'dish');
   if (want && kin(sp, to) && !projectOf(w, sp.group) && !busy(to)){
     // the dish they crave, or another they'd like nearly as much, that the two can manage
@@ -441,6 +459,8 @@ function pickTopic(w, sp, to, c){
   if (meal && now - meal.t < 0.2 && meal.cook && meal.cook !== sp && quiet(sp, praiseKey(meal), now, 0.5)) return praiseChain(w, sp, to);
   if (pot && ask('pot') && (pot.potCook() === sp || pot.pot.raw > 0 || need(sp, 'food') > 0.3)) return potChain(w, sp, to, pot);
   if (pot && pot.potCook() !== sp && cookingWanted(w, sp, pot)) return cookingChain(w, sp, pot.potCook() && pot.potCook().convo === sp.convo && pot.potCook() !== sp ? pot.potCook() : to, pot);
+  const heard = heardDish(sp, to, now);
+  if (heard) return teachChain(w, sp, to, heard.recipe);
   if ((w.evening > 0.25 || w.rain > 0.2) && !hasRoof(w, sp) && ask('hut')) return hutChain(w, sp, to);
   if (need(sp, 'food') > 0.55 && !((sp.pack || 0) > 0) && ask('food')) return hungerChain(w, sp, to, c);
   if (w.rain < 0.05 && w.cloud > 0.45 && ask('rain')) return rainChain(w, sp, to);
@@ -556,6 +576,22 @@ function* newsChain(w, T, L, f, c){
   } else if (f.kind === 'kind'){
     const r = regard(L, f.subj);
     yield M(L, T, r > 0.3 ? 'kind-warm' : r < -0.3 ? 'kind-cold' : 'kind-mild', 'gift', { subj: f.subj, feel: true });
+  } else if (f.kind === 'market'){
+    // a trade heard of: one of the folk short of garden food asks what that village wants
+    if (f.wish && !L.home && lack(L, 'garden', w.time) > 0.3 && w.tradePlan){
+      yield M(L, T, 'mk-ask', 'ask', { ask: true });              // "What do they want there?"
+      yield M(T, L, 'mk-wish', 'trade', { item: f.wish });         // "Meat, mostly."
+      w.tradePlan(L, f.house, f.wish);
+      yield M(L, T, 'mk-plan', 'trade', { item: f.wish });         // "I'll get some and go."
+    } else yield M(L, T, f.qn >= f.gn ? 'mk-good' : 'mk-dear', 'trade', { feel: true });
+  } else if (f.kind === 'boat'){
+    // where a canoe lies (agents.js seeCanoes): the folk ask where; villagers keep off the water
+    if (L.home) return;
+    yield M(L, T, 'ask-where', 'ask', { ask: true });
+    yield M(T, L, 'where', 'place', { x: f.x, z: f.z });
+    yield M(L, T, 'thanks', 'hello');
+  } else if (f.kind === 'dish'){
+    if (f.subj === T && stepsKnown(L, f.recipe, w.time) < RECIPES[f.recipe].steps.length && stepsKnown(T, f.recipe, w.time) === RECIPES[f.recipe].steps.length) yield* teachChain(w, L, T, f.recipe);
   } else if (f.kind === 'omen' && f.house){
     yield M(L, T, 'omen-ask', 'ask', { ask: true });
     yield M(T, L, 'omen-mean', 'omen', { tenor: f.tenor });
@@ -638,6 +674,36 @@ function* hungerChain(w, A, B, c){
   yield M(B, A, family && householdShort(w, A) ? 'prov-low' : need(B, 'food') > 0.55 ? 'a-food-hungry' : 'a-food-no', 'pot');
 }
 
+// ---- a trade at a village door (agents.js callAt, js/trade.js, docs/trade.md) ----
+// A of the folk asks B of the household for the crop A wants most. No deal: B
+// says so, and what they'd take instead. A deal: A bids high, B counters low,
+// they meet where trade.js strike put it, and the goods change hands on "Done."
+// Whatever B says they're short of, A remembers (a plan to bring it).
+function* haggleChain(c, A, B, h){
+  const w = c.w, t = w.tradeTerms(A, B, h);
+  if (!t.want){ yield M(B, A, 'tr-none', 'trade'); w.tradeDone(A, B, h, null, t); return; }
+  yield M(A, B, 'tr-ask', 'trade', { ask: true, item: t.want });           // "Any onions to spare?"
+  yield M(B, A, 'tr-what', 'trade', { ask: true });                        // "Some. What have you brought?"
+  const d = t.deal;
+  if (!d){
+    yield M(A, B, 'tr-show', 'trade', { item: t.show });                   // "Acorns, mostly."
+    yield M(B, A, 'tr-no', 'trade', { item: t.show, wish: t.wish, feel: true });   // "No use for acorns. Bring meat."
+    w.tradeDone(A, B, h, null, t);
+    return;
+  }
+  const deal = { give: d.give, gn: d.gn, get: d.get };
+  yield M(A, B, 'tr-bid', 'trade', { ...deal, qn: t.bidQ, ask: true });   // "Three morels for six leeks?"
+  if (t.bidQ !== d.qn){
+    yield M(B, A, 'tr-counter', 'trade', { ...deal, qn: t.askQ });        // "Four."
+    if (t.askQ !== d.qn) yield M(A, B, 'tr-meet', 'trade', { ...deal, qn: d.qn, ask: true });   // "Five, then?"
+  }
+  const ok = w.tradeDone(A, B, h, d, t);                                  // the hand-over (tossed)
+  yield M(B, A, ok ? 'tr-done' : 'tr-off', 'trade', { ...deal, qn: d.qn, feel: ok });
+  if (!ok) return;
+  yield M(A, B, 'thanks', 'hello');
+  if (t.wish && t.wish !== d.give) yield M(B, A, 'tr-wish', 'trade', { item: t.wish });   // "Bring meat next time."
+}
+
 // ---- shared plans ----------------------------------------------------------------
 const busy = n => !!(n.project && n.project.status === 'on');   // in a live shared plan
 const homeFire = (w, n) => { let f = null, d = 45; for (const g of w.fires){ const x = Math.hypot(g.x - n.x, g.z - n.z); if (g.done && x < d){ d = x; f = g; } } return f; };
@@ -681,9 +747,13 @@ function* proposeChain(w, A, B, want, dish){
 const carriesAny = (n, items) => items.some(k => carries(n, [k]));
 
 function* provisionChain(w, A, B){
+  // the hearth now, as the caller checked it: after the first line A may have walked out of
+  // homeFire's 45u, and a project with no fire crashed the planner (pl.fire.x)
+  const f = homeFire(w, A);
+  if (!f) return;
   if (!A._said) A._said = new Map(); A._said.set('q:provision', w.time);
   yield M(A, B, 'prov-low-ahead', 'pot', { ask: true });               // "We're getting low on food."
-  const pr = new Project(w, 'provision', A, homeFire(w, A), { by: w.time + 0.3 }); w.projects.push(pr);
+  const pr = new Project(w, 'provision', A, f, { by: w.time + 0.3 }); w.projects.push(pr);
   pr.take(A, pr.open[0]);
   A._said.set('pt:' + pr.id + ':' + B.id, w.time);                     // B's been told, whatever they say
   if (need(B, 'rest') < 0.7){ pr.take(B, pr.open[0]); yield M(B, A, 'prov-go', 'food', { feel: true }); }   // "We should gather. I'll go for apples."
@@ -702,6 +772,33 @@ function* hutChain2(w, A, B, h){
   pr.take(B, tb);
   yield M(B, A, 'proj-claim', 'hut', { item: itemWord(tb) });
   const ta = pr.open.find(t => t.item[0] === want); if (ta) pr.take(A, ta);
+}
+
+// "Will you help me with the canoe?" Yes puts it on their agenda (agents.js
+// choose: bark, poles, a spell at the bed). Kin say yes unless worn out or
+// starving; anyone else, if they like the one asking.
+function* canoeChain(w, A, B, b){
+  for (const n of [A, B]){ if (!n._said) n._said = new Map(); n._said.set('cn:*', w.time); }
+  yield M(A, B, b.needs() === 'bark' ? 'cn-ask-bark' : b.needs() === 'ribs' ? 'cn-ask-poles' : 'cn-ask', 'wood', { ask: true });
+  if (need(B, 'rest') > 0.8 || need(B, 'food') > 0.8 || regard(B, A) < (kin(A, B) ? -0.3 : 0.15)){ yield M(B, A, 'cn-no', 'wood', { feel: true }); return; }
+  addPlan(B, { kind: 'canoe', build: b, until: w.time + 1.5 });
+  yield M(B, A, 'cn-yes', 'wood');
+}
+
+// "Know of a canoe anywhere?" — the one they know of nearest the asker, said as
+// news (so the asker remembers it, gossip.js knowCanoe), and where; or no.
+function* canoeAskChain(w, A, B){
+  yield M(A, B, 'q-canoe', 'ask', { mark: 'q:canoe', ask: true });
+  let best = null, bd = Infinity;
+  for (const [b, k] of B.canoes || []){
+    if (A.canoes && A.canoes.has(b)) continue;
+    const d = Math.hypot(k.x - A.x, k.z - A.z); if (d < bd){ bd = d; best = [b, k]; }
+  }
+  if (!best){ yield M(B, A, 'a-canoe-no', 'ask'); return; }
+  const f = w.canoeFact(best[0], best[1].x, best[1].z, best[1].t, best[1].from);
+  yield M(B, A, 'tell-boat', factIcon(f), { fact: f });
+  yield M(B, A, 'where', 'place', { x: f.x, z: f.z });
+  yield M(A, B, 'thanks', 'hello');
 }
 
 // telling someone of the household's plan; they may take a part in it
@@ -759,7 +856,7 @@ function* smallChain(w, A, B, st){
 // Whoever answers knows only what they can see — the cook, if they're in the talk,
 // answers for their own pot.
 function* potChain(w, A, B, f){
-  const p = f.pot, cook = f.potCook(), dish = p.kind;     // pinned: the pot can be emptied mid-talk
+  const p = f.pot, cook = f.potCook(), dish = potDish(p);     // pinned: the pot can be emptied mid-talk
   if (cook === A){                                   // it's my pot: I tell you, you needn't ask
     if (p.ready > 0){ yield M(A, B, 'pot-offer', 'pot', { mark: 'q:pot', dish, feel: true }); return; }
     yield M(A, B, 'pot-mine', 'pot', { mark: 'q:pot', dish });
@@ -795,7 +892,7 @@ function cookingWanted(w, A, f){
 function* cookingChain(w, A, cook, f){
   const p = f.pot;
   if (!RECIPES[p.recipe] || p.raw <= 0) return;
-  const id = p.recipe, dish = p.kind, now = w.time, len = RECIPES[id].steps.length;   // the dish, fixed now: the pot may be emptied mid-talk
+  const id = p.recipe, dish = potDish(p), now = w.time, len = RECIPES[id].steps.length;   // the dish, fixed now: the pot may be emptied mid-talk
   if (stepsKnown(cook, id, now) < len){       // they don't know the dish: send A to whoever's cooking it
     const owner = f.potCook();
     if (owner && owner !== cook && owner !== A && quiet(A, 'q:ask-cook' + id, now, ASK_GAP)){
@@ -828,10 +925,27 @@ function* cookingChain(w, A, cook, f){
   }
   if (stepsKnown(A, id, now) < len && quiet(A, 'q:how' + id, now, ASK_GAP)){
     yield M(A, cook, 'q-how', 'ask', { ask: true, mark: 'q:how' + id, dish });
-    learnRecipe(A, id, now);
+    knowDish(A, id, now);
     yield M(cook, A, 'a-how', 'pot', { recipe: id });
     yield M(A, cook, 'lore-learnt', 'pot', { feel: true });
   }
+}
+
+// A book dish (taught by the player, recipes.js) spreads like a rumour: whoever learns
+// one makes it now, and that's news ("Tam makes hazel porridge, from an old book"),
+// passed on by gossip. Someone who's heard it, meeting the cook, asks to be shown.
+export function knowDish(n, id, now){
+  learnRecipe(n, id, now);
+  if (RECIPES[id].book) addNews(n, { kind: 'dish', key: 'dish:' + id + ':' + n.id, recipe: id, subj: n, t: now });
+}
+const heardDish = (A, B, now) => A.news && [...A.news.values()].find(f => f.kind === 'dish' && f.subj === B
+  && stepsKnown(A, f.recipe, now) < RECIPES[f.recipe].steps.length && stepsKnown(B, f.recipe, now) === RECIPES[f.recipe].steps.length
+  && quiet(A, 'q:teach' + f.recipe, now, ASK_GAP));
+function* teachChain(w, A, B, id){
+  yield M(A, B, 'q-teach', 'ask', { ask: true, mark: 'q:teach' + id, dish: id });
+  knowDish(A, id, w.time);
+  yield M(B, A, 'a-how', 'pot', { recipe: id });
+  yield M(A, B, 'lore-learnt', 'pot', { feel: true });
 }
 
 // the pot has stalled on a step nobody at the fire knows: whoever's there asks
@@ -839,7 +953,7 @@ function* cookingChain(w, A, cook, f){
 function* stuckChain(w, A, B, f){
   const p = f.pot, step = potStep(p), id = p.recipe;
   if (!B._said) B._said = new Map(); B._said.set('q:pot', w.time);   // they've heard what's cooking now
-  yield M(A, B, p.step ? 'q-stuck' : 'q-stuck-start', 'ask', { ask: true, mark: 'q:stuck' + p.step, dish: p.kind });
+  yield M(A, B, p.step ? 'q-stuck' : 'q-stuck-start', 'ask', { ask: true, mark: 'q:stuck' + p.step, dish: potDish(p) });
   if (B.convo && stepsKnown(B, id, w.time) > p.step){
     learnRecipe(A, id, w.time);
     yield M(B, A, 'a-stuck', 'pot', { say: step.say, feel: true });
@@ -860,7 +974,7 @@ function* praiseChain(w, A, B){
     yield M(B, A, good ? 'praise-thanks' : 'meh-reply', 'pot', { feel: true });
   } else {
     yield M(A, B, good ? 'praise-other' : 'meh-other', 'pot', { dish: meal.kind, subj: meal.cook, feel: true });
-    if (good){ const d = RECIPES[meal.kind] ? meal.kind : Object.keys(RECIPES).find(id => RECIPES[id].base.includes(meal.kind)); if (d) boostCraving(B, d, 0.35, w.time); }   // now they want some
+    if (good){ const d = RECIPES[meal.kind] ? meal.kind : Object.keys(RECIPES).find(id => RECIPES[id].base.includes(meal.kind)); if (d && !RECIPES[d].book) boostCraving(B, d, 0.35, w.time); }   // now they want some (not a book dish: nobody craves those)
     if (good) nudge(A, meal.cook, 0, 0.06);
     const same = B._ate && B._ate.cook === meal.cook && B._ate.kind === meal.kind && w.time - B._ate.t < 0.3;
     if (same) markSaid(B, praiseKey(meal), w.time);              // agreeing counts as saying it

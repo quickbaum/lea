@@ -4,8 +4,8 @@
 // match the game's look. Boats float at the waterline and bob; an unmanned boat
 // sways gently where it was left, a manned one is glued under its rider's camera.
 //
-// Deferred (see docs/boats.md): NPCs crafting boats from bark, portaging a canoe
-// overland, and fishing from the water. This module is just the vessel + riding.
+// Also the canoe the folk are making on the bank (CanoeBedView, docs/boats.md
+// "Making canoes"). Deferred: portaging a canoe overland.
 
 import * as THREE from 'three';
 import { WATER, WORLD_R, AREA } from './config.js';
@@ -108,25 +108,26 @@ function buildCanoe(){
 }
 
 class Boat {
-  constructor(x, z, yaw){
-    this.x = x; this.z = z; this.yaw = yaw;
+  // `water`: the level it floats on (the Lea's, unless it's on a cave's lake)
+  constructor(x, z, yaw, water = WATER){
+    this.x = x; this.z = z; this.yaw = yaw; this.water = water;
     this.aboard = false;
     this._claimed = null;          // an NPC that has reserved this boat for a crossing
-    this.deckY = WATER + FLOAT;     // world Y of the gunwale — where a rider sits
+    this.deckY = water + FLOAT;     // world Y of the gunwale — where a rider sits
     this.group = buildCanoe();
-    this.group.position.set(x, WATER + FLOAT, z);
+    this.group.position.set(x, water + FLOAT, z);
     this.group.rotation.y = yaw;
     this._ph = Math.random() * Math.PI * 2;   // bob phase, so boats don't bob in lockstep
   }
   placeAt(x, z, yaw){ this.x = x; this.z = z; this.yaw = yaw; }
   update(dt, t){
-    this.group.position.set(this.x, WATER + FLOAT, this.z);
+    this.group.position.set(this.x, this.water + FLOAT, this.z);
     this.group.rotation.y = this.yaw;
     if (this.aboard){
-      this.group.position.y = WATER + FLOAT;    // glued steady under the rider
+      this.group.position.y = this.water + FLOAT;    // glued steady under the rider
       this.group.rotation.z = 0;
     } else {
-      this.group.position.y = WATER + FLOAT + Math.sin(t * 1.3 + this._ph) * 0.05;   // gentle bob
+      this.group.position.y = this.water + FLOAT + Math.sin(t * 1.3 + this._ph) * 0.05;   // gentle bob
       this.group.rotation.z = Math.sin(t * 0.9 + this._ph) * 0.04;                   // slow roll
     }
   }
@@ -135,8 +136,8 @@ class Boat {
 export class Boats {
   constructor(scene){ this.scene = scene; this.list = []; }
 
-  add(x, z, yaw){
-    const b = new Boat(x, z, yaw);
+  add(x, z, yaw, water){
+    const b = new Boat(x, z, yaw, water);
     this.scene.add(b.group);
     this.list.push(b);
     return b;
@@ -174,4 +175,66 @@ export class Boats {
   }
 
   update(dt, t){ for (const b of this.list) b.update(dt, t); }
+}
+
+// A canoe being made on the bank (agents.js CanoeBuild). The bed is a patch of
+// levelled earth with a row of stakes down each side. Sheets of birch bark are
+// laid out on it as they come, and poles beside it; then the hull takes shape:
+// the bark's sides bend up against the stakes as the work goes on, and the ribs
+// and gunwales go in. Finished, the bed is cleared and a canoe floats off the bank.
+const BARK_PALE = 0xd8cdb4;   // a sheet of birch bark, white side up
+const EARTH = 0x5a4632;
+export class CanoeBedView {
+  constructor(b){
+    this.b = b;
+    const g = this.group = new THREE.Group();
+    g.position.set(b.x, height(b.x, b.z), b.z);
+    g.rotation.y = b.face + Math.PI / 2;         // along the shore, the water to one side
+    const earth = new THREE.MeshLambertMaterial({ color: EARTH, flatShading: true });
+    const bed = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.06, 4.2), earth);
+    bed.position.y = 0.02; g.add(bed);
+    const stakeMat = new THREE.MeshLambertMaterial({ color: TRIM, flatShading: true });
+    const stake = new THREE.BoxGeometry(0.05, 0.7, 0.05);
+    for (const sx of [-0.62, 0.62]) for (let i = 0; i < 6; i++){
+      const st = new THREE.Mesh(stake, stakeMat);
+      st.position.set(sx, 0.3, -1.6 + i * 0.64); st.rotation.z = sx * 0.08;   // leaning out a little
+      g.add(st);
+    }
+    // the bark, laid out a sheet at a time
+    const barkMat = new THREE.MeshLambertMaterial({ color: BARK_PALE, flatShading: true, side: THREE.DoubleSide });
+    this.sheets = [];
+    for (let i = 0; i < 3; i++){
+      const sh = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.02, 1.35), barkMat);
+      sh.position.set(0, 0.07 + i * 0.02, -1.35 + i * 1.35); sh.rotation.y = (i - 1) * 0.06;
+      sh.visible = false; g.add(sh); this.sheets.push(sh);
+    }
+    // the poles, beside the bed
+    const poleMat = new THREE.MeshLambertMaterial({ color: PADDLE, flatShading: true });
+    this.poles = [];
+    for (let i = 0; i < 4; i++){
+      const pl = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 3.2), poleMat);
+      pl.position.set(1.0 + (i % 2) * 0.12, 0.05 + (i >> 1) * 0.08, 0); pl.rotation.y = 0.04 * (i - 1.5);
+      pl.visible = false; g.add(pl); this.poles.push(pl);
+    }
+    // the hull itself, without its paddle: it rises off the bed as the work goes on
+    this.hull = buildCanoe();
+    this.hull.children[this.hull.children.length - 1].visible = false;
+    this.hull.visible = false; g.add(this.hull);
+    this.sync();
+  }
+  sync(){
+    const b = this.b, building = b.bark >= 3 && b.ribs >= 4;
+    this.sheets.forEach((s, i) => { s.visible = !building && i < b.bark; });
+    this.poles.forEach((p, i) => { p.visible = !building && i < b.ribs; });
+    this.hull.visible = building;
+    if (building){
+      const t = Math.min(1, b.work / (b.workNeed || 600));
+      const up = 0.12 + 0.88 * t;                  // the sides bend up
+      this.hull.scale.set(1, up, 1);
+      this.hull.position.y = 0.06 + 0.55 * up;     // keel on the bed
+      // ribs and gunwales go in once the sides are up (children 1..4: rails, thwarts)
+      for (let i = 1; i <= 4; i++) this.hull.children[i].visible = t > 0.4;
+    }
+  }
+  dispose(){ this.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
 }

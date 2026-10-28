@@ -14,7 +14,7 @@
 
 import { SIZE, WATER, WORLD_SEED } from '../config.js';
 import { mulberry32 } from '../rng.js';
-import { height, habitat, GREAT_LAKE } from './land.js';
+import { height, habitat, GREAT_LAKE, settlements, ruins, under } from './land.js';
 
 const CELL = 250;                 // region scale (u)
 const STEP = 16;                  // sampling grid (u)
@@ -22,8 +22,8 @@ const HALF = SIZE / 2;
 const N = Math.ceil(SIZE / STEP);
 
 // ---- kinds ----------------------------------------------------------------------
-// habitat → region kind. Beach is a thin rim, never a region in its own right.
-const KIND_OF = { lake: 'lake', beach: null, marsh: 'marsh', fen: 'fen', carr: 'carr',
+// habitat → region kind. Beach is a thin rim and the road a thin line, never regions in their own right.
+const KIND_OF = { lake: 'lake', beach: null, road: null, lane: null, yard: null, green: 'meadow', field: 'meadow', marsh: 'marsh', fen: 'fen', carr: 'carr',
   wetmeadow: 'wetmeadow', meadow: 'meadow', woodland: 'wood', grove: 'grove', heath: 'heath', rock: 'rock' };
 
 // name templates per kind: `t` is the name ({N} = the generated part), `at` how
@@ -235,6 +235,83 @@ export function placeAt(x, z){
 }
 let _idx = null;
 function _byId(){ if (!_idx){ _idx = []; for (const g of REG) _idx[g.id] = g; } return _idx; }
+
+// the settlements' names (gen/settle.js), in the same order as their places:
+// { name, word } — "Thornwick", a farmstead "Brenstead Farm" — and each lane is
+// named for where it goes ("Thornwick Lane"). Their own seed stream, so the
+// region names don't shift, and never a word a region already uses.
+// a settlement's name ends the way English villages' do: a farm (-ton, -wick,
+// -stead), a clearing (-ley, -field), a ford, a homestead (-ham), a village (-by)
+const SETTLED = /(ton|wick|ham|by|ley|stead|cot|ford|field|well|combe|den|holt|dale)$/;
+let SNAMES = null;
+export function settlementNames(){
+  if (SNAMES) return SNAMES;
+  if (!REG) build();
+  const r = mulberry32((WORLD_SEED ^ 0x5e77a3e) >>> 0), used = new Set(REG.map(g => g.word));
+  SNAMES = settlements().places.map(p => {
+    let w; do w = makeWord(r); while (used.has(w) || !SETTLED.test(w));
+    used.add(w);
+    return { word: w, name: p.kind === 'farmstead' ? `${w} Farm` : w, lane: `${w} Lane` };
+  });
+  return SNAMES;
+}
+
+// the ruins' names (gen/ruins.js), in the same order: { name, at } — "the Tarrow
+// Stones", "Brenwick Tower", "Old Shiel Hall". Their own seed stream, and never
+// a word a region or settlement already uses.
+const RUIN_NAMES = {
+  tower:  [{ t: '{N} Tower', at: 'at' }, { t: 'the Old Tower', at: 'at', plain: true }, { t: '{N} Peel', at: 'at' }],
+  circle: [{ t: 'the {N} Stones', at: 'by' }, { t: '{N} Ring', at: 'by' }, { t: 'the Stones of {N}', at: 'by' }],
+  hall:   [{ t: 'Old {N} Hall', at: 'at' }, { t: '{N} Walls', at: 'among' }, { t: 'the Walls of {N}', at: 'among' }],
+  chapel: [{ t: '{N} Chapel', at: 'at' }, { t: 'the Chapel of {N}', at: 'at' }, { t: '{N} Kirk', at: 'at' }],
+  abbey:  [{ t: '{N} Abbey', at: 'at' }, { t: 'the Abbey of {N}', at: 'at' }, { t: '{N} Minster', at: 'at' }],
+  // by the plan they're laid on, where it isn't their kind's own
+  round:  [{ t: '{N} Tower', at: 'at' }, { t: 'the Round Tower', at: 'at', plain: true }, { t: '{N} Broch', at: 'at' }],
+  grange: [{ t: '{N} Grange', at: 'at' }, { t: 'the Grange of {N}', at: 'at' }, { t: '{N} Garth', at: 'among' }],
+  aqueduct: [{ t: '{N} Arches', at: 'by' }, { t: 'the Arches of {N}', at: 'by' }, { t: 'the Old Water', at: 'by', plain: true }],
+};
+let RNAMES = null;
+export function ruinNames(){
+  if (RNAMES) return RNAMES;
+  const r = mulberry32((WORLD_SEED ^ 0x7a1d5a3) >>> 0);
+  const used = new Set([...places().map(g => g.word), ...settlementNames().map(n => n.word)]);
+  const plain = new Set();                             // "the Old Tower" only once
+  RNAMES = ruins().map(ru => {
+    const tl = RUIN_NAMES[ru.plan || ru.kind].filter(t => !(t.plain && plain.has(t.t)));
+    const t = tl[(r() * tl.length) | 0];
+    if (t.plain){ plain.add(t.t); return { name: t.t, at: t.at }; }
+    let w; do w = makeWord(r); while (used.has(w));
+    used.add(w);
+    return { word: w, name: t.t.replace('{N}', w), at: t.at };
+  });
+  return RNAMES;
+}
+
+// the underground levels' names (gen/under.js), in the same order: a cave is
+// named like a northern pothole ("Tarrow Hole", "the Brenwick Caves"); a crypt
+// for the ruin it lies under ("the Crypt of Githick").
+const UNDER_NAMES = { cave: ['the {N} Caves', '{N} Hole', '{N} Cavern', 'the Caves of {N}'], tomb: ['the Tomb of {N}', 'the Sepulchre of {N}', 'the {N} Vault', '{N} Barrow'] };
+let UNAMES = null;
+export function underNames(){
+  if (UNAMES) return UNAMES;
+  const r = mulberry32((WORLD_SEED ^ 0x0ca5e7) >>> 0), rt = mulberry32((WORLD_SEED ^ 0x70b5e7) >>> 0), rn = ruinNames();
+  const used = new Set([...places().map(g => g.word), ...settlementNames().map(n => n.word), ...rn.map(n => n.word).filter(Boolean)]);
+  UNAMES = under().levels.map(L => {
+    if (L.kind === 'crypt' && L.site === 'tomb'){
+      // the country tombs: their own names, from their own stream so the caves' stay put
+      const tl = UNDER_NAMES.tomb, t = tl[(rt() * tl.length) | 0];
+      let w; do w = makeWord(rt); while (used.has(w));
+      used.add(w);
+      return { name: t.replace('{N}', w) };
+    }
+    if (L.kind === 'crypt'){ const w = rn[L.ruin]?.word, what = L.site === 'hall' ? 'Vaults' : L.site === 'tower' ? 'Undercroft' : L.site === 'abbey' ? 'Great Crypt' : 'Crypt'; return { name: w ? `the ${what} of ${w}` : `the Old ${what}` }; }
+    const tl = UNDER_NAMES.cave, t = tl[(r() * tl.length) | 0];
+    let w; do w = makeWord(r); while (used.has(w));
+    used.add(w);
+    return { name: t.replace('{N}', w) };
+  });
+  return UNAMES;
+}
 
 // "in Bramwick Wood", "out on the Sedmere Marshes", "by Lake Mirren"
 export const placePhrase = g => `${g.at} ${g.name}`;

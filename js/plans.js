@@ -54,7 +54,7 @@ const CRAVE_DAYS  = 2;       // days without a dish for the craving to come back
 const CRAVE_AT    = 0.7;     // how strong before you set about making it
 const CRAVE_CD    = 0.5;     // days between one person's craving plans
 const BOOST_DAYS  = 1;       // a boost from hearing it praised fades over this
-export const CRAVED = Object.keys(RECIPES).filter(id => !RECIPES[id].warms);
+export const CRAVED = Object.keys(RECIPES).filter(id => !RECIPES[id].warms && !RECIPES[id].book);   // (nobody craves a dish they've never had)
 
 const hash01 = (a, b) => { let h = 2166136261 >>> 0; for (const c of a + '|' + b) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return (h % 10007) / 10007; };
 export const taste = (n, dish) => 0.3 + 0.7 * hash01('t' + n.id, dish);

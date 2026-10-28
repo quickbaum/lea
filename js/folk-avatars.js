@@ -7,7 +7,9 @@
 // painted M&M sheets: there are no models for them.
 //
 // Bakes are cached in IndexedDB by everything that shapes them, so a world loads its
-// villagers instantly the second time. ?bakedfolk=0 turns it all off.
+// villagers instantly the second time (the body kit, maps and walks aren't even
+// fetched until something actually needs baking). "Make the folk afresh" on the
+// start screen clears the cache first. ?bakedfolk=0 turns it all off.
 
 import { loadBodyKit, randomBody } from './body-kit.js';
 import { randomLook } from './outfit.js';
@@ -32,6 +34,8 @@ const db = () => new Promise((res, rej) => { const r = indexedDB.open('lea-folk'
   r.onupgradeneeded = () => r.result.createObjectStore('bakes'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 async function cacheGet(key){ try { const d = await db(); return await new Promise(res => {
   const q = d.transaction('bakes').objectStore('bakes').get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); } catch { return null; } }
+async function cacheClear(){ try { const d = await db(); await new Promise(res => {
+  const q = d.transaction('bakes', 'readwrite').objectStore('bakes').clear(); q.onsuccess = q.onerror = res; }); } catch { /* nothing to clear */ } }
 async function cachePut(key, val){ try { const d = await db(); d.transaction('bakes', 'readwrite').objectStore('bakes').put(val, key); } catch { /* no cache: bake next time too */ } }
 const toBlob = cv => new Promise(res => cv.toBlob(res, 'image/png'));
 const toImage = blob => new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = URL.createObjectURL(blob); });
@@ -62,17 +66,21 @@ export function folkCharacter(n, worldSeed, index){
 export async function bakeFolk(npcs, worldSeed, onProgress = () => {}){
   const todo = npcs.filter(wantsBake);
   if (!todo.length || !bakedFolkEnabled()) return 0;
-  const [kit, maps, masks, ...clips] = await Promise.all([loadBodyKit(), loadAvatarMaps(), loadSkinMasks(), ...CLIPS.map(c => loadClip(c))]);
+  if (globalThis.__leaRebake){ await cacheClear(); globalThis.__leaRebake = false; }
+  // what baking needs, loaded on the first miss only
+  let assets = null;
+  const load = async () => assets ??= await Promise.all([loadBodyKit(), loadAvatarMaps(), loadSkinMasks(), ...CLIPS.map(c => loadClip(c))]);
   let baker = null, done = 0;
   for (const [i, n] of todo.entries()){
     onProgress(i, todo.length);
     try {
       const { seed, look, body } = folkCharacter(n, worldSeed, n.group ? n.group.npcs.indexOf(n) : i);
-      const ci = seed % CLIPS.length, clip = clips[ci];
+      const ci = seed % CLIPS.length;
       const key = `v${VERSION}|${CLIPS[ci]}|${ARM_OUT}|${hash(JSON.stringify({ look, body }))}`;
       let hit = await cacheGet(key);
       if (hit) hit = await inMemory(hit);
       if (!hit){
+        const [kit, maps, masks, ...clips] = await load(), clip = clips[ci];
         baker ??= createBaker();
         const av = await makeAvatar(kit, look, body, { env: baker.env, maps, masks, seed });
         const out = baker.bake(av, clip, { armOut: ARM_OUT });

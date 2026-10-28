@@ -533,6 +533,13 @@ export class Sky {
     if (this.domeU) this.domeU.uCloudThresh.value = 1.0 - 0.72 * this.cloudCover; }
   addCloudCover(d){ this.setCloudCover((this.cloudCover ?? 0.55) + d); }
   setDayFraction(f){ this.time = Math.floor(this.time) + ((f % 1) + 1) % 1; }
+  // turn the heavens as if `days` had gone by: the sun and moon move on along the
+  // ecliptic (so the phase changes, and the stars stand differently at this hour)
+  // but the clock doesn't move, and nothing on the ground lives those days
+  turnHeavens(days){
+    this.sunLon  += days * (2 * Math.PI / this.yearDays);
+    this.moonLon += days * (2 * Math.PI / 27.32);
+  }
 
   update(dt, camera){
     const rate = dt / this.dayLength;

@@ -24,13 +24,14 @@ const SIZE_WORD = { 800: 'small', 1600: 'medium', 3200: 'large' };
 
 const $ = id => document.getElementById(id);
 // the gear and pack are main.js's; until it loads they'd be dead buttons
-const ingame = ['gear', 'inv-btn'];
+const ingame = ['gear', 'inv-btn', 'rest-btn'];
 let saved = {};
 try { saved = JSON.parse(localStorage.getItem('lea.world') || '{}') || {}; } catch (_){ saved = {}; }
 
 function enter(world, preset){
   try { localStorage.setItem('lea.world', JSON.stringify({ ...world, preset })); } catch (_){}
   globalThis.__leaWorld = world;
+  globalThis.__leaRebake = !!$('intro-rebake')?.checked;   // folk-avatars.js drops its saved bakes first
   $('intro-choices')?.classList.add('hide');
   $('world-opts')?.classList.add('hide');
   $('loading-status')?.classList.remove('hide');

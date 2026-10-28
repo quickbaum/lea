@@ -16,7 +16,10 @@
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { height, terrainType, biome } from './terrain.js';
+import { height, terrainType, biome, builtBand } from './terrain.js';
+
+// grass grows on grassy ground, but not on a settlement's lanes and yards (gen/settle.js)
+const grows = (x, z) => terrainType(x, z) === 'grass' && builtBand(x, z) < 3;
 import { makeGrassTexture } from './textures.js';
 
 // Regional grass length: a smooth, low-frequency field over the world so some
@@ -132,7 +135,7 @@ export class GrassDetail {
     const x = this.bx[i], z = this.bz[i];
     this.by[i] = height(x, z) + 0.02;
     this.bh[i] = grassLength(x, z) * this.hj[i];
-    const grass = terrainType(x, z) === 'grass';
+    const grass = grows(x, z);
     this.on[i] = grass ? 1 : 0;
     // perpendicular to the lean direction (in XZ) for the quad width
     const lx = this.lx[i], lz = this.lz[i];
@@ -265,7 +268,7 @@ export class GrassClumps {
   _sample(i){
     const x = this.bx[i], z = this.bz[i];
     this.by[i] = height(x, z);
-    this.on[i] = terrainType(x, z) === 'grass' ? 1 : 0;
+    this.on[i] = grows(x, z) ? 1 : 0;
     const h = grassLength(x, z) * 2.2 * this.hj[i];   // same regional length field as the blades, taller as a tuft
     this.ch[i] = h; this.cw[i] = h * 0.65;
   }

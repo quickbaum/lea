@@ -71,8 +71,12 @@ export function makeTalkView({ camera, canvas, lineFor }){
     } else if (e.type === 'glance') glances.push({ who: e.who, like: e.like, t: 0 });
   }
 
-  // someone speaks to the player: one move, already words
-  function say(who, move){ lines.push({ move, who, t: 0, dur: SAY_S, convo: { heard: true } }); }
+  // someone speaks to the player: one move, already words (replacing their last remark, if it's still up)
+  function say(who, move){
+    const l = { move, who, t: 0, dur: SAY_S, convo: { heard: true, said: true } };
+    const i = lines.findIndex(x => x.who === who && x.convo.said);
+    if (i >= 0) lines[i] = l; else lines.push(l);
+  }
 
   function bubble(i){
     let el = pool[i];

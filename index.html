@@ -87,6 +87,9 @@
   #intro-presets .preset .meta{font-size:11px;letter-spacing:1px;color:#9ab87f;}
   #intro-presets .preset.last{border-color:#c9a23a;box-shadow:0 0 0 1px #c9a23a inset;}
   #intro-presets .preset.custom{border-style:dashed;}
+  #intro-choices .intro-rebake{display:block;margin-top:12px;font-family:monospace;font-size:12px;color:#cdb;cursor:pointer;}
+  #intro-choices .intro-rebake span{opacity:.6;}
+  #intro-choices .intro-rebake input{accent-color:#c9a23a;vertical-align:middle;}
   /* settings: gear button + sound panel */
   #gear{position:fixed;right:10px;top:10px;z-index:30;width:34px;height:34px;
         background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
@@ -111,6 +114,8 @@
   #meter{position:fixed;left:10px;bottom:46px;z-index:30;font:12px monospace;color:#dccfa0;
          background:rgba(0,19,11,.7);border:1px solid #5a6b50;border-radius:4px;padding:3px 7px;pointer-events:none;}
   .hide{display:none!important;}
+  #cheat{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:70;width:280px;padding:6px 10px;
+       background:#0a2416;color:#dccfa0;border:1px solid #e8c75a;border-radius:4px;font:14px monospace;outline:none;}
   /* cursor mode: free mouse over canvas, crosshair hidden */
   body.cursor-mode #c{cursor:default;}
   body.cursor-mode #cross{display:none;}
@@ -121,17 +126,86 @@
     font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;font-family:monospace;}
   #look-btn:hover{background:#1a3a1a;}
   body.cursor-mode #look-btn{display:block;}
-  #inv-btn{position:fixed;left:10px;bottom:10px;z-index:30;
+  /* the corner buttons, in a row so they never overlap whatever their labels */
+  #corner-btns{position:fixed;left:10px;bottom:10px;z-index:30;display:flex;gap:6px;}
+  #inv-btn,#journal-btn,#rest-btn{position:relative;
     background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
     font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;
     font-family:monospace;opacity:.7;}
-  #inv-btn:hover{opacity:1;}
+  #inv-btn:hover,#journal-btn:hover,#rest-btn:hover{opacity:1;}
+  #journal-btn.new::after{content:'';position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:#e8c75a;box-shadow:0 0 4px #e8c75a;}
+  /* passing time (R): the choices, then a progress line while it passes */
+  #rest-panel{position:fixed;left:10px;bottom:46px;z-index:40;width:260px;
+    background:rgb(0,19,11);border:1px solid #5a6b50;border-radius:6px;
+    box-shadow:0 10px 40px #000b;padding:16px 20px;
+    color:#dccfa0;font-family:monospace;font-size:13px;line-height:1.5;}
+  #rest-panel h3{margin:0 0 6px;font-size:13px;letter-spacing:2px;opacity:.6;font-weight:normal;}
+  #rest-panel .now{margin:0 0 10px;color:#a89c78;font-style:italic;}
+  #rest-panel .opts{display:flex;flex-direction:column;gap:4px;}
+  #rest-panel .opts button{display:flex;align-items:baseline;gap:8px;text-align:left;background:#0a2416;color:#dccfa0;
+    border:1px solid #2e3f2a;border-radius:4px;padding:5px 8px;font:13px monospace;cursor:pointer;}
+  #rest-panel .opts button:hover{border-color:#e8c75a;background:#13301e;}
+  #rest-panel .key{color:#e8c75a;}
+  #rest-panel .for{margin-left:auto;color:#a89c78;font-size:12px;}
+  #rest-panel .track{height:6px;border:1px solid #5a6b50;border-radius:3px;overflow:hidden;}
+  #rest-panel .track i{display:block;height:100%;width:0;background:#e8c75a;}
+  #rest-panel .foot{margin-top:10px;font-size:12px;color:#a89c78;}
   /* inventory panel */
   #inv-panel{position:fixed;left:10px;bottom:46px;z-index:40;
     background:rgb(0,19,11);border:1px solid #5a6b50;border-radius:6px;
     box-shadow:0 10px 40px #000b;padding:16px 20px;min-width:180px;
     color:#dccfa0;font-family:monospace;font-size:13px;line-height:1.8;}
   #inv-panel h3{margin:0 0 8px;font-size:13px;letter-spacing:2px;opacity:.6;font-weight:normal;}
+  /* the pack as a grid (js/pack-view.js): a box per ingredient, as big as the thing */
+  #inv-panel .pack-grid{position:relative;user-select:none;touch-action:none;
+    background-color:#06180f;background-image:linear-gradient(#24382b 1px,transparent 1px),linear-gradient(90deg,#24382b 1px,transparent 1px);
+    border:1px solid #3d4f38;}
+  #inv-panel .pack-box{position:absolute;margin:1px;box-sizing:border-box;cursor:grab;overflow:hidden;
+    background:color-mix(in srgb,var(--tint) 28%,#10241a);border:1px solid color-mix(in srgb,var(--tint) 70%,#dccfa0);border-radius:3px;
+    font:12px/1.1 Georgia,'Times New Roman',serif;padding:3px 3px;color:#efe6cf;}
+  #inv-panel .pack-box:hover{border-color:#e8c75a;}
+  #inv-panel .pack-box.raw{color:#b8ad8a;}
+  #inv-panel .pack-box .nm{display:block;hyphens:auto;-webkit-hyphens:auto;}
+  #inv-panel .pack-box .pic{position:absolute;inset:2px;width:calc(100% - 4px);height:calc(100% - 4px);object-fit:contain;image-rendering:pixelated;pointer-events:none;}
+  #inv-panel .pack-box .ct{position:absolute;right:4px;bottom:2px;color:#e8c75a;font:11px monospace;}
+  #inv-panel .pack-box.lifted{z-index:2;cursor:grabbing;opacity:.85;box-shadow:0 4px 14px #000a;}
+  #inv-panel .pack-ghost{position:absolute;margin:1px;box-sizing:border-box;border:2px dashed #7fc77a;border-radius:3px;pointer-events:none;}
+  #inv-panel .pack-ghost.bad{border-color:#c75a4a;}
+  #inv-panel .pack-foot{margin-top:8px;height:49px;display:flex;gap:10px;box-sizing:border-box;}   /* fixed: hovering never moves the panel */
+  #inv-panel .pack-desc{flex:1;min-width:0;height:100%;overflow:hidden;font-size:12px;line-height:1.35;color:#a89c78;}
+  #inv-panel .pack-hint{flex:none;width:88px;text-align:right;font-size:11px;line-height:1.35;color:#6f6650;}
+  /* spell points and stamina: two upright bars beside the minimap (main.js drawVitals) */
+  #vitals{position:fixed;right:192px;bottom:14px;z-index:20;display:flex;gap:4px;pointer-events:auto;}
+  #vitals .bar{position:relative;width:7px;height:120px;background:#0b0a07cc;border:1px solid #1d1a14;box-shadow:0 0 0 1px #c9a23a66;}
+  #vitals .bar i{position:absolute;left:0;right:0;bottom:0;}
+  #vitals .sp i{background:#5b7fd6;}
+  #vitals .st i{background:#c99a3a;}
+  #vitals.winded .st i{background:#8a5a2a;}
+  /* the spellbook (C): a page of spells, cast by click or by number */
+  #spellbook{position:fixed;inset:0;z-index:45;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);
+    font-family:Georgia,'Times New Roman',serif;}
+  #spellbook .book{background:#1d1a14;border:2px solid #c9a23a;border-radius:10px;box-shadow:0 10px 40px #000c;color:#efe6cf;
+    padding:22px 26px 16px;width:min(560px,calc(100% - 32px));max-height:calc(100% - 32px);overflow-y:auto;}
+  #spellbook h2{margin:0 0 4px;color:#e8c75a;font-style:italic;font-weight:normal;font-size:24px;letter-spacing:.5px;}
+  #spellbook .sub{margin:0 0 16px;color:#a89c78;font-style:italic;font-size:13px;}
+  #spellbook .spells{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
+  #spellbook .spell{border:1px solid #5a4a24;border-radius:6px;padding:10px;cursor:pointer;background:#25211a;transition:background .12s,border-color .12s;}
+  #spellbook .spell:hover{background:#3a3320;border-color:#c9a23a;}
+  #spellbook .spell.off{opacity:.45;cursor:default;}
+  #spellbook .spell.off:hover{background:#25211a;border-color:#5a4a24;}
+  #spellbook .spell canvas{width:48px;height:48px;image-rendering:pixelated;display:block;margin-bottom:6px;}
+  #spellbook .spell .name{color:#e8c75a;font-size:16px;}
+  #spellbook .spell .key{float:right;color:#a89c78;font:12px monospace;}
+  #spellbook .spell .cost{font-size:12px;color:#8fa8d8;font-style:italic;}
+  #spellbook .spell .desc{font-size:13px;line-height:1.35;color:#d6ccb0;margin-top:3px;}
+  #spellbook h3{margin:18px 0 2px;color:#e8c75a;font-style:italic;font-weight:normal;font-size:19px;}
+  #spellbook .recipes{display:grid;gap:8px;}
+  #spellbook .recipe{border-top:1px solid #3a3020;padding-top:6px;}
+  #spellbook .recipe .name{color:#e8c75a;font-size:15px;}
+  #spellbook .recipe .wants{font-size:13px;color:#a89c78;margin-top:2px;}
+  #spellbook .recipe .wants .have{color:#efe6cf;text-decoration:underline;text-decoration-color:#c9a23a;}
+  #spellbook .recipe .wants .rare::after{content:' ★';color:#4ff0d0;}
+  #spellbook .foot{margin-top:14px;font:12px monospace;color:#a89c78;text-align:center;}
 </style>
 <script type="importmap">
 {
@@ -156,6 +230,8 @@
     <div id="intro-choices">
       <p class="intro-ask">Which Lea will you enter?</p>
       <div id="intro-presets"></div>
+      <label class="intro-rebake"><input type="checkbox" id="intro-rebake"> make the folk afresh
+        <span>— bake every character again instead of using the saved ones (slow)</span></label>
     </div>
     <div id="world-opts" class="hide">
       <span class="lbl">SIZE</span>
@@ -179,12 +255,18 @@
       <div id="loading-track"><div id="loading-fill"></div></div>
     </div>
     <p class="enter hide" id="enter-text">CLICK TO ENTER</p>
-    <p class="controls hide" id="controls-text">WASD move &middot; mouse look &middot; shift run &middot; E talk &middot; O sound &middot; esc release</p>
+    <p class="controls hide" id="controls-text">WASD move &middot; mouse look &middot; shift run &middot; E talk &middot; I pack &middot; J journal &middot; R rest &middot; C spells &middot; O sound &middot; esc release</p>
   </div>
 </div>
 <button id="look-btn" title="Return to mouselook (Esc)">&#x25B6; look</button>
+<div id="corner-btns">
 <button id="inv-btn" title="Inventory (pack)">pack</button>
+<button id="journal-btn" title="Journal (J)">journal</button>
+<button id="rest-btn" title="Pass time (R)">rest</button>
+</div>
+<div id="rest-panel" class="hide"></div>
 <div id="inv-panel" class="hide"></div>
+<input id="cheat" class="hide" type="text" autocomplete="off" spellcheck="false" maxlength="40">
 <button id="gear" title="Sound settings (O)">⚙</button>
 <div id="settings" class="hide">
   <div class="panel">

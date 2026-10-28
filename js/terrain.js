@@ -6,8 +6,8 @@ import { makeTexture, makeGrain } from './textures.js';
 // The land itself is generated in js/gen/land.js (seeded noise, region fields,
 // habitats; pure so node tools can map it). This module keeps the API the rest
 // of the game was written against: height, biome colour, the five surface types.
-import { height, habitat, fields, HABITATS } from './gen/land.js';
-export { height, habitat, HABITATS };
+import { height, habitat, fields, HABITATS, road, roadBand, settlements, ruins, under, builtBand, solidAt, builtAt } from './gen/land.js';
+export { height, habitat, HABITATS, road, roadBand, settlements, ruins, under, builtBand, solidAt, builtAt };
 
 function hash(x, z){
   const n = Math.sin(x*127.1 + z*311.7) * 43758.5453;
@@ -21,7 +21,42 @@ export function terrainType(x, z){ return HABITATS[habitat(x, z)].surface; }
 // how readily trees take hold here, 0..1 (woodland and alder carr high, open
 // meadow and marsh low) — flora uses it so forests and clearings form
 export function treeCover(x, z){ return HABITATS[habitat(x, z)].cover; }
-export const walkable = (x, z) => height(x, z) > WATER - 0.1;
+// dry ground, and not through the wall of a building (settle.js)
+export const walkable = (x, z) => height(x, z) > WATER - 0.1 && !solidAt(x, z, 0.35);
+
+// ---- walking pace -------------------------------------------------------------
+// How fast anyone walks here, as a multiple of their pace on a level meadow:
+// the ground (HABITATS[..].pace — the road quickest, a reedbed half speed) times
+// the slope. The slope follows Tobler's hiking function: fastest on a gentle
+// downhill (~5%), slower on the flat, and falling off steeply either way — a
+// 30% climb is about a third of your flat pace. Used by the player, by the folk
+// as they walk, and by their pathfinding and choices (nav.js, agents.js), so
+// everyone weighs the same land the same way.
+const TOBLER_FLAT = Math.exp(3.5 * 0.05);         // normalises Tobler to 1 on the level
+export const slopePace = grade => Math.max(0.2, Math.exp(-3.5 * Math.abs(grade + 0.05)) * TOBLER_FLAT);
+export function groundPace(x, z){ return HABITATS[habitat(x, z)].pace; }
+// Worn ground is quicker going: a trodden path is packed earth, so the more it's
+// walked (trails.js wear, 0..1) the nearer its pace comes to TRAIL_PACE — a
+// path through a reedbed is most of the way to a meadow's. Ground already
+// quicker than a path (the road) is left as it is. This closes the trails'
+// loop: paths form where walking is easy, and are easier for being walked.
+export const TRAIL_PACE = 1.1;
+export function wornPace(ground, w){
+  if (!(w > 0.08) || ground >= TRAIL_PACE) return ground;
+  const t = Math.min(1, (w - 0.08) / 0.42), k = t * t * (3 - 2 * t);
+  return ground + (TRAIL_PACE - ground) * 0.8 * k;
+}
+let wearAt = null;                                  // (x, z) => wear; main.js hands over the trail field
+export function setWearSource(fn){ wearAt = fn; }
+// walking from (x, z) in direction (dx, dz)
+export function pace(x, z, dx, dz){
+  const l = Math.hypot(dx, dz);
+  const ground = wornPace(groundPace(x, z), wearAt ? wearAt(x, z) : 0);
+  if (!l) return ground;
+  const ux = dx / l, uz = dz / l;
+  const grade = (height(x + ux, z + uz) - height(x - ux, z - uz)) / 2;   // rise per unit, ahead
+  return ground * slopePace(grade);
+}
 
 // How far to lower an object's base so a flat footprint of radius r doesn't float
 // on a slope: the drop from the centre down to the lowest ground under that

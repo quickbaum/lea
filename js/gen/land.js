@@ -22,8 +22,12 @@
 // Fields are sampled once onto grids (height at 2u, the rest at 8u) the first
 // time anything asks, so height() stays as cheap as it was.
 
-import { SIZE, WATER, WORLD_SEED, WORLD } from '../config.js';
+import { SIZE, WATER, WORLD_SEED, WORLD, WORLD_R } from '../config.js';
 import { mulberry32 } from '../rng.js';
+import { planRoad, gradeWeight, ROAD_W, VERGE, BANK } from './road.js';
+import { planSettlements, inBuilding, LANE_W } from './settle.js';
+import { planRuins, standing } from './ruins.js';
+import { planUnder } from './under.js';
 
 // ---- seeded 2D simplex noise (after Gustavson) ------------------------------
 function makeSimplex(seed){
@@ -158,6 +162,10 @@ const HALF = SIZE / 2 + PAD;
 let H = null, HN = 0;                           // height grid
 let F = null, FN = 0;                           // region fields: sand, wet, wood, rough, peat, grove
 const NF = 6;
+let ROAD = null, RB = null;                     // the Old Road (road.js), and its band per height cell
+let SETTLE = null, SB = null;                   // settlements and their lanes (settle.js), and their band per height cell
+let RUINS = null;                               // the old stone ruins (ruins.js)
+let UNDER = null;                               // the caves' and crypts' mouths (under.js)
 
 function build(){
   HN = Math.round(2 * HALF / HSTEP) + 1;
@@ -171,6 +179,176 @@ function build(){
     F[o] = rawSand(x, z); F[o + 1] = rawWet(x, z); F[o + 2] = rawWood(x, z);
     F[o + 3] = rawRough(x, z); F[o + 4] = rawPeat(x, z); F[o + 5] = rawGrove(x, z);
   }
+  ROAD = planRoad({ size: SIZE, seed: (WORLD_SEED ^ 0x70ad) >>> 0, height, water: WATER, fields });
+  gradeRoad();
+  SETTLE = planSettlements({ size: SIZE, seed: (WORLD_SEED ^ 0x5e771e) >>> 0, height, habitat, water: WATER, road: ROAD, worldR: WORLD_R });
+  gradeSettlements();
+  RUINS = planRuins({ size: SIZE, seed: (WORLD_SEED ^ 0x7a1d5) >>> 0, height, habitat, water: WATER, road: ROAD, settle: SETTLE, worldR: WORLD_R });
+  placeRuins();
+  UNDER = planUnder({ size: SIZE, seed: (WORLD_SEED ^ 0x0ca5e) >>> 0, height, habitat, water: WATER, road: ROAD, settle: SETTLE, ruins: RUINS, worldR: WORLD_R, solidAt: builtAt });
+  // no tree grows in a cave's mouth or on the crypt stair, nor where you stand before it
+  for (const e of UNDER.entrances) for (const [x, z, R] of [[e.x, e.z, 5.5], [e.stand[0], e.stand[1], 3]]){
+    const c0 = Math.max(0, Math.floor((x - R + HALF) / HSTEP)), c1 = Math.min(HN - 1, Math.ceil((x + R + HALF) / HSTEP));
+    const r0 = Math.max(0, Math.floor((z - R + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((z + R + HALF) / HSTEP));
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++)
+      if (!SB[r * HN + c] && Math.hypot(c * HSTEP - HALF - x, r * HSTEP - HALF - z) < R) SB[r * HN + c] = 1;
+  }
+}
+
+// Grade the land to the road: across the paving it takes the road's height,
+// over the embankment's skirt it eases back to its own. Each cell also learns
+// its band — 2 paved (the shoulder just past the kerb included, so the ground's
+// colour meets the stones), 1 the cleared verge, 0 off the road.
+function gradeRoad(){
+  const reach = ROAD_W + Math.max(VERGE, BANK + 1);
+  const D = new Float32Array(HN * HN).fill(Infinity), S = new Float32Array(HN * HN);
+  for (const g of ROAD.legs){
+    const bx = g.ax + g.dx * g.len, bz = g.az + g.dz * g.len;
+    const c0 = Math.max(0, Math.floor((Math.min(g.ax, bx) - reach + HALF) / HSTEP)), c1 = Math.min(HN - 1, Math.ceil((Math.max(g.ax, bx) + reach + HALF) / HSTEP));
+    const r0 = Math.max(0, Math.floor((Math.min(g.az, bz) - reach + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((Math.max(g.az, bz) + reach + HALF) / HSTEP));
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+      const x = c * HSTEP - HALF, z = r * HSTEP - HALF;
+      const t = Math.max(0, Math.min(g.len, (x - g.ax) * g.dx + (z - g.az) * g.dz));
+      const d = Math.hypot(x - g.ax - g.dx * t, z - g.az - g.dz * t), i = r * HN + c;
+      if (d < D[i]){ D[i] = d; S[i] = g.s0 + t; }
+    }
+  }
+  RB = new Uint8Array(HN * HN);
+  for (let i = 0; i < D.length; i++){
+    const d = D[i];
+    if (d > reach) continue;
+    const w = gradeWeight(d);
+    if (w > 0) H[i] += (ROAD.heightAt(S[i]) - H[i]) * w;
+    RB[i] = d <= ROAD_W + 0.8 ? 2 : d <= ROAD_W + VERGE ? 1 : 0;
+  }
+}
+
+// Grade the land to the settlements and mark their ground: lanes take their
+// profile across their width and ease back over a few units; each building's
+// pad is levelled to one height and feathered out. Bands, highest wins:
+// 1 cleared (no trees or scrub), 2 the green, 3 a lane, 4 trodden yard.
+function gradeSettlements(){
+  SB = new Uint8Array(HN * HN);
+  const visit = (x0, z0, x1, z1, fn) => {
+    const c0 = Math.max(0, Math.floor((x0 + HALF) / HSTEP)), c1 = Math.min(HN - 1, Math.ceil((x1 + HALF) / HSTEP));
+    const r0 = Math.max(0, Math.floor((z0 + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((z1 + HALF) / HSTEP));
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) fn(r * HN + c, c * HSTEP - HALF, r * HSTEP - HALF);
+  };
+  const mark = (i, b) => { if (SB[i] < b) SB[i] = b; };
+  for (const p of SETTLE.places){
+    const R = (p.green ? Math.max(p.green.rx, p.green.rz) : 8) + 34;
+    visit(p.x - R, p.z - R, p.x + R, p.z + R, (i, x, z) => {
+      if (Math.hypot(x - p.x, z - p.z) < R) mark(i, 1);
+      if (p.green && inGreen(p.green, x, z)) mark(i, 2);
+      if (p.yard && inBuilding({ x: p.x, z: p.z, a: p.yard.a, hl: p.yard.depth / 2, hw: p.yard.width / 2 }, x, z)) mark(i, 4);
+    });
+  }
+  // the fields: ploughed ground, kept clear
+  for (const f of SETTLE.fields){
+    const R = Math.hypot(f.hl, f.hw) + 4;
+    visit(f.x - R, f.z - R, f.x + R, f.z + R, (i, x, z) => {
+      if (inBuilding(f, x, z)) mark(i, 5); else if (inBuilding(f, x, z, 4)) mark(i, 1);
+    });
+  }
+  // lanes: the nearest lane to each cell, and how far along it
+  const reach = LANE_W + 4, D = new Map();
+  SETTLE.lanes.forEach((L, li) => {
+    for (const g of L.legs){
+      const bx = g.ax + g.dx * g.len, bz = g.az + g.dz * g.len;
+      visit(Math.min(g.ax, bx) - reach, Math.min(g.az, bz) - reach, Math.max(g.ax, bx) + reach, Math.max(g.az, bz) + reach, (i, x, z) => {
+        const t = Math.max(0, Math.min(g.len, (x - g.ax) * g.dx + (z - g.az) * g.dz));
+        const d = Math.hypot(x - g.ax - g.dx * t, z - g.az - g.dz * t);
+        const o = D.get(i);
+        if (d <= reach && (!o || d < o.d)) D.set(i, { d, s: g.s0 + t, li });
+      });
+    }
+  });
+  for (const [i, { d, s, li }] of D){
+    if (RB[i] === 2) continue;                       // the road's paving stays as it is
+    const w = d <= LANE_W + 0.5 ? 1 : smooth(LANE_W + 3, LANE_W + 0.5, d);
+    if (w > 0) H[i] += (SETTLE.lanes[li].heightAt(s) - H[i]) * w;
+    mark(i, d <= LANE_W + 0.3 ? 3 : 1);
+  }
+  // pads: level under each building and a little round it, feathered out
+  const pad = (b, y) => {
+    const R = Math.hypot(b.hl, b.hw) + 6;
+    visit(b.x - R, b.z - R, b.x + R, b.z + R, (i, x, z) => {
+      let w = 0;
+      if (inBuilding(b, x, z, 1.5)) w = 1;
+      else for (let e = 2; e <= 5; e++) if (inBuilding(b, x, z, 1.5 + e)){ w = 1 - e / 6; break; }
+      if (w > 0) H[i] += (y - H[i]) * w;
+      if (inBuilding(b, x, z, 3)) mark(i, 4);
+    });
+  };
+  for (const b of SETTLE.buildings) pad(b, b.y);
+  for (const p of SETTLE.places) if (p.well){
+    const b = { x: p.well.x, z: p.well.z, a: 0, hl: p.well.r, hw: p.well.r };
+    p.well.y = height(p.well.x, p.well.z);
+    pad(b, p.well.y);
+  }
+  // what's solid, bucketed so solidAt() looks at a handful
+  for (const b of SETTLE.buildings) addSolid(b, Math.hypot(b.hl, b.hw));
+  for (const p of SETTLE.places) if (p.well) addSolid({ x: p.well.x, z: p.well.z, a: 0, hl: p.well.r, hw: p.well.r }, p.well.r * 1.5);
+}
+// The ruins aren't graded: the ground has grown up round them. Their walls and
+// standing stones are solid where they stand too high to step over, and no tree
+// grows through a wall (band 1, cleared) — but trees may stand inside them.
+function placeRuins(){
+  for (const ru of RUINS) for (const o of [...ru.pieces, ...ru.stones]){
+    if (standing(o)) addSolid(o, Math.hypot(o.hl, o.hw));
+    const R = Math.hypot(o.hl, o.hw) + 2;
+    const c0 = Math.max(0, Math.floor((o.x - R + HALF) / HSTEP)), c1 = Math.min(HN - 1, Math.ceil((o.x + R + HALF) / HSTEP));
+    const r0 = Math.max(0, Math.floor((o.z - R + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((o.z + R + HALF) / HSTEP));
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++)
+      if (!SB[r * HN + c] && inBuilding(o, c * HSTEP - HALF, r * HSTEP - HALF, 1.2)) SB[r * HN + c] = 1;
+  }
+}
+const inGreen = (e, x, z) => {
+  const dx = x - e.x, dz = z - e.z, c = Math.cos(e.a), s = Math.sin(e.a);
+  const u = (dx * c + dz * s) / e.rx, v = (-dx * s + dz * c) / e.rz;
+  return u * u + v * v < 1;
+};
+const SOLID = new Map(), SC = 32;
+const skey = (i, j) => (i + 2048) * 4096 + (j + 2048);
+function addSolid(b, rad){
+  for (let i = Math.floor((b.x - rad - 2) / SC); i <= Math.floor((b.x + rad + 2) / SC); i++)
+    for (let j = Math.floor((b.z - rad - 2) / SC); j <= Math.floor((b.z + rad + 2) / SC); j++){
+      const k = skey(i, j);
+      (SOLID.get(k) || SOLID.set(k, []).get(k)).push(b);
+    }
+}
+
+// the settlements: { places, buildings, lanes } (settle.js)
+export function settlements(){ if (!H) build(); return SETTLE; }
+// the ruins: [{ kind, x, z, a, rad, pieces, stones, byRoad }] (ruins.js)
+export function ruins(){ if (!H) build(); return RUINS; }
+// the ways underground: { levels: [plan], entrances: [{ level, mouth, kind, x, z, y, face, stand }] } (under.js)
+export function under(){ if (!H) build(); return UNDER; }
+// 0 wild, 1 cleared round a settlement, beside a lane or at a ruin's walls, 2 a green, 3 a lane, 4 a yard, 5 a field
+export function builtBand(x, z){
+  if (!SB) return 0;
+  const c = Math.round((x + HALF) / HSTEP), r = Math.round((z + HALF) / HSTEP);
+  return c < 0 || r < 0 || c >= HN || r >= HN ? 0 : SB[r * HN + c];
+}
+// is (x, z) within `pad` of a building, the well, or a ruin's standing wall or
+// stone? Buildings are solid: the villagers go in and out by their doors, out of
+// sight (agents.js House)
+export function builtAt(x, z, pad = 0){
+  if (!H) build();
+  const list = SOLID.get(skey(Math.floor(x / SC), Math.floor(z / SC)));
+  if (!list) return false;
+  for (const b of list) if (inBuilding(b, x, z, pad)) return true;
+  return false;
+}
+export const solidAt = builtAt;
+
+// the Old Road: { pts, legs, length, xs, zs, prof, heightAt(s), nearest(x, z) }
+export function road(){ if (!H) build(); return ROAD; }
+// 2 on the paving, 1 on the cleared verge beside it, 0 elsewhere
+export function roadBand(x, z){
+  if (!H) build();
+  const c = Math.round((x + HALF) / HSTEP), r = Math.round((z + HALF) / HSTEP);
+  return c < 0 || r < 0 || c >= HN || r >= HN ? 0 : RB[r * HN + c];
 }
 
 export function height(x, z){
@@ -206,20 +384,31 @@ export function slope(x, z){
 // surface: what the rest of the game reads via terrainType()
 // cover:   how readily trees take hold (0..1) — forests where it's high
 // soil:    richness 0..1 (soilRichness)
+// pace:    walking speed here relative to an open meadow (1): soft sand, heather
+//          and undergrowth slow you, a bog or reedbed halves you, the road
+//          is quickest. terrain.js pace() adds the slope (Tobler).
 // color:   ground colour
 export const HABITATS = {
-  lake:      { surface: 'water', cover: 0,    soil: 0,    color: [0.30, 0.26, 0.18] },
-  beach:     { surface: 'sand',  cover: 0.02, soil: 0.15, color: [0.79, 0.69, 0.47] },
-  marsh:     { surface: 'mud',   cover: 0.03, soil: 0.7,  color: [0.36, 0.33, 0.19] },
-  fen:       { surface: 'mud',   cover: 0.08, soil: 0.3,  color: [0.47, 0.49, 0.25] },   // sedge + sphagnum
-  carr:      { surface: 'mud',   cover: 0.85, soil: 0.8,  color: [0.30, 0.31, 0.17] },
-  wetmeadow: { surface: 'grass', cover: 0.08, soil: 0.85, color: [0.33, 0.50, 0.22] },
-  meadow:    { surface: 'grass', cover: 0.10, soil: 0.6,  color: [0.47, 0.53, 0.25] },
-  woodland:  { surface: 'grass', cover: 1.0,  soil: 0.65, color: [0.31, 0.39, 0.19] },
+  lake:      { surface: 'water', cover: 0,    soil: 0,    pace: 0.4,  color: [0.30, 0.26, 0.18] },
+  beach:     { surface: 'sand',  cover: 0.02, soil: 0.15, pace: 0.7,  color: [0.79, 0.69, 0.47] },
+  marsh:     { surface: 'mud',   cover: 0.03, soil: 0.7,  pace: 0.5,  color: [0.36, 0.33, 0.19] },
+  fen:       { surface: 'mud',   cover: 0.08, soil: 0.3,  pace: 0.6,  color: [0.47, 0.49, 0.25] },   // sedge + sphagnum
+  carr:      { surface: 'mud',   cover: 0.85, soil: 0.8,  pace: 0.55, color: [0.30, 0.31, 0.17] },
+  wetmeadow: { surface: 'grass', cover: 0.08, soil: 0.85, pace: 0.85, color: [0.33, 0.50, 0.22] },
+  meadow:    { surface: 'grass', cover: 0.10, soil: 0.6,  pace: 1.0,  color: [0.47, 0.53, 0.25] },
+  woodland:  { surface: 'grass', cover: 1.0,  soil: 0.65, pace: 0.8,  color: [0.31, 0.39, 0.19] },
   // the redwoods' home; other trees are sparse under them (see flora's scatter)
-  grove:     { surface: 'grass', cover: 0.25, soil: 0.75, color: [0.34, 0.27, 0.18] },   // needle duff
-  heath:     { surface: 'grass', cover: 0.08,  soil: 0.2,  color: [0.40, 0.33, 0.31] },   // heather
-  rock:      { surface: 'rock',  cover: 0.05, soil: 0.05, color: [0.49, 0.47, 0.44] },
+  grove:     { surface: 'grass', cover: 0.25, soil: 0.75, pace: 0.9,  color: [0.34, 0.27, 0.18] },   // needle duff
+  heath:     { surface: 'grass', cover: 0.08, soil: 0.2,  pace: 0.75, color: [0.40, 0.33, 0.31] },   // heather
+  rock:      { surface: 'rock',  cover: 0.05, soil: 0.05, pace: 0.7,  color: [0.49, 0.47, 0.44] },
+  // the Old Road's paving (road.js): stone underfoot, so it walks and sounds like rock
+  road:      { surface: 'rock',  cover: 0,    soil: 0,    pace: 1.25, color: [0.62, 0.55, 0.42] },
+  // the settlements (settle.js): packed-earth lanes, the trodden ground round
+  // the buildings, and the grazed green
+  lane:      { surface: 'grass', cover: 0,    soil: 0.3,  pace: 1.15, color: [0.36, 0.24, 0.15] },   // darker and redder than a worn trail, so lanes read
+  yard:      { surface: 'grass', cover: 0,    soil: 0.4,  pace: 1.05, color: [0.42, 0.36, 0.26] },
+  green:     { surface: 'grass', cover: 0,    soil: 0.6,  pace: 1.0,  color: [0.40, 0.52, 0.23] },
+  field:     { surface: 'grass', cover: 0,    soil: 0.9,  pace: 0.85, color: [0.33, 0.25, 0.16] },   // ploughed earth, walked across the furrows
 };
 
 const GROVE = 0.8;   // how rare the old-growth stands are (field threshold)
@@ -228,6 +417,12 @@ function hash(x, z){ const n = Math.sin(x * 127.1 + z * 311.7) * 43758.5453; ret
 
 const _hf = { sand: 0, wet: 0, wood: 0, rough: 0, peat: 0, grove: 0 };
 export function habitat(x, z, h = height(x, z)){
+  if (roadBand(x, z) === 2) return 'road';
+  const sb = builtBand(x, z);
+  if (sb === 3) return 'lane';
+  if (sb === 4) return 'yard';
+  if (sb === 2) return 'green';
+  if (sb === 5) return 'field';
   // a little per-metre jitter so borders are grainy, not ruled lines
   const d = h - WATER + (hash(Math.floor(x), Math.floor(z)) - 0.5) * 0.35;
   if (d < 0) return 'lake';

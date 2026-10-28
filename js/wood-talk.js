@@ -396,8 +396,9 @@ export function facedTreeVoice(node, ctx){
 // ------------------------------------------------------------- the fungus ----
 
 // Only strong rings get a voice (main.js decides which, from Mycelium.strengthAt).
-// ringTree(node, ctx, { onTake, amount }) — taking the caps ends the conversation,
-// which is the honest outcome: the fruiting body is the mouth.
+// ringTree(node, ctx, { onTake, clover }) — taking the caps ends the conversation,
+// which is the honest outcome: the fruiting body is the mouth. `clover()` searches the
+// grass inside the ring (main.js: a four-leaf one at first light) and says what you found.
 export function ringTree(node, ctx, opts = {}){
   const heardAround = () => {
     // The fungus is not stuck in one place, so it knows everything its whole
@@ -411,6 +412,7 @@ export function ringTree(node, ctx, opts = {}){
     return [...seen.values()].sort((a, b) => b.mag - a.mag);
   };
 
+  let found = null;   // what the last look in the clover turned up
   return {
     speaker: 'The ring',
     portrait: null,
@@ -423,7 +425,8 @@ export function ringTree(node, ctx, opts = {}){
           { label: 'What do the trees pay you?', next: 'trade' },
           { label: 'Do you look after them?', next: 'mother' },
         ];
-        if (opts.onTake) c.push({ label: 'Take the caps.', action: 'take', next: null });
+        if (opts.clover) c.push({ label: 'Look in the clover.', run: () => { found = opts.clover(); }, next: 'clover' });
+        if (opts.onTake) c.push({ label: 'Take the caps.', run: opts.onTake, next: null });
         return { text:
           'These are the caps. The rest of me is under your feet and runs further than you have walked today.\n\n'
         + 'Ask, then. I deal in this.', choices: c };
@@ -444,6 +447,8 @@ export function ringTree(node, ctx, opts = {}){
         });
         return { text: 'What I have on hand:\n\n' + lines.join('\n') };
       },
+
+      get clover(){ return { text: found || 'Grass. Clover. Nothing you came for.' }; },
 
       get trade(){ return { text:
         'Sugar. They make it out of light and they cannot move, and I can move and cannot make it. That is the entire basis of our friendship.\n\n'

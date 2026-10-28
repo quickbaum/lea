@@ -23,7 +23,8 @@
       "choices": [
         { "label": "The clouds.", "next": "weather-clouds" },
         { "label": "The hour of the day.", "next": "weather-time" },
-        { "label": "The wind.", "next": "weather-wind" }
+        { "label": "The wind.", "next": "weather-wind" },
+        { "label": "The moon.", "next": "weather-moon" }
       ]
     },
     "weather-clouds": {
@@ -73,6 +74,15 @@
         { "label": "A breeze from the west.", "action": "windWest" },
         { "label": "Raise a strong gale.", "action": "windGale" },
         { "label": "Still the air.", "action": "windCalm" },
+        { "label": "Back.", "next": "weather" }
+      ]
+    },
+    "weather-moon": {
+      "text": "\"The moon I can't hurry without hurrying everything behind her. So I'll turn the whole wheel of heaven instead, and leave your day where it stands: the stars will have shifted when you next look up, and no one down here will have aged an hour. Which face of her do you want?\"",
+      "choices": [
+        { "label": "The full moon.", "action": "moonFull" },
+        { "label": "The dark of the moon.", "action": "moonNew" },
+        { "label": "Turn her a quarter on.", "action": "moonQuarter" },
         { "label": "Back.", "next": "weather" }
       ]
     },

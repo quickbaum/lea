@@ -1,12 +1,15 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { WATER, WORLD_R, AREA } from '../config.js';
-import { height, terrainType, soilRichness, groundSink, treeCover, habitat } from '../terrain.js';
+import { height, terrainType, soilRichness, groundSink, treeCover, habitat, roadBand, builtBand } from '../terrain.js';
 import { rand, randint, fork } from '../rng.js';
 import { makeGrassTexture, makePussywillowTexture, makeCattailTexture, makeAcornTexture, makeMushroomTexture, makeTrinketTexture, makeVineTexture, makeFernTexture, makeRedwoodFoliageTexture, makeSedgeTexture, makeCottonGrassTexture, makeHeatherTexture } from '../textures.js';
 import { makeLeafAtlas } from './leaf.js';
 import { makeBark, makeBirchBark, makeRedwoodBark, makeRowanBark } from './bark.js';
 import { generateTree, leafMaterial, TREE_SPECIES, SHRUB_SPECIES, REDWOOD_SPECIES, OAK_SPECIES, BIRCH_SPECIES, ROWAN_SPECIES, PINE_SPECIES, ALDER_SPECIES } from './tree.js';
+
+// ground kept clear of trees and scrub: the Old Road's verge, and the settlements' cleared ground and lanes
+const kept = (x, z) => roadBand(x, z) || builtBand(x, z);
 
 // plantWorld — scatter trees & shrubs across the terrain. We generate a few
 // detailed archetypes once, then GPU-instance each across many positions, so
@@ -254,7 +257,8 @@ function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scale
     let x, z, ok = false;
     for (let t = 0; t < 60 && !ok; t++){
       x = (rng() - 0.5) * WORLD_R * 2; z = (rng() - 0.5) * WORLD_R * 2;
-      if (Math.hypot(x, z) < WORLD_R && (typeof allowed === 'function' ? allowed(x, z) : allowed.has(terrainType(x, z)))
+      if (Math.hypot(x, z) < WORLD_R && !kept(x, z)       // the Old Road's verge and the settlements' ground are kept clear
+          && (typeof allowed === 'function' ? allowed(x, z) : allowed.has(terrainType(x, z)))
           && (!coverK || rng() < 1 - coverK * (1 - treeCover(x, z)))) ok = true;
     }
     if (!ok) continue;
@@ -367,6 +371,7 @@ function scatterGrass(scene, rng, geo, mat, count, place){
   for (let i = 0; i < count; i++){
     const spot = place(rng); if (!spot) continue;
     const [x, z, sc] = spot;
+    if (roadBand(x, z) === 2 || builtBand(x, z) >= 3) continue;   // nothing grows through the Old Road's paving, a lane or a yard
     q.setFromAxisAngle(UP, rng() * Math.PI*2);
     const m = new THREE.Matrix4().compose(new THREE.Vector3(x, height(x, z), z), q, new THREE.Vector3(sc, sc, sc));
     spots.push([x, z, m, sc]);
@@ -596,7 +601,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
   for (let i = 0; i < BIRCH_CLUSTERS * 8 && birchCenters.length < BIRCH_CLUSTERS; i++){
     const x = (rng() - 0.5) * WORLD_R * 2, z = (rng() - 0.5) * WORLD_R * 2;
     if (Math.hypot(x, z) >= WORLD_R) continue;
-    if (!['grass','mud'].includes(terrainType(x, z))) continue;
+    if (!['grass','mud'].includes(terrainType(x, z)) || kept(x, z)) continue;
     if (underTree(x, z) > 0.12) continue;   // open clearing — pioneer species need light
     birchCenters.push([x, z]);
   }
@@ -608,7 +613,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       const a = rng() * Math.PI * 2, r = Math.sqrt(rng()) * CLUSTER_R;
       const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
       if (Math.hypot(x, z) >= WORLD_R) continue;
-      if (!['grass','mud'].includes(terrainType(x, z))) continue;
+      if (!['grass','mud'].includes(terrainType(x, z)) || kept(x, z)) continue;
       if (underTree(x, z) > 0.28) continue;   // can be near a forest edge but not in shade
       birchPos.push([x, z]);
       placed++;
@@ -654,7 +659,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
     for (let i = 0; i < D(1280); i++){    // try 1280 times (per 800u world) to place ~400 rowans
       const x = (rng() - 0.5) * WORLD_R * 2, z = (rng() - 0.5) * WORLD_R * 2;
       if (Math.hypot(x, z) >= WORLD_R) continue;
-      if (!['grass','mud','rock'].includes(terrainType(x, z))) continue;
+      if (!['grass','mud','rock'].includes(terrainType(x, z)) || kept(x, z)) continue;
       const u = underTree(x, z);
       if (u < 0.08 || u > 0.42) continue;   // forest edge — partial light
       const rsc = rand(rng, 0.65, 1.2);
@@ -818,7 +823,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
   const landSpot = (allowed) => {
     for (let t = 0; t < 40; t++){
       const x = (frng()-0.5)*WORLD_R*2, z = (frng()-0.5)*WORLD_R*2;
-      if (Math.hypot(x, z) < WORLD_R && allowed.has(terrainType(x, z))) return [x, z];
+      if (Math.hypot(x, z) < WORLD_R && allowed.has(terrainType(x, z)) && !kept(x, z)) return [x, z];
     }
     return null;
   };
@@ -909,7 +914,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       const x = (frng()-0.5)*WORLD_R*2, z = (frng()-0.5)*WORLD_R*2;
       if (Math.hypot(x, z) > WORLD_R) continue;
       const hy = height(x, z);
-      if (hy >= WATER && hy <= WATER + 1.1) s = [x, z];
+      if (hy >= WATER && hy <= WATER + 1.1 && !kept(x, z)) s = [x, z];
     }
     if (!s) continue;
     plants.push(makeGroundFood(scene, frng, { x: s[0], z: s[1], n: 4, size: 0.5, spread: 0.5,

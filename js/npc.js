@@ -419,6 +419,10 @@ class AnimNPC {
     }
 
     this._updatePack(toCam, clipFrac, tint, hopOff);
+    // indoors (a villager at home, agents.js House) is out of sight
+    const seen = !this._indoors;
+    this.mesh.visible = seen;
+    if (!seen){ this.packMesh.visible = false; if (this.faceMesh) this.faceMesh.visible = false; }
   }
 
   // Show a backpack on the NPC's back when it's carrying. Placed behind the body

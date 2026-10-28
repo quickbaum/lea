@@ -16,6 +16,13 @@ import { makeLabel } from './label.js';
 //
 // Ancient Pucks are a rare variant: slightly larger, they glide instead of hop,
 // and materialise alone or in company of a few regular pucks.
+//
+// The leader can also guide you (js/puck-guide.js sets `guide`): he hops along
+// a route a little ahead of you, waits when you fall behind, hurries when you
+// get ahead, and isn't skittish while he's at it.
+//
+// Out in the open world he doesn't let you lose him: now and then, if you've
+// wandered far from him, he winks out and winks back in near you.
 
 const FRONT = 'sprites/puck.png';
 const BACK  = 'sprites/puck_back.png';
@@ -24,6 +31,11 @@ const ANCIENT_SPRITES = [
   'sprites/ancient_puck_blue.png',
   'sprites/ancient_puck_green.png',
 ];
+
+const LEAD = 12;      // how far ahead of you a guiding Puck keeps, along the route (u)
+const WAIT = 22;      // and how far off you may fall before he stops and waits
+const FAR  = 50;      // farther than this from you (outside), and he may wink over to you
+const NEAR = [10, 18];   // where he winks in: this far from you (beyond his skittish 7)
 
 function loadTex(loader, src){
   return new Promise((res) => loader.load(src, t => {
@@ -68,10 +80,48 @@ class Puck {
     }
   }
 
+  // Guiding: `guide` is { pts, cum (arc length at each point), len, s (how far along he
+  // is), ip (the point the player is nearest), waiting }. He keeps LEAD ahead of the
+  // player's place on the route, but never more than WAIT from the player.
+  guideStep(dt, player){
+    const g = this.guide, P = g.pts, C = g.cum;
+    // where the player is along the route: the nearest point, looking a little behind and ahead
+    let best = g.ip, bd = Infinity;
+    for (let q = Math.max(0, g.ip - 4); q < Math.min(P.length, g.ip + 40); q++){
+      const d = Math.hypot(P[q][0] - player.x, P[q][1] - player.z);
+      if (d < bd){ bd = d; best = q; }
+    }
+    g.ip = best; g.off = bd;
+    const sP = C[best], dPlayer = Math.hypot(this.x - player.x, this.z - player.z);
+    const want = Math.min(g.len, sP + LEAD);
+    // waiting: as far ahead as he'll go (or you've fallen right back)
+    g.waiting = (dPlayer > WAIT && g.s > sP) || g.s >= want - 0.3;
+    this.hop += this.hopSpeed * dt;
+    if (g.waiting) return false;
+    if (Math.sin(this.hop) <= 0) return false;                  // he moves only in the air
+    const v = g.s < sP ? 14 : 9.5;                              // hurry when you're ahead of him
+    g.s = Math.min(want, g.s + 2 * v * dt);
+    // the point that far along, and a hop toward it (round what's in the way)
+    let q = g.k || 0;
+    while (q + 1 < C.length - 1 && C[q + 1] < g.s) q++;
+    while (q > 0 && C[q] > g.s) q--;
+    g.k = q;
+    const f = C[q + 1] > C[q] ? (g.s - C[q]) / (C[q + 1] - C[q]) : 0;
+    const tx = P[q][0] + (P[q + 1][0] - P[q][0]) * f, tz = P[q][1] + (P[q + 1][1] - P[q][1]) * f;
+    const dx = tx - this.x, dz = tz - this.z, dist = Math.hypot(dx, dz), step = Math.min(dist, 2.8 * v * dt);
+    if (dist < 0.05) return false;
+    for (const turn of [0, 0.6, -0.6, 1.2, -1.2]){
+      const a = Math.atan2(dz, dx) + turn, nx = this.x + Math.cos(a) * step, nz = this.z + Math.sin(a) * step;
+      if (walkable(nx, nz) || turn === -1.2){ this.heading = Math.atan2(nx - this.x, nz - this.z); this.x = nx; this.z = nz; return true; }
+    }
+    return false;
+  }
+
   update(cam, dt, player, cx, cz, spread, tint){
     if (tint) this.mat.color.copy(tint);
     let moving = false;
-    if (!this.talking){
+    if (this.guide && !this.talking) moving = this.guideStep(dt, player);
+    else if (!this.talking){
       const dPlayer = Math.hypot(this.x - player.x, this.z - player.z);
       if (dPlayer < 7) this.spooked = 0.8 + Math.random() * 0.7;
       if (this.spooked > 0){
@@ -315,6 +365,8 @@ export class PuckFlock {
     this.maxBands = 3;
     // ancient pucks are rare — one every 90–180 s, max 1 at a time
     this.ancientTimer = 90 + Math.random() * 90;
+    this.findTimer = 40 + Math.random() * 40;    // next check on whether you've lost him
+    this.wink = null;                            // 'out' | 'in' while he's winking over to you
   }
 
   async load(){
@@ -350,10 +402,45 @@ export class PuckFlock {
     return all;
   }
 
-  update(cam, dt, player, tint){
+  // somewhere walkable a short way from the player, for the leader to wink in at
+  _nearSpot(player){
+    for (let i = 0; i < 12; i++){
+      const a = Math.random() * Math.PI * 2, r = NEAR[0] + Math.random() * (NEAR[1] - NEAR[0]);
+      const x = player.x + Math.cos(a) * r, z = player.z + Math.sin(a) * r;
+      if (walkable(x, z) && Math.hypot(x, z) < WORLD_R) return [x, z];
+    }
+    return null;
+  }
+
+  // Now and then, outside, if you've got far from him, the leader fades out and
+  // back in near you. Not while he's guiding (he's already with you) or talking.
+  _keepNear(dt, player, outside){
+    const L = this.leader;
+    if (this.wink === 'out'){
+      L.mat.opacity = Math.max(0, L.mat.opacity - dt * 1.5);
+      if (L.mat.opacity > 0) return;
+      const at = this._nearSpot(player);
+      if (at){ L.x = L.tx = this.leaderCx = at[0]; L.z = L.tz = this.leaderCz = at[1]; L.retarget = 0; }
+      this.wink = 'in';
+    } else if (this.wink === 'in'){
+      L.mat.opacity = Math.min(1, L.mat.opacity + dt * 1.2);
+      if (L.mat.opacity >= 1){ this.wink = null; L.mat.depthWrite = true; }
+      return;
+    }
+    if (!outside || L.guide || L.talking) return;
+    this.findTimer -= dt;
+    if (this.findTimer > 0) return;
+    this.findTimer = 40 + Math.random() * 40;
+    if (Math.hypot(L.x - player.x, L.z - player.z) > FAR){ this.wink = 'out'; L.mat.depthWrite = false; }
+  }
+
+  // outside: the player is in the open world (not underground), where the leader keeps near
+  update(cam, dt, player, tint, { outside = true } = {}){
     if (!this.leader) return;
 
+    this._keepNear(dt, player, outside);
     this.leader.update(cam, dt, player, this.leaderCx, this.leaderCz, 7, tint);
+    if (this.leader.label) this.leader.label.material.opacity = this.leader.mat.opacity;   // his name fades with him
     this.leaderCx += (this.leader.x - this.leaderCx) * Math.min(1, dt * 0.4);
     this.leaderCz += (this.leader.z - this.leaderCz) * Math.min(1, dt * 0.4);
 

@@ -16,12 +16,36 @@ export function addNews(npc, fact){
   if (!npc.news) npc.news = new Map();
   const ex = npc.news.get(fact.key);
   if (!ex || fact.t > ex.t) npc.news.set(fact.key, fact);
+  if (fact.kind === 'boat' && fact.boat) knowCanoe(npc, fact.boat, fact.x, fact.z, fact.t, fact.from || null);
+}
+
+// Canoes are known apart from the news (docs/boats.md, "Making canoes"): a canoe
+// is days of work, so where one lies is worth remembering longer than a passing
+// fact, and past the news cap. npc.canoes: boat -> { x, z, t, from } — where they
+// last saw it, or were told it was. Seen again, or told of it more lately, it's
+// updated; gone looking and not found it there, it's forgotten (agents.js).
+const CANOE_DAYS = 8;              // a canoe not seen or heard of for this long is forgotten
+const CANOES_MAX = 6;
+export function knowCanoe(npc, boat, x, z, t, from = null){
+  if (!npc.canoes) npc.canoes = new Map();
+  const ex = npc.canoes.get(boat);
+  if (ex && ex.t >= t) return;
+  npc.canoes.set(boat, { x, z, t, from });
+  if (npc.canoes.size > CANOES_MAX){                       // the stalest goes
+    let old = null; for (const [b, k] of npc.canoes) if (!old || k.t < old[1].t) old = [b, k];
+    npc.canoes.delete(old[0]);
+  }
+}
+export function knownCanoes(npc, now){
+  if (!npc.canoes) return [];
+  for (const [b, k] of npc.canoes) if (now - k.t > CANOE_DAYS) npc.canoes.delete(b);
+  return [...npc.canoes];
 }
 
 export function pruneNews(npc, now){
   const m = npc.news; if (!m) return;
   // reputation & omens linger far longer than a fleeting sighting
-  for (const [k, f] of m) if (now - f.t > (f.kind === 'kind' || f.kind === 'omen' ? NEWS_TTL * 5 : NEWS_TTL)) m.delete(k);
+  for (const [k, f] of m) if (now - f.t > (f.kind === 'kind' || f.kind === 'omen' ? NEWS_TTL * 5 : f.kind === 'boat' || f.kind === 'dish' ? NEWS_TTL * 2 : NEWS_TTL)) m.delete(k);
   const over = m.size - NEWS_MAX;            // past the cap, shed the least valuable first
   if (over > 0){ const low = [...m.entries()].sort((a, b) => NEWS_RANK(a[1]) - NEWS_RANK(b[1]) || a[1].t - b[1].t);
     for (let i = 0; i < over; i++) m.delete(low[i][0]); }
@@ -30,7 +54,7 @@ export function pruneNews(npc, now){
 // rank facts for sharing/telling: reputation and food tips are worth more than the
 // constant churn of "who I just saw" (sightings refresh to `now` every frame, so by
 // freshness alone they'd drown everything else out).
-const NEWS_RANK = f => (f.kind === 'omen' ? 3 : f.kind === 'kind' ? 2 : f.kind === 'food' ? 1 : 0);
+const NEWS_RANK = f => (f.kind === 'omen' ? 3 : f.kind === 'kind' ? 2 : f.kind === 'market' ? 1.5 : f.kind === 'dish' ? 1.4 : f.kind === 'boat' ? 1.2 : f.kind === 'food' ? 1 : 0);   // (market: a trade at a village door, docs/trade.md; boat: where a canoe lies; dish: who makes a book dish, convo.js knowDish)
 
 // The best thing `from` could tell `to` right now: the choicest fact `to` doesn't
 // already have. Never news of `to` themselves; and nobody is told they saw

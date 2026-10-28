@@ -1,0 +1,152 @@
+{
+  "root": "greeting",
+  "speaker": "Puck",
+  "portrait": "sprites/puck.png",
+  "nodes": {
+    "greeting": {
+      "text": "Ho there, traveller! Puck's the name. Every wood and stone and old wall in the Lea, Puck knows. Lost, are you?",
+      "choices": [
+        {
+          "label": "What is a puck?",
+          "next": "puck"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "puck": {
+      "text": "Puck is me and I am Puck, though some calls us brownies, hobgoblins and robins. We are the jesters of the Faerian court, and the bard calls us shrewd knaves.",
+      "choices": [
+        {
+          "label": "Where are you from?",
+          "next": "faerie"
+        },
+        {
+          "label": "Is Puck Rock a genre?",
+          "next": "puck-rock"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "puck-rock": {
+      "text": "Puck rock is not a genre, it's a rock where the [[puck]] like to hang out.",
+      "choices": [
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "faerie": {
+      "text": "It's three days travel, wading through rivers of blood and tears. \n\nSome say that there are four island cities there, each with its own prophet poet.",
+      "choices": [
+        {
+          "label": "Can you show me the way into Faerie?",
+          "next": "faerie-way"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "faerie-way": {
+      "text": "I can show it, but you wouldn't see it. It's nothing personal, most of you who dwell in this green world are blind.",
+      "choices": [
+        {
+          "label": "Then help me see!",
+          "next": "see"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "see": {
+      "text": "Do I look like a doctor?",
+      "choices": [
+        {
+          "label": "Are there any doctors around, then?",
+          "next": "doctors"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "doctors": {
+      "text": "What, just because I don't LOOK like a doctor means I can't be one? No but really, I can't be one. Not legally, since the incident. You know, I was the best frond transplant surgeon in the Lea but now they won't even let me near a fern.",
+      "choices": [
+        {
+          "label": "Any other doctors around?",
+          "next": "badger"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "badger": {
+      "text": "There's the badger by {badger}, but he's not accepting new patients.",
+      "choices": [
+        {
+          "label": "Are there any HUMAN doctors around?",
+          "next": "human-doctors"
+        },
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    },
+    "human-doctors": {
+      "text": "To be perfectly honest, I highly doubt that a human could make it through medical school. But to be even more honest, I don't really talk to humans, present company generously excluded. So go and ask one of them.",
+      "choices": [
+        {
+          "label": "Ask something else.",
+          "next": "greeting"
+        },
+        {
+          "label": "Farewell, good fellow.",
+          "next": null
+        }
+      ]
+    }
+  }
+}
