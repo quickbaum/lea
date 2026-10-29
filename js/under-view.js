@@ -245,7 +245,7 @@ function palaceMats(c){
   // the columns and piers in the Julia slabs (julia-calc.js), as the Turning Stair's: verde, and porphyry
   const verde = juliaMaterial('verdeSlab', 0x2f6a52, { clearcoat: 0.6, clearcoatRoughness: 0.08, envMap: palaceEnv() });
   const porphyry = juliaMaterial('porphyrySlab', 0x6a2438, { clearcoat: 0.6, clearcoatRoughness: 0.08, envMap: palaceEnv() });
-  // the walls, their trim and arches, and the vaults overhead, in Julia slabs too the
+  // the walls, their trim and arches, and the vaults overhead, in Julia slabs too: the
   // stair's cloisonné, and the dome's spiral colouring. Vertex colours kept, for the shading
   const wall = juliaMaterial('wallSlab', 0x2a2c58, { vertexColors: true, clearcoat: 0.3, clearcoatRoughness: 0.2, envMap: palaceEnv() });
   const vault = juliaMaterial('vaultSlab', 0x4a3a78, { vertexColors: true, clearcoat: 0.3, clearcoatRoughness: 0.2, envMap: palaceEnv() });

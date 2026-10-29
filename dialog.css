@@ -14,6 +14,11 @@
   width: 120px; flex: 0 0 120px; align-self: flex-end;
   image-rendering: auto; filter: drop-shadow(0 3px 6px #000a);
 }
+/* a household's mark behind the face: tiled, framed like the kin roster's faces */
+#dlg-portrait.marked {
+  background-size: 40px; border: 1px solid #c9a23a; border-radius: 6px;
+  filter: none; box-shadow: 0 3px 8px #000a;
+}
 #dlg-main  { flex: 1; min-width: 0; }
 #dlg-speaker {
   font-weight: bold; color: #e8c75a; font-size: 16px;
@@ -27,6 +32,7 @@
   width: 66px; height: 66px; object-fit: cover;
   border: 1px solid #c9a23a; border-radius: 4px;
   display: block; margin: 0 auto 3px; image-rendering: auto; background: #0c0e16;
+  background-size: 22px;            /* the household's mark, when set inline */
 }
 .dlg-kin-name  { font-size: 12px; color: #efe6cf; line-height: 1.15; }
 .dlg-kin-rel   { font-size: 11px; color: #a89c78; font-style: italic; }
