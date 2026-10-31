@@ -354,7 +354,10 @@ class AnimNPC {
     // night-gathering sway: seated folk at a gathering rock gently in unison (a
     // shared wall-clock phase keeps the whole circle in time — song made visible).
     let sway = 0, swayBob = 0;
-    if (this.sitting && this.atGathering){
+    if (this.dancing){                              // dancing to a tune (music-sim.js dancePose): up on each beat, swaying across two
+      hopOff = Math.max(hopOff, this.dancing.hop * this.h * 0.08);
+      sway = this.dancing.sway * 0.13;
+    } else if (this.sitting && this.atGathering){
       const ph = performance.now() * 0.0016;        // shared across all NPCs → synchronised
       sway = Math.sin(ph) * 0.1;
       swayBob = (Math.cos(ph * 2) * 0.5 + 0.5) * this.h * 0.03;

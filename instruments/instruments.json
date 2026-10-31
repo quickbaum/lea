@@ -1,0 +1,421 @@
+{
+ "bone flute": {
+  "gm": 75,
+  "preset": "Pan Flute",
+  "attack": 0.04,
+  "release": 0.15,
+  "sustain": true,
+  "zones": [
+   {
+    "file": "bone-flute-0.wav",
+    "lo": 0,
+    "hi": 84,
+    "root": 72,
+    "cents": 25,
+    "rate": 16000,
+    "loop": [
+     0.1149375,
+     0.1188125
+    ]
+   },
+   {
+    "file": "bone-flute-1.wav",
+    "lo": 85,
+    "hi": 127,
+    "root": 90,
+    "cents": 15,
+    "rate": 22050,
+    "loop": [
+     0.022403628117913833,
+     0.02308390022675737
+    ]
+   }
+  ]
+ },
+ "tabor pipe": {
+  "gm": 74,
+  "preset": "Recorder",
+  "attack": 0.03,
+  "release": 0.12,
+  "sustain": true,
+  "zones": [
+   {
+    "file": "tabor-pipe-0.wav",
+    "lo": 0,
+    "hi": 127,
+    "root": 84,
+    "cents": -2,
+    "rate": 20000,
+    "loop": [
+     0.0236,
+     0.02455
+    ]
+   }
+  ]
+ },
+ "vielle": {
+  "gm": 40,
+  "preset": "Violin",
+  "attack": 0.06,
+  "release": 0.2,
+  "sustain": true,
+  "zones": [
+   {
+    "file": "vielle-0.wav",
+    "lo": 0,
+    "hi": 60,
+    "root": 65,
+    "cents": 2,
+    "rate": 16000,
+    "loop": [
+     0.02225,
+     0.025125
+    ]
+   },
+   {
+    "file": "vielle-1.wav",
+    "lo": 61,
+    "hi": 69,
+    "root": 76,
+    "cents": 26,
+    "rate": 22050,
+    "loop": [
+     0.02331065759637188,
+     0.024852607709750566
+    ]
+   },
+   {
+    "file": "vielle-2.wav",
+    "lo": 70,
+    "hi": 76,
+    "root": 82,
+    "cents": 26,
+    "rate": 22050,
+    "loop": [
+     0.02290249433106576,
+     0.02399092970521542
+    ]
+   },
+   {
+    "file": "vielle-3.wav",
+    "lo": 77,
+    "hi": 82,
+    "root": 85,
+    "cents": 9,
+    "rate": 22050,
+    "loop": [
+     0.012879818594104309,
+     0.013786848072562358
+    ]
+   },
+   {
+    "file": "vielle-4.wav",
+    "lo": 83,
+    "hi": 88,
+    "root": 87,
+    "cents": 22,
+    "rate": 16000,
+    "loop": [
+     0.011125,
+     0.0119375
+    ]
+   },
+   {
+    "file": "vielle-5.wav",
+    "lo": 89,
+    "hi": 127,
+    "root": 90,
+    "cents": 33,
+    "rate": 16000,
+    "loop": [
+     0.022375,
+     0.0230625
+    ]
+   }
+  ]
+ },
+ "psaltery": {
+  "gm": 15,
+  "preset": "Santur",
+  "attack": 0.0,
+  "release": 0.6,
+  "sustain": false,
+  "zones": [
+   {
+    "file": "psaltery-0.wav",
+    "lo": 0,
+    "hi": 56,
+    "root": 56,
+    "cents": 0,
+    "rate": 22050,
+    "loop": [
+     0.04825396825396826,
+     0.053061224489795916
+    ]
+   },
+   {
+    "file": "psaltery-1.wav",
+    "lo": 57,
+    "hi": 72,
+    "root": 60,
+    "cents": 0,
+    "rate": 22050,
+    "loop": [
+     0.04217687074829932,
+     0.04598639455782313
+    ]
+   },
+   {
+    "file": "psaltery-2.wav",
+    "lo": 73,
+    "hi": 127,
+    "root": 76,
+    "cents": 0,
+    "rate": 22050,
+    "loop": [
+     0.03292517006802721,
+     0.03746031746031746
+    ]
+   }
+  ]
+ },
+ "harp": {
+  "gm": 46,
+  "preset": "Harp",
+  "attack": 0.0,
+  "release": 0.8,
+  "sustain": false,
+  "zones": [
+   {
+    "file": "harp-0.wav",
+    "lo": 0,
+    "hi": 96,
+    "root": 78,
+    "cents": 32,
+    "rate": 22050,
+    "loop": [
+     0.02163265306122449,
+     0.022993197278911564
+    ]
+   },
+   {
+    "file": "harp-1.wav",
+    "lo": 97,
+    "hi": 127,
+    "root": 97,
+    "cents": 17,
+    "rate": 22050,
+    "loop": [
+     0.007845804988662131,
+     0.008299319727891157
+    ]
+   }
+  ]
+ },
+ "silver pipes": {
+  "gm": 73,
+  "preset": "Flute",
+  "attack": 0.04,
+  "release": 0.15,
+  "sustain": true,
+  "zones": [
+   {
+    "file": "silver-pipes-0.wav",
+    "lo": 0,
+    "hi": 127,
+    "root": 84,
+    "cents": -2,
+    "rate": 20000,
+    "loop": [
+     0.0236,
+     0.02455
+    ]
+   }
+  ]
+ },
+ "celesta": {
+  "gm": 8,
+  "preset": "Celesta",
+  "attack": 0.0,
+  "release": 0.9,
+  "sustain": false,
+  "zones": [
+   {
+    "file": "celesta-0.wav",
+    "lo": 0,
+    "hi": 75,
+    "root": 67,
+    "cents": 14,
+    "rate": 16000,
+    "loop": [
+     0.0261875,
+     0.02875
+    ]
+   },
+   {
+    "file": "celesta-1.wav",
+    "lo": 76,
+    "hi": 101,
+    "root": 97,
+    "cents": 10,
+    "rate": 22050,
+    "loop": [
+     0.011519274376417234,
+     0.01197278911564626
+    ]
+   },
+   {
+    "file": "celesta-2.wav",
+    "lo": 102,
+    "hi": 127,
+    "root": 114,
+    "cents": 20,
+    "rate": 22050,
+    "loop": [
+     0.00013605442176870748,
+     0.0008163265306122449
+    ]
+   }
+  ]
+ },
+ "glockenspiel": {
+  "gm": 9,
+  "preset": "Glockenspiel",
+  "attack": 0.0,
+  "release": 1.0,
+  "sustain": false,
+  "zones": [
+   {
+    "file": "glockenspiel-0.wav",
+    "lo": 0,
+    "hi": 83,
+    "root": 60,
+    "cents": -6,
+    "rate": 22050,
+    "loop": [
+     0.03800453514739229,
+     0.0418140589569161
+    ]
+   },
+   {
+    "file": "glockenspiel-1.wav",
+    "lo": 84,
+    "hi": 93,
+    "root": 84,
+    "cents": -6,
+    "rate": 22050,
+    "loop": [
+     0.009478458049886621,
+     0.010430839002267574
+    ]
+   },
+   {
+    "file": "glockenspiel-2.wav",
+    "lo": 94,
+    "hi": 101,
+    "root": 101,
+    "cents": -8,
+    "rate": 22050,
+    "loop": [
+     0.0,
+     0.0014058956916099773
+    ]
+   },
+   {
+    "file": "glockenspiel-3.wav",
+    "lo": 102,
+    "hi": 127,
+    "root": 114,
+    "cents": 35,
+    "rate": 22050,
+    "loop": [
+     0.00013605442176870748,
+     0.0008163265306122449
+    ]
+   }
+  ]
+ },
+ "music box": {
+  "gm": 10,
+  "preset": "Music Box",
+  "attack": 0.0,
+  "release": 1.0,
+  "sustain": false,
+  "zones": [
+   {
+    "file": "music-box-0.wav",
+    "lo": 0,
+    "hi": 83,
+    "root": 60,
+    "cents": -6,
+    "rate": 22050,
+    "loop": [
+     0.03800453514739229,
+     0.0418140589569161
+    ]
+   },
+   {
+    "file": "music-box-1.wav",
+    "lo": 84,
+    "hi": 93,
+    "root": 84,
+    "cents": -6,
+    "rate": 22050,
+    "loop": [
+     0.009478458049886621,
+     0.010430839002267574
+    ]
+   },
+   {
+    "file": "music-box-2.wav",
+    "lo": 94,
+    "hi": 101,
+    "root": 101,
+    "cents": -8,
+    "rate": 22050,
+    "loop": [
+     0.0,
+     0.0014058956916099773
+    ]
+   },
+   {
+    "file": "music-box-3.wav",
+    "lo": 102,
+    "hi": 127,
+    "root": 114,
+    "cents": 35,
+    "rate": 22050,
+    "loop": [
+     0.00013605442176870748,
+     0.0008163265306122449
+    ]
+   }
+  ]
+ },
+ "tabor": {
+  "gm": 0,
+  "preset": "Standard",
+  "attack": 0.0,
+  "release": 0.1,
+  "sustain": false,
+  "perc": true,
+  "zones": [
+   {
+    "file": "tabor-0.wav",
+    "lo": 38,
+    "hi": 38,
+    "root": 38,
+    "cents": 0,
+    "rate": 16000
+   },
+   {
+    "file": "tabor-1.wav",
+    "lo": 45,
+    "hi": 45,
+    "root": 45,
+    "cents": 0,
+    "rate": 16000
+   }
+  ]
+ }
+}

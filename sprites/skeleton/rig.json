@@ -1,0 +1,599 @@
+{
+ "src": "sprites/Skeleton_shaded.psd",
+ "made_by": "tools/extract_skeleton_psd.py",
+ "axis": 309.5,
+ "ground": 848,
+ "unit": 0.002108433734939759,
+ "atlasSize": [
+  512,
+  512
+ ],
+ "nodes": [
+  {
+   "id": "pelvis",
+   "parent": null,
+   "pivot": [
+    309.5,
+    400
+   ]
+  },
+  {
+   "id": "loins",
+   "parent": "pelvis",
+   "pivot": [
+    309.5,
+    380
+   ]
+  },
+  {
+   "id": "chest",
+   "parent": "loins",
+   "pivot": [
+    309.5,
+    312
+   ]
+  },
+  {
+   "id": "neck",
+   "parent": "chest",
+   "pivot": [
+    309.5,
+    166
+   ]
+  },
+  {
+   "id": "head",
+   "parent": "neck",
+   "pivot": [
+    309.5,
+    116
+   ]
+  },
+  {
+   "id": "jaw",
+   "parent": "head",
+   "pivot": [
+    309.5,
+    96
+   ]
+  },
+  {
+   "id": "shoulder_R",
+   "parent": "chest",
+   "pivot": [
+    300,
+    168
+   ]
+  },
+  {
+   "id": "arm_R",
+   "parent": "shoulder_R",
+   "pivot": [
+    213,
+    184
+   ]
+  },
+  {
+   "id": "fore_R",
+   "parent": "arm_R",
+   "pivot": [
+    197,
+    322
+   ]
+  },
+  {
+   "id": "hand_R",
+   "parent": "fore_R",
+   "pivot": [
+    164,
+    430
+   ]
+  },
+  {
+   "id": "thigh_R",
+   "parent": "pelvis",
+   "pivot": [
+    259,
+    417
+   ]
+  },
+  {
+   "id": "shin_R",
+   "parent": "thigh_R",
+   "pivot": [
+    269,
+    623
+   ]
+  },
+  {
+   "id": "foot_R",
+   "parent": "shin_R",
+   "pivot": [
+    282,
+    789
+   ]
+  },
+  {
+   "id": "shoulder_L",
+   "parent": "chest",
+   "pivot": [
+    319.0,
+    168
+   ]
+  },
+  {
+   "id": "arm_L",
+   "parent": "shoulder_L",
+   "pivot": [
+    406.0,
+    184
+   ]
+  },
+  {
+   "id": "fore_L",
+   "parent": "arm_L",
+   "pivot": [
+    422.0,
+    322
+   ]
+  },
+  {
+   "id": "hand_L",
+   "parent": "fore_L",
+   "pivot": [
+    455.0,
+    430
+   ]
+  },
+  {
+   "id": "thigh_L",
+   "parent": "pelvis",
+   "pivot": [
+    360.0,
+    417
+   ]
+  },
+  {
+   "id": "shin_L",
+   "parent": "thigh_L",
+   "pivot": [
+    350.0,
+    623
+   ]
+  },
+  {
+   "id": "foot_L",
+   "parent": "shin_L",
+   "pivot": [
+    337.0,
+    789
+   ]
+  }
+ ],
+ "pieces": [
+  {
+   "id": "neck",
+   "node": "neck",
+   "box": [
+    292,
+    118,
+    33,
+    47
+   ],
+   "atlas": [
+    2,
+    332,
+    33,
+    47
+   ]
+  },
+  {
+   "id": "ribs_low",
+   "node": "chest",
+   "box": [
+    262,
+    282,
+    97,
+    38
+   ],
+   "atlas": [
+    109,
+    332,
+    97,
+    38
+   ]
+  },
+  {
+   "id": "lumbar",
+   "node": "loins",
+   "box": [
+    287,
+    308,
+    46,
+    74
+   ],
+   "atlas": [
+    386,
+    223,
+    46,
+    74
+   ]
+  },
+  {
+   "id": "thoracic",
+   "node": "chest",
+   "box": [
+    294,
+    156,
+    33,
+    159
+   ],
+   "atlas": [
+    223,
+    2,
+    33,
+    159
+   ]
+  },
+  {
+   "id": "scapula_R",
+   "node": "shoulder_R",
+   "box": [
+    199,
+    159,
+    70,
+    84
+   ],
+   "atlas": [
+    312,
+    223,
+    70,
+    84
+   ]
+  },
+  {
+   "id": "scapula_L",
+   "node": "shoulder_L",
+   "box": [
+    350.0,
+    159,
+    70,
+    84
+   ],
+   "flip": true,
+   "atlas": [
+    312,
+    223,
+    70,
+    84
+   ]
+  },
+  {
+   "id": "ribs_L",
+   "node": "chest",
+   "box": [
+    309,
+    165,
+    84,
+    155
+   ],
+   "atlas": [
+    316,
+    2,
+    84,
+    155
+   ]
+  },
+  {
+   "id": "ribs_R",
+   "node": "chest",
+   "box": [
+    226,
+    157,
+    84,
+    163
+   ],
+   "atlas": [
+    135,
+    2,
+    84,
+    163
+   ]
+  },
+  {
+   "id": "sternum",
+   "node": "chest",
+   "box": [
+    292,
+    176,
+    34,
+    119
+   ],
+   "atlas": [
+    404,
+    2,
+    34,
+    119
+   ]
+  },
+  {
+   "id": "clavicle_R",
+   "node": "shoulder_R",
+   "box": [
+    204,
+    153,
+    109,
+    30
+   ],
+   "atlas": [
+    210,
+    332,
+    109,
+    30
+   ]
+  },
+  {
+   "id": "clavicle_L",
+   "node": "shoulder_L",
+   "box": [
+    306.0,
+    153,
+    109,
+    30
+   ],
+   "flip": true,
+   "atlas": [
+    210,
+    332,
+    109,
+    30
+   ]
+  },
+  {
+   "id": "jaw",
+   "node": "jaw",
+   "box": [
+    274,
+    86,
+    66,
+    47
+   ],
+   "atlas": [
+    39,
+    332,
+    66,
+    47
+   ]
+  },
+  {
+   "id": "skull",
+   "node": "head",
+   "box": [
+    263,
+    18,
+    90,
+    96
+   ],
+   "atlas": [
+    142,
+    223,
+    90,
+    96
+   ]
+  },
+  {
+   "id": "pelvis",
+   "node": "pelvis",
+   "box": [
+    243,
+    347,
+    136,
+    105
+   ],
+   "atlas": [
+    2,
+    223,
+    136,
+    105
+   ]
+  },
+  {
+   "id": "femur_R",
+   "node": "thigh_R",
+   "box": [
+    230,
+    408,
+    64,
+    217
+   ],
+   "atlas": [
+    2,
+    2,
+    64,
+    217
+   ]
+  },
+  {
+   "id": "femur_L",
+   "node": "thigh_L",
+   "box": [
+    325.0,
+    408,
+    64,
+    217
+   ],
+   "flip": true,
+   "atlas": [
+    2,
+    2,
+    64,
+    217
+   ]
+  },
+  {
+   "id": "shin_R",
+   "node": "shin_R",
+   "box": [
+    241,
+    619,
+    61,
+    172
+   ],
+   "atlas": [
+    70,
+    2,
+    61,
+    172
+   ]
+  },
+  {
+   "id": "shin_L",
+   "node": "shin_L",
+   "box": [
+    317.0,
+    619,
+    61,
+    172
+   ],
+   "flip": true,
+   "atlas": [
+    70,
+    2,
+    61,
+    172
+   ]
+  },
+  {
+   "id": "foot_R",
+   "node": "foot_R",
+   "box": [
+    249,
+    783,
+    53,
+    65
+   ],
+   "atlas": [
+    436,
+    223,
+    53,
+    65
+   ]
+  },
+  {
+   "id": "foot_L",
+   "node": "foot_L",
+   "box": [
+    317.0,
+    783,
+    53,
+    65
+   ],
+   "flip": true,
+   "atlas": [
+    436,
+    223,
+    53,
+    65
+   ]
+  },
+  {
+   "id": "humerus_R",
+   "node": "arm_R",
+   "box": [
+    182,
+    171,
+    52,
+    158
+   ],
+   "atlas": [
+    260,
+    2,
+    52,
+    158
+   ]
+  },
+  {
+   "id": "humerus_L",
+   "node": "arm_L",
+   "box": [
+    385.0,
+    171,
+    52,
+    158
+   ],
+   "flip": true,
+   "atlas": [
+    260,
+    2,
+    52,
+    158
+   ]
+  },
+  {
+   "id": "forearm_R",
+   "node": "fore_R",
+   "box": [
+    149,
+    319,
+    64,
+    117
+   ],
+   "atlas": [
+    442,
+    2,
+    64,
+    117
+   ]
+  },
+  {
+   "id": "forearm_L",
+   "node": "fore_L",
+   "box": [
+    406.0,
+    319,
+    64,
+    117
+   ],
+   "flip": true,
+   "atlas": [
+    442,
+    2,
+    64,
+    117
+   ]
+  },
+  {
+   "id": "hand_R",
+   "node": "hand_R",
+   "box": [
+    110,
+    424,
+    72,
+    87
+   ],
+   "atlas": [
+    236,
+    223,
+    72,
+    87
+   ]
+  },
+  {
+   "id": "hand_L",
+   "node": "hand_L",
+   "box": [
+    437.0,
+    424,
+    72,
+    87
+   ],
+   "flip": true,
+   "atlas": [
+    236,
+    223,
+    72,
+    87
+   ]
+  }
+ ]
+}

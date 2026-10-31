@@ -1,6 +1,7 @@
 {
   "root": "greeting",
   "speaker": "Puck",
+  "voice": "puck",
   "portrait": "sprites/puck.png",
   "nodes": {
     "greeting": {

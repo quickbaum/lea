@@ -6,8 +6,77 @@
 // [[node]] or [[node|label]] inline links. A tree built at runtime may give a
 // choice `run`, a function called when it's picked (before moving to `next`). `action` names a function supplied by
 // the caller in opts.actions — that's how Claude actually changes the weather.
+// A tree with a `voice` (speech-score.js VOICES: Puck's) sings: each screen's words come up one
+// at a time on the beat of a score worked out from them, each sounding a note on the voice's
+// instrument (played by whatever setVoicePlayer was given; main.js gives its Instruments). A
+// click or Space shows the rest at once; the choices wait until the words are all there.
+// A voiced tree's text may carry hidden marks ({slow}, *stress*, …: speech-score.js), never
+// shown; other trees' text is shown as written (claude.json's *asterisks* stay).
+
+import { prepare, score, VOICES } from './speech-score.js';
 
 const cache = {};
+let voicePlayer = null;          // (kind, { notes, length }, { gain }) → Promise<{ stop } | null>
+export function setVoicePlayer(fn){ voicePlayer = fn; }
+
+// each word of el's text in a span of its own, split as speech-score.js prepare() splits them
+function wordify(el){
+  const spans = [];
+  const walk = node => {
+    for (const ch of [...node.childNodes]){
+      if (ch.nodeType !== 3){ walk(ch); continue; }
+      const frag = document.createDocumentFragment();
+      for (const part of ch.textContent.split(/(\s+)/)){
+        if (!part) continue;
+        if (/^\s+$/.test(part)){ frag.appendChild(document.createTextNode(part)); continue; }
+        const w = document.createElement('span'); w.className = 'dlg-w'; w.textContent = part;
+        frag.appendChild(w); spans.push(w);
+      }
+      node.replaceChild(frag, ch);
+    }
+  };
+  walk(el);
+  return spans;
+}
+
+// sing a line said in the world (talk-view.js bubbles): the notes start now, and the words come
+// up on their beats from t0 (ms, performance.now(); null until the notes are asked for)
+// { words: [{ text, t }], length, t0, stop() }, or null if the voice can't sing
+export function ringLine(text, voice){
+  if (!voicePlayer || !VOICES[voice]) return null;
+  const sc = score(text, voice);
+  if (!sc.words.length) return null;
+  const r = { words: sc.words, length: sc.length, t0: null, perf: null, stop(){ this.perf?.stop(); } };
+  Promise.resolve(voicePlayer(VOICES[voice].kind, { notes: sc.notes, length: sc.length }, { gain: VOICES[voice].gain ?? 1 })).catch(() => null)
+    .then(p => { r.perf = p; r.t0 = performance.now() + 80; });
+  return r;
+}
+// sing one screen: { skip() }, or null if it can't (no player, or the words don't line up)
+function sing(textEl, choicesEl, text, voice){
+  const sc = score(text, voice), spans = wordify(textEl);
+  if (!voicePlayer || !VOICES[voice] || spans.length !== sc.words.length) return null;
+  textEl.classList.add('singing'); choicesEl.classList.add('waiting');
+  let perf = null, timer = null, done = false, t0 = 0;
+  const finish = () => {
+    if (done) return; done = true; clearTimeout(timer);
+    for (const w of spans) w.classList.add('sung');
+    textEl.classList.remove('singing'); choicesEl.classList.remove('waiting');
+  };
+  const tick = () => {
+    const now = (performance.now() - t0) / 1000;
+    let next = null;
+    spans.forEach((w, i) => { if (sc.words[i].t <= now + 0.01) w.classList.add('sung'); else if (next === null) next = sc.words[i].t; });
+    timer = next === null ? setTimeout(finish, 250) : setTimeout(tick, Math.max(10, (next - now) * 1000));
+  };
+  // the words keep time even with no sound (no audio yet): the clock starts once the notes are asked for
+  Promise.resolve(voicePlayer(VOICES[voice].kind, { notes: sc.notes, length: sc.length }, { gain: VOICES[voice].gain ?? 1 })).catch(() => null).then(p => {
+    perf = p;
+    if (done){ p?.stop(); return; }
+    t0 = performance.now() + 80;                   // instruments.js starts its notes 80 ms on
+    tick();
+  });
+  return { skip(){ perf?.stop(); finish(); } };
+}
 
 function ensureCss(){
   if (document.getElementById('dialog-css')) return;
@@ -37,7 +106,7 @@ function open(tree, opts){
   opts = opts || {};
   const actions = opts.actions || {};
   const history = [];
-  let cur = null;
+  let cur = null, song = null;
 
   const overlay = document.createElement('div'); overlay.id = 'dlg-overlay';
   const box = document.createElement('div'); box.id = 'dlg-box';
@@ -49,8 +118,14 @@ function open(tree, opts){
   box.appendChild(portrait); box.appendChild(main);
   overlay.appendChild(box); document.body.appendChild(overlay);
 
-  function close(){ overlay.remove(); document.removeEventListener('keydown', onKey); if (opts.onClose) opts.onClose(); }
-  function onKey(e){ if (e.key === 'Escape') close(); }
+  function close(){ song?.skip(); overlay.remove(); document.removeEventListener('keydown', onKey); if (opts.onClose) opts.onClose(); }
+  function onKey(e){
+    if (e.key === 'Escape') close();
+    else if (song && (e.key === ' ' || e.key === 'Enter')){ e.preventDefault(); song.skip(); }
+  }
+  // a click shows the rest of what's said; not a click that takes you somewhere (a choice, a
+  // link, back): that click opens the next screen first, and skipping then would skip that one
+  main.addEventListener('click', e => { if (!e.target.closest('.dlg-choice, .dlg-link, .dlg-back, .dlg-kin')) song?.skip(); });
   document.addEventListener('keydown', onKey);
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
@@ -61,6 +136,7 @@ function open(tree, opts){
     if (id === tree.root) history.length = 0;
     cur = id;
     if (opts.onNav) opts.onNav(id);          // per-navigation hook (e.g. clear a map marker)
+    song?.skip(); song = null;
     main.innerHTML = '';
 
     if (tree.speaker){
@@ -74,7 +150,7 @@ function open(tree, opts){
       main.appendChild(back);
     }
     const t = document.createElement('div'); t.id = 'dlg-text';
-    t.appendChild(parseText(node.text, go));
+    t.appendChild(parseText(tree.voice ? prepare(node.text).clean : node.text, go));
     main.appendChild(t);
 
     // an optional roster of people (portrait + name + relation), e.g. one's kin
@@ -116,6 +192,7 @@ function open(tree, opts){
       cs.appendChild(b);
     }
     main.appendChild(cs);
+    if (tree.voice) song = sing(t, cs, node.text, tree.voice);
   }
   go(tree.root);
 }

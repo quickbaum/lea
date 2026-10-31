@@ -4,9 +4,12 @@ import { mulberry32, fork } from './rng.js';
 import { height, biome, walkable, buildTerrain, terrainType, soilRichness, pace, setWearSource, settlements, ruins, under } from './terrain.js';
 import { spawnPeasants, spawnNamedNPC } from './npc.js';
 import { PuckFlock } from './puck.js';
+import { makeTrolls } from './troll.js';
+import { loadSkeletonKit, makeSkeleton } from './skeleton.js';
+import { makeGuards } from './skeleton-guards.js';
+import { makeBolts } from './light-bolt.js';
 import { Warren } from './fauna.js';
-import { plantWorld, cullFlora, floraTilesDrawn, setFloraLod } from './gen/flora.js';
-import { MusicPlayer } from './music.js';
+import { plantWorld, cullFlora, floraTilesDrawn, setFloraLod, makeFairyRing } from './gen/flora.js';
 import { Footsteps } from './footsteps.js';
 import { Boats, CanoeBedView } from './boats.js';
 import { fishingSpots, fishingGrounds } from './gen/fishing.js';
@@ -24,7 +27,8 @@ import { packView } from './pack-view.js';
 import { makeJournal } from './journal.js';
 import { journalView } from './journal-view.js';
 import { describe as describeProv, THIN_R, DAWN, isDawn } from './provenance.js';
-import { PREPARATIONS, shelfBook, wantsMet, daysToNewMoon, NEW_MOON } from './stillroom.js';
+import { PREPARATIONS, shelfBook, shelfCraft, wantsMet, daysToNewMoon, NEW_MOON } from './stillroom.js';
+import { CRAFTS, canMake, needsText, teachCraft, goodsOf, takeGoods } from './making.js';
 import { houseName, phaseName } from './astrology.js';
 import { makeVitals, tickVitals, canRun, spend, eat, eatValue, SP_MAX, ST_MAX } from './vitals.js';
 import { worth, isWild, VALUABLES } from './trade.js';
@@ -50,17 +54,22 @@ import { sampleFaceSkin } from './headscan.js';
 import { generateCrown, PORTRAIT_SCALE, PORTRAIT_ANCHOR_X, PORTRAIT_BOTTOM_Y } from './crown.js';
 import { makeSociety, makeHouseholds } from './society.js';
 import { makeOmen } from './astrology.js';
-import { talk, talkTree, loadTree } from './dialog.js';
+import { talk, talkTree, loadTree, setVoicePlayer } from './dialog.js';
 import { readPage } from './page.js';
 import { FAERIE_BOOKS } from './faerie-books.js';
+import { TUNES, MUSIC_BOOKS, shelfMusic, shelfTune, schedule } from './tunes.js';
+import { phrasesKnown, phraseCount, knowsTune, knownSet, tunesOf, teachTune, instrumentOf, giveInstrument, craftsKnown, musicalCamp } from './music-sim.js';
+import { DRUMS, parts, partNotes, liftFor } from './arrange.js';
+import { staffSvg } from './notation.js';
+import { Instruments } from './instruments.js';
 import { makePuckGuide } from './puck-guide.js';
 import { createHands } from './hands.js';
 import { bakeMissing } from './spritebaker.js';
 import { Rain } from './rain.js';
 import { intakeRumor } from './rumor.js';
 import { Fireworks } from './firework.js';
-import { FaerieSight } from './faerie-view.js';
-import { planPortals, palaceSpec, portalPaths, buildFaerie, groundsSpec, stairSpec, GROUNDS, STAIR } from './gen/faerie.js';
+import { FaerieSight, OVAL } from './faerie-view.js';
+import { planPortals, extraDoor, palaceSpec, portalPaths, buildFaerie, groundsSpec, stairSpec, GROUNDS, STAIR } from './gen/faerie.js';
 import { planRoute } from './guide.js';
 import { Mycelium } from './mycelium.js';
 import { treeVoice, facedTreeVoice, ringTree, woodRumour } from './wood-talk.js';
@@ -68,6 +77,7 @@ import { TreeFaces } from './tree-faces.js';
 import { createMaps } from './map.js';
 import { places, placeAt, placePhrase, settlementNames, ruinNames, underNames } from './gen/places.js';
 import { makeTalkView } from './talk-view.js';
+import { isMember, mayHear, atSecretRite } from './fellowships.js';
 import { makeTosses } from './toss.js';
 
 // Bake any sprites that are in tools/bakes.json but not yet on disk.
@@ -136,8 +146,10 @@ const myc = new Mycelium(forage.treeRecords,
     .map(p => ({ p, node: myc.nearest(p.x, p.z, 14), s: myc.strengthAt(p.x, p.z) }))
     .filter(r => r.node)
     .sort((a, b) => b.s - a.s);
-  for (const r of caps.slice(0, Math.max(1, Math.round(caps.length / 3)))){
+  const ringRng = mulberry32((WORLD_SEED ^ 0xfa1e) >>> 0);   // its own stream: the circles' caps renumber nothing else
+  for (const r of caps.slice(0, Math.max(1, Math.round(caps.length / 10)))){
     r.p.ring = true; r.p.ringNode = r.node;
+    makeFairyRing(r.p, ringRng);                              // a circle of fairy mushrooms
   }
 }
 
@@ -225,7 +237,8 @@ if (new URLSearchParams(location.search).has('rite'))
 // logic in agents.js), so hearths emerge where people actually gather.
 agents.setBoats(boats);                                    // communal canoes NPCs ferry across the water
 agents.setBirches(forage.treeRecords.filter(t => t.species === 'birch'));   // bark for the canoes the folk make (docs/boats.md)
-agents.setFood(forage.plants);                             // bushes/trees double as food sources
+agents.setFood(forage.plants.filter(p => !p.ring && p.kind !== 'elder'));   // bushes/trees double as food sources (the folk leave fairy rings be)
+agents.setElders(forage.plants.filter(p => p.kind === 'elder'));            // stems for making instruments (making.js)
 agents.setValuables(forage.valuables);                     // rare finds people gather & trade
 agents.setFishing(fishingSpots({ height, walkable, water: WATER, radius: WORLD_R, habitat,   // places on the bank to fish (docs/fishing.md)
   rng: mulberry32((WORLD_SEED ^ 0xf15b) >>> 0) }),
@@ -325,6 +338,10 @@ fetch('sprites/npc/lea_clan.json').then(r => r.ok ? r.json() : []).catch(() => [
                          : CULTURES[cq] || CULTURES.folk;
     for (const n of api.npcs) agents.attach(n, cultureOf(n));
     for (const g of api.groups) if (g.village) agents.settleIn(g.npcs, agents.houses[g.house]);   // villagers move in
+    // the fellowships (js/fellowships.js, docs/fellowships.md): who belongs, and the stones they meet at
+    { const rn = ruinNames();
+      agents.setFellowships({ circles: ruins().map((u, i) => ({ u, i })).filter(q => q.u.kind === 'circle')
+        .map(({ u, i }) => ({ x: u.x, z: u.z, r: u.rad || 10, name: rn[i].name })) }); }
     setLoad('painting faces…', 0.08);
     // Portraits first, then warmTrails. warmTrails pre-simulates synchronously and
     // triggers onCrownMade for any elf who gathers 7 flowers. onCrownMade is async
@@ -409,6 +426,9 @@ function setLoad(msg, frac){
 async function warmTrails(seconds, onProgress){
   const dt = 0.15, steps = Math.floor(seconds / dt);
   const CHUNK = 40;   // yield to the browser every ~6 simulation-seconds
+  // the fellowships sit the warm-up out: its nights are made up while the clock stands
+  // still, so a member would spend tonight's one going-out (agents.js maybeRite) on one
+  const fellowships = agents.fellowships; agents.fellowships = [];
   for (let s = 0; s < steps; s++){
     agents.night = 0.5 - 0.5 * Math.cos(s / steps * Math.PI * 6);   // ~3 day/night cycles
     agents.day = 1 - agents.night;
@@ -425,12 +445,18 @@ async function warmTrails(seconds, onProgress){
       await new Promise(r => setTimeout(r, 0));
     }
   }
+  agents.fellowships = fellowships;
   trail.flush();
 }
 
-const music = new MusicPlayer();
+// No land music (2026-10-29): the only music is what's played, by you and by the folk
+// (instruments.js), and the MUSIC slider sets its volume. music.js, the old terrain
+// soundtrack, is kept but not loaded.
 const footsteps = new Footsteps();
 const ambience = new Ambience();
+const instruments = new Instruments();
+setVoicePlayer((kind, sched, o) => instruments.play(kind, sched, o));   // a voiced speaker's words ring (dialog.js sing)
+let tunePlaying = null;          // { id, kind, perf }: the tune you're playing (playTune, below)
 
 // While the splash is up the world is rendered but paused, and name tags hide.
 let playing = false;
@@ -524,6 +550,17 @@ const ENTRANCE_REACH = 9;     // a cave mouth or the crypt stair: how far off yo
 // E acts on, so they never disagree. We pick the talkable entity (Claude, Puck,
 // any peasant) whose direction best lines up with where you're looking — not
 // merely the nearest one. updateFocus() sets nearTalker / nearFruit and the box.
+// how far along your gaze it meets door p's oval (faerie-view.js OVAL, a little generous), or -1
+function portalHit(p){
+  const nx = Math.cos(p.face), nz = Math.sin(p.face), c = camera.position;
+  const den = _fwd.x * nx + _fwd.z * nz;
+  if (Math.abs(den) < 1e-4) return -1;                // looking along its edge
+  const t = ((p.x - c.x) * nx + (p.z - c.z) * nz) / den;
+  if (t < 0) return -1;
+  const hx = c.x + _fwd.x * t - p.x, hz = c.z + _fwd.z * t - p.z, hy = c.y + _fwd.y * t - p.y;
+  const u = (-hx * nz + hz * nx) / OVAL[0], v = (hy - OVAL[1] - 0.1) / OVAL[1];
+  return u * u + v * v <= 1.3 ? t : -1;
+}
 function focusAt(eyeY, x, z){          // angular fit of (x,z) to the view dir
   _to.set(x - camera.position.x, eyeY - camera.position.y, z - camera.position.z);
   const dist = _to.length();
@@ -544,7 +581,7 @@ function forageLabel(p){
 
 function updateFocus(){
   nearTalker = null; nearFruit = null; nearObject = null; nearBoat = null; nearTree = null; nearRing = null; nearFish = null;
-  nearEntrance = null; nearFind = null; nearExit = -1; nearSconce = null; nearShelf = null; nearPortal = null;
+  nearEntrance = null; nearFind = null; nearExit = -1; nearSconce = null; nearShelf = null; nearPortal = null; nearDoor = null; nearChest = null;
   if (!playing || inDialog || document.pointerLockElement !== canvas){ hoverPanel.style.display = 'none'; return; }
   if (down){ underFocus(); return; }
   camera.getWorldDirection(_fwd);
@@ -561,6 +598,7 @@ function updateFocus(){
   // E still only fires once within TALK_RANGE
   if (avatar) consider(avatar.x, avatar.z, height(avatar.x, avatar.z) + 1.0, FRAME_RANGE, { kind: 'person', c: avatar, dialog: 'claude', name: 'Claude' });
   if (puck)   consider(puck.x,   puck.z,   height(puck.x,   puck.z)   + 1.0, FRAME_RANGE, { kind: 'person', c: puck,   dialog: 'puck',   name: 'Puck'   });
+  for (const T of trolls){ const [x, z] = T.front(pos.x, pos.z); consider(x, z, height(x, z) + T.h * 0.59, FRAME_RANGE, { kind: 'person', c: T, dialog: T.dialog, name: T.name }); }
   for (const n of npcApi.npcs) if (!n._indoors)            // nobody indoors to be seen
     consider(n.x, n.z, height(n.x, n.z) + n.h * 0.6, FRAME_RANGE, { kind: 'person', c: n, peasant: true, name: n.name || 'a peasant', npc: n });
   // forageables: berries, shells, stones… (a strong mushroom ring is a talker
@@ -589,12 +627,17 @@ function updateFocus(){
   // entranceHit), not a point near it — you look down into a stairwell. A hit
   // counts as near dead centre, so it wins unless someone stands in the way.
   for (const en of under().entrances){
-    if (Math.hypot(en.x - pos.x, en.z - pos.z) > 16) continue;
+    if (en.troll || Math.hypot(en.x - pos.x, en.z - pos.z) > 16) continue;   // the troll's: he's in the way
     const t = entranceHit(en, camera.position.x, camera.position.y, camera.position.z, _fwd.x, _fwd.y, _fwd.z, ENTRANCE_REACH);
     if (t >= 0 && 0.99 > bestDot){ bestDot = 0.99; best = { dist: t, kind: 'entrance', e: en }; }
   }
-  if (sight) for (const pt of portals())             // a door into Faerie, seen with the salve on
-    if (Math.hypot(pt.x - pos.x, pt.z - pos.z) < 16) consider(pt.x, pt.z, pt.y + 2.7, FRAME_RANGE, { kind: 'portal', p: pt });
+  // a door into Faerie, seen with the salve on: aimed at by its oval, foot to crown (like
+  // an entrance, a hit counts as near dead centre)
+  if (sight) for (const pt of doors()){
+    if (Math.hypot(pt.x - pos.x, pt.z - pos.z) > 16) continue;
+    const t = portalHit(pt);
+    if (t >= 0 && t <= FRAME_RANGE && 0.99 > bestDot){ bestDot = 0.99; best = { dist: t, kind: 'portal', p: pt }; }
+  }
   for (const b of agents.canoeBuilds)                // a canoe being made on the bank
     consider(b.x, b.z, height(b.x, b.z) + 0.3, FRAME_RANGE, { kind: 'canoe-bed', bed: b });
 
@@ -661,8 +704,7 @@ function updateFocus(){
       : sp.stock > 0.6 ? (sp.kind === 'eels' ? 'Eels lie in mud like this.' : 'Fish are rising here.')
       : sp.stock > FISH_LOW_SHOWN ? 'Fished a little lately.' : 'Fished out, for now.', null);
   } else if (best && best.kind === 'ring'){
-    showText(best.item.kind === 'morels' ? 'A ring of morels' : 'A ring of mushrooms',
-      'Caps in a curve. The rest of it is underfoot.', null);
+    showText('A fairy ring', 'Violet caps in a circle. The rest of it is underfoot.', null);
   } else if (best && best.kind === 'rabbit'){
     showText('A rabbit', best.q.fleeing ? 'Bolting — wary of you.' : 'Grazing, ears twitching.', null);
   } else if (best && best.kind === 'entrance'){
@@ -716,6 +758,7 @@ function tryClickInteract(e){
     { kind: 'person', c: avatar, dialog: 'claude', name: 'Claude' });
   if (puck)   check(puck.x, height(puck.x, puck.z) + 1.0, puck.z,
     { kind: 'person', c: puck, dialog: 'puck', name: 'Puck' });
+  for (const T of trolls){ const [x, z] = T.front(pos.x, pos.z); check(x, height(x, z) + T.h * 0.59, z, { kind: 'person', c: T, dialog: T.dialog, name: T.name }); }
   for (const n of npcApi.npcs) if (!n._indoors)
     check(n.x, height(n.x, n.z) + n.h * 0.6, n.z,
       { kind: 'person', c: n, peasant: true, name: n.name || 'a peasant', npc: n });
@@ -803,8 +846,10 @@ function packUse(kind){
   const e = ingredient(kind) || {};
   if (edible(kind)){ const g = eatValue(me, kind, agents.time); return `Eat one: ${giveWords(g) || 'nothing much'}${g.f < 0.9 ? " (you've had that lately)" : ''}.`; }
   if (e.use === 'sight') return 'Use: touch it to one eye, after dark, at a fairy ring, a stone circle or a sacred tree.';
+  if (e.use === 'play') return tunePlaying?.kind === kind ? 'Playing. Click it again to stop.' : tunesRead.size ? 'Click to play a tune on it.' : "Click to play it. You don't know a tune for it yet.";
   if (e.raw) return 'Raw: it wants a pot over a fire.';
   if (e.group === 'trinket') return 'A pretty thing, worth a trade.';
+  if (e.use === 'unlock') return 'A key. Aim at the door with its sign on it and press E.';
   return 'Not for eating as it is.';
 }
 // the line under the grid for a box: what it's good for, then where it came from (its
@@ -816,6 +861,7 @@ function packSays(box){
 function eatFromPack(box){
   const e = ingredient(box.kind) || {}, name = e.label || box.kind;
   if (e.use === 'sight') return useSalve(box);
+  if (e.use === 'play') return playFromPack(box);
   if (!edible(box.kind)) return packUse(box.kind);
   const g = eat(me, box.kind, agents.time);
   myPack.takeFrom(box.id);
@@ -828,18 +874,27 @@ function eatFromPack(box){
 // Puck has something to say about it, and more the second time (the midwife's tale,
 // docs/texts/magic-traditions.md §4: they take the eye that sees them).
 let sight = null, salveUses = 0;
-// the portals (gen/faerie.js), beside the thin places, and the paths between them: planned
-// once, the first time anything asks
+// every thin place in the Lea: the fairy rings, the stone circles, the sacred trees
+const thinSpots = () => [...forage.plants.filter(q => q.ring).map(q => ({ kind: 'fairy ring', x: q.x, z: q.z, r: 3 })),
+  ...ruins().filter(u => u.kind === 'circle').map(u => ({ kind: 'stone circle', x: u.x, z: u.z, r: u.rad || THIN_R })),
+  ...agents.shrines.map(t => ({ kind: 'sacred tree', x: t.x, z: t.z, r: TREE_AT }))];
+// the portals (gen/faerie.js), the palaces' own doors at a few of the thin places, and the
+// paths between them: planned once, the first time anything asks
 let _portals = null, _faerieSet = false;
 function portals(){
-  if (_portals) return _portals;
-  const thin = [...forage.plants.filter(q => q.ring).map(q => ({ kind: 'fairy ring', x: q.x, z: q.z, r: 3 })),
-    ...ruins().filter(u => u.kind === 'circle').map(u => ({ kind: 'stone circle', x: u.x, z: u.z, r: u.rad || THIN_R })),
-    ...agents.shrines.map(t => ({ kind: 'sacred tree', x: t.x, z: t.z, r: TREE_AT }))];
-  return (_portals = planPortals(thin, { seed: WORLD_SEED, size: SIZE, walkable, height }));
+  return (_portals ??= planPortals(thinSpots(), { seed: WORLD_SEED, size: SIZE, walkable, height }));
+}
+// and a door at every other thin place (gen/faerie.js extraDoor), each into the nearest
+// palace: they were always there, and the salve only lets you see them
+let _doors = null;
+function doors(){
+  if (_doors) return _doors;
+  const own = new Set(portals().map(p => p.thin.join()));
+  return (_doors = [...portals(), ...thinSpots().filter(t => !own.has([t.x, t.z].join()))
+    .map(t => extraDoor(t, portals(), { walkable, height })).filter(Boolean)]);
 }
 function openSight(){
-  if (!_faerieSet){ faerie.setWorld(portals(), portalPaths(portals(), (a, b, c, d) => planRoute(a, b, c, d, 'scenic'))); _faerieSet = true; }
+  if (!_faerieSet){ faerie.setWorld(doors(), portalPaths(portals(), (a, b, c, d) => planRoute(a, b, c, d, 'scenic'))); _faerieSet = true; }
   faerie.start();
 }
 const inPalace = () => !!down && !!down.L.faerie;           // a palace, the grounds or the stair: anywhere in Faerie
@@ -860,7 +915,7 @@ function useSalve(box){
   sight = { x: pos.x, z: pos.z };
   openSight();
   jot('saw', 'the Gentry, with the green salve on one eye');
-  const puckSays = salveUses === 1 ? "Oh! You've the green salve on. See the doors, out across the Lea? Look, then, but don't stare." : "Again? Mind they don't see you looking. They take the eye that sees them.";
+  const puckSays = salveUses === 1 ? "Oh! You've the green salve on. See the door, just there? And more out across the Lea, where the lights go up. Look, then, but don't stare." : "Again? Mind they don't see you looking. They take the eye that sees them.";
   setTimeout(() => setForageMsg(`Puck, at your ear: "${puckSays}"`, 6000), 2500);
   return `You touch the salve to one eye. It stings, and then the dark ${thin[0] === 'sacred tree' ? 'under the tree' : `in the ${thin[0]}`} is not empty.`;
 }
@@ -899,6 +954,7 @@ function closeInventory(relockAfter = false){ invPanel.classList.add('hide'); in
 function stow(kind, n, prov){
   const got = myPack.add(kind, n, prov);
   if (got < n) setForageMsg(got ? `+${got} ${kind}; no room in your pack for the rest.` : 'No room in your pack.', 3000);
+  else if (ingredient(kind)?.use === 'play') setForageMsg(`You take the ${ingredient(kind).label}. Click it in your pack (I) to play it.`, 4000);
   else setForageMsg(`+${n} ${kind}`);
   if (invOpen) openInventory();
   if (got > 0 && (prov?.how === 'picked' || prov?.how === 'found')) jot(prov.how, (ingredient(kind) || {}).label || kind);
@@ -1025,10 +1081,21 @@ spawnNamedNPC(scene, {
 // Puck — a magical hopping creature who travels in winking-in-and-out bands.
 // The leader is persistent and talkable; the band is ephemeral. See js/puck.js.
 let puck = null, pucks = null, puckGuide = null;
+// the trolls, each by the mouth of his cave (js/troll.js, dialogs/troll.json, dialogs/elder.json)
+const trolls = makeTrolls(scene);
+// come too close to one (troll.js tooClose) and he roars at you, in a bubble, and you jump back
+// out of his reach: away from him, a hop and a few strides (more from the big one), not steered
+let shove = null;          // { dx, dz, dist, hop, t, dur }
+const ease = t => 1 - (1 - t) * (1 - t);
+function roarAt(T){
+  talkView.say(T, { who: T, key: 'roar', icon: 'cross', line: T.roar });
+  const [dx, dz] = T.away(pos.x, pos.z);
+  shove = { dx, dz, dist: 3 + 2.5 * T.scale, hop: 0.9, t: 0, dur: 0.5 };
+}
 new PuckFlock(scene, { x: -4, z: 13 }).load().then(f => {
   pucks = f; puck = f.leader; registerTag(f.leader?.label);
   // Puck as a guide: "Where am I?" → somewhere to go → he leads you there (js/puck-guide.js)
-  puckGuide = makePuckGuide({ flock: f, player: pos, say: line => talkView.say(puck, { who: puck, key: 'guide', icon: 'place', line }), finder: { kinds: findKinds, where: whereFound, thin: thinPlaces, salve: () => salveHeard }, friends: puckFriends,
+  puckGuide = makePuckGuide({ flock: f, player: pos, say: line => talkView.say(puck, { who: puck, key: 'guide', icon: 'place', line, voice: 'puck' }), finder: { kinds: findKinds, where: whereFound, thin: thinPlaces, salve: () => salveHeard }, friends: puckFriends,
     onArrive: d => { journal.arrive(destPlace(d), 'puck'); markJournal(); } });
 });
 // what Puck knows of where things are found (puck-guide.js "Where would I find…?"): the
@@ -1084,7 +1151,7 @@ function thinNear(x, z){
   if (c) places.push({ kind: 'stone circle', dest: { name: rn[c.i].name, what: `a stone circle, ${rn[c.i].name}`, x: c.x, z: c.z, arrive: Math.max(2, (c.u.rad || THIN_R) * 0.5) } });
   const t = nearestOf(agents.shrines, x, z);
   if (t) places.push({ kind: 'sacred tree', dest: { name: 'the sacred tree', spot: true, what: `a sacred tree ${here(t.x, t.z)}`, x: t.x, z: t.z, arrive: TREE_AT - 1.5 } });
-  const d = sight && nearestOf(portals(), x, z);   // with the salve on, the doors are thin places too
+  const d = sight && nearestOf(doors(), x, z);     // with the salve on, the doors are thin places too
   if (d) places.push({ kind: 'door into Faerie', dest: { name: d.name, what: `a door into ${d.name}`, x: d.stand[0], z: d.stand[1], arrive: 4 } });
   places.sort((a, b) => Math.hypot(a.dest.x - x, a.dest.z - z) - Math.hypot(b.dest.x - x, b.dest.z - z));
   return places;
@@ -1253,6 +1320,11 @@ window.leaReverence = () => {
 window.leaNpcs = () => agents.npcs.slice(0, 6).map(n => ({
   slug: n.slug, moving: !!n.moving,
   scaleY: +n.mesh.scale.y.toFixed(5), y: +n.mesh.position.y.toFixed(4) }));
+// debug: the fellowships (js/fellowships.js) — where each meets, who belongs, who's out now
+window.leaFellows = () => agents.fellowships.map(F => ({ name: F.def.name, secrecy: F.def.secrecy,
+  at: F.site ? `${F.site.name} @${F.site.x | 0},${F.site.z | 0}` : `a fire near @${F.anchor.x | 0},${F.anchor.z | 0}`,
+  members: F.members.map(n => n.name), out: F.members.filter(n => n.brain?._rite).map(n => `${n.name}${n.brain._rite.sat ? ' (sat)' : ''}`),
+  nights: [...F.present.entries()].map(([o, h]) => `night ${o}: ${h.size}`) }));
 window.leaRevTest = () => { for (const n of agents.npcs){ n.reverence = 1;
   n.needs.warmth = n.needs.food = n.needs.rest = n.needs.company = 0.1; } return agents.npcs.length; };
 // the rite: how far each shrine has been built, and (debug) fill one to see it whole
@@ -1343,10 +1415,18 @@ window.leaUnder = (i, go = false) => {
 window.leaFaerie = (where = 'grounds') => { fade(() => goDown({ level: where === 'stair' ? STAIR : GROUNDS, mouth: 0 })); return where; };
 window.leaDown = () => down && { name: down.name, at: `${upos.x.toFixed(1)},${upos.z.toFixed(1)}`, floor: +down.L.floorAt(upos.x, upos.z).toFixed(2),
   finds: down.L.finds.map(f => `${f.kind}${f.taken ? ' (taken)' : ''}`), revealed: down.L.revealed.reduce((a, b) => a + b, 0) };
-// underground, stand beside the first untaken find of a kind ('foxfire', 'cave salt'…) or the lake's 'canoe', facing it
+// underground, stand beside the first untaken find of a kind ('foxfire', 'cave salt', 'heart key'…), the lake's 'canoe',
+// the first shut 'chest', or before the first locked 'door', facing it
 window.leaFind = kind => {
   if (!down) return 'not underground';
-  const L = down.L, f = kind === 'canoe' ? L.canoe : L.finds.find(f => !f.taken && f.kind === kind);
+  const L = down.L;
+  if (kind === 'door'){                                    // the first locked door: in front of it, in the room
+    const d = (L.doors || []).find(q => !q.open); if (!d) return 'no locked door here';
+    const x = d.x - Math.cos(d.a) * 3, z = d.z - Math.sin(d.a) * 3;
+    upos.set(x, L.floorAt(x, z) + EYE, z); yaw = Math.atan2(-Math.cos(d.a), -Math.sin(d.a)); pitch = 0;
+    return `before the door of ${d.sign}`;
+  }
+  const f = kind === 'canoe' ? L.canoe : kind === 'chest' ? (L.chests || []).find(c => !c.open) : L.finds.find(f => !f.taken && f.kind === kind);
   if (!f) return `no ${kind} here: ${[...new Set(L.finds.filter(f => !f.taken).map(f => f.kind))].join(', ')}`;
   for (let a = 0; a < 6.28; a += 0.4){
     const x = f.x + Math.cos(a) * 2, z = f.z + Math.sin(a) * 2;
@@ -1433,8 +1513,8 @@ canvas.addEventListener('click', e => {
   if (!playing) {
     if (_worldReady) canvas.requestPointerLock();   // enter from splash
   } else if (document.pointerLockElement !== canvas) {
-    tryClickInteract(e);                            // cursor mode: click to interact or re-lock
-  }
+    if (!castAt(e.clientX, e.clientY)) tryClickInteract(e);   // cursor mode: a skeleton first, else click to interact or re-lock
+  } else castAt(innerWidth / 2, innerHeight / 2);  // locked: at whatever's under the crosshair
 });
 start.addEventListener('click',  () => { if (_worldReady) canvas.requestPointerLock(); });
 document.addEventListener('pointerlockchange', () => {
@@ -1447,12 +1527,11 @@ document.addEventListener('pointerlockchange', () => {
       start.classList.add('hide');
       for (const t of nameTags) t.visible = true;
       window.Leaves?.stop();
-      music.init(); footsteps.init(); ambience.init();
+      footsteps.init(); ambience.init(); instruments.init();
     }
-    music.play(terrainType(pos.x, pos.z));
   } else {
     if (inDialog || settingsOpen || maps.bigOpen) return;    // dialog/settings/map released lock temporarily
-    if (!playing) { music.play('menu'); return; }
+    if (!playing) return;
     // Player pressed Escape — enter cursor mode (world keeps running)
     document.body.classList.add('cursor-mode');
   }
@@ -1469,7 +1548,7 @@ const readVol = (s, d) => { const v = parseFloat(s); return Number.isFinite(v) ?
 let volMusic = readVol(localStorage.getItem('lea.vol.music'), 0.5);   // music quieter by default
 let volSfx   = readVol(localStorage.getItem('lea.vol.sfx'), 1.0);     // effects at full
 function applyVolumes(){
-  music.setVolume(volMusic); footsteps.setVolume(volSfx); ambience.setVolume(volSfx);
+  instruments.setVolume(volMusic); footsteps.setVolume(volSfx); ambience.setVolume(volSfx);
   musicRange.value = Math.round(volMusic * 100); musicVal.textContent = `${Math.round(volMusic * 100)}%`;
   sfxRange.value   = Math.round(volSfx   * 100); sfxVal.textContent   = `${Math.round(volSfx   * 100)}%`;
 }
@@ -1792,7 +1871,7 @@ const placesBig = () => places().find(g => g.kind === 'greatlake');
 // sentence (who was seen where/when, where food grows). Reads npc.news (agents.js).
 function newsReport(npc, now){
   const rank = f => (f.kind === 'omen' ? 3 : f.kind === 'kind' ? 2 : f.kind === 'food' || f.kind === 'boat' ? 1 : 0);   // omens, reputation & tips before idle sightings
-  const facts = npc.news ? [...npc.news.values()].sort((a, b) => rank(b) - rank(a) || b.t - a.t).slice(0, 3) : [];
+  const facts = npc.news ? [...npc.news.values()].filter(f => mayHear(f, PLAYER)).sort((a, b) => rank(b) - rank(a) || b.t - a.t).slice(0, 3) : [];
   if (!facts.length) return voicePick(npc, 'n-none', [`"Naught I've heard worth the telling, friend."`, `"Quiet of late — no news to pass on."`, `"Nothing's reached my ears worth your time."`]);
   // people are named in rumour (the speaker knows them) — and hearing the name is
   // itself how you come to *know of* someone (sets heardFrom, so a later meeting
@@ -1806,7 +1885,7 @@ function newsReport(npc, now){
 
 // The player, as a listener: factLine names people differently to a stranger
 // ("my sister Bryn") than to someone who knows them ("Bryn", "Mum").
-const PLAYER = { player: true };
+const PLAYER = { player: true, fellowships: new Map() };   // fellowships you belong to (fellowships.js; joining is to come)
 const PARENT = { mother: 'Mum', father: 'Dad' };
 
 // what `sp` calls `o` when talking to `to`. Folk who both know someone well use
@@ -1875,9 +1954,20 @@ function factLine(sp, f, now, to){
                : vp('b1', [`There's a canoe ${where}.`, `I saw a canoe ${where}${tail(when)}.`]);
   } else if (f.kind === 'omen'){
     line = src ? `${src} ${says}: ${f.text}` : f.text;
+  } else if (f.kind === 'tune'){
+    const inst = ingredient(f.subj.instrument)?.label || 'pipe';
+    line = f.subj === sp ? `I can play ${f.tune} now, on my ${inst}.`
+         : src ? `${src} ${says} ${who} plays ${f.tune} now.` : `${who} plays ${f.tune} now, on ${pron(f.subj, true)} ${inst}.`;
   } else if (f.kind === 'dish'){
     line = f.subj === sp ? `I make ${f.recipe} now, from an old book${tail(when)}.`
          : src ? `${src} ${says} ${who} makes ${f.recipe} now, from an old book.` : `${who} makes ${f.recipe} now, from an old book.`;
+  } else if (f.kind === 'sign'){
+    const at = f.place || where;
+    line = f.what === 'went'
+      ? (src ? `${src} ${says} ${who} went off in the night, toward ${at}.` : vp('sg1', [`I saw ${who} go off in the dark${tail(when)}, toward ${at}.`, `${who} went out in the night${tail(when)}. Toward ${at}, it looked like.`]))
+      : (src ? `${src} ${says} there were folk out at ${at} in the night.` : vp('sg2', [`There were folk at ${at} in the night${tail(when)}. Just sitting there in the dark.`, `I saw people out at ${at} in the night${tail(when)}. Sitting in a ring, not talking.`]));
+  } else if (f.kind === 'fellow'){
+    line = fellowLine(sp, f, src, says, where, when);
   } else if (f.kind === 'market'){
     const deal = `${qty(f.qn, f.get)} for ${qty(f.gn, f.give)}`, at = villageOf(f.house);
     line = (f.subj === sp ? `I got ${deal} at ${at}${tail(when)}.` : `${who} got ${deal} at ${at}${tail(when)}.`)
@@ -1922,6 +2012,17 @@ function plansReport(npc, v){
 // "Where?" "South of here."), so a bubble is a few words.
 
 // a fact as the opening of a topic: what, and from whom — the where comes later
+// what a fellowship's own say of its meeting (agents.js endRite): a member says "we", anyone
+// else passes it on. Only told where mayHear allows (a secret one, only to its own).
+function fellowLine(sp, f, src, says, where, when){
+  const mine = isMember(sp, f.fid);
+  if (f.fid === 'night-company') return mine ? `We kept the stones${tail(when)}. ${cap(numWord(f.n))} of us.` : `${src || 'They'} ${says} the stones were kept.`;
+  if (f.fid === 'fiddlers') return mine ? `The fiddlers met at the full moon${tail(when)}, ${where}. ${cap(numWord(f.n))} of us played.`
+    : `${src || 'They'} ${says} the fiddlers met at the full moon. ${cap(numWord(f.n))} of them played.`;
+  return '';
+}
+const numWord = k => ['none', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'][k] || String(k);
+
 function tellLine(sp, f, to, now){
   const vp = (key, arr) => voicePick(sp, key + f.key, arr);
   const src = f.from ? callName(sp, f.from, to) : null, saw = f.hops === 1;   // the teller saw it themselves
@@ -1937,10 +2038,18 @@ function tellLine(sp, f, to, now){
     const got = f.obj ? callName(sp, f.obj, to) : 'someone';
     return !src ? `${who} gave ${got} some food.` : `${src} says ${who}'s been sharing.`;
   }
+  if (f.kind === 'sign') return f.what === 'went'
+    ? (!src ? `I saw ${who} go off in the dark.` : `${src} saw ${who} go off in the night.`)
+    : (!src ? `There were folk out at ${f.place || 'the stones'} in the night.` : `${src} says there were folk at ${f.place || 'the stones'} in the night.`);
+  if (f.kind === 'fellow') return isMember(sp, f.fid)
+    ? (f.fid === 'night-company' ? 'We kept the stones.' : 'The fiddlers had a good meet.')
+    : (f.fid === 'night-company' ? `${src || 'Someone'} says the stones were kept.` : `${src || 'Someone'} says the fiddlers met.`);
   if (f.kind === 'market'){
     const deal = `${qty(f.qn, f.get)} for ${qty(f.gn, f.give)}`, at = villageOf(f.house);
     return f.subj === sp ? `I got ${deal} at ${at}.` : `${who} got ${deal} at ${at}.`;
   }
+  if (f.kind === 'tune') return f.subj === sp ? vp('tt0', [`I can play ${f.tune} now.`, `I've learnt ${f.tune}.`])
+    : !src ? `${who} plays ${f.tune} now.` : `${src} says ${who} plays ${f.tune} now.`;
   if (f.kind === 'dish') return f.subj === sp ? vp('td0', [`I've learnt to make ${f.recipe}. From an old book, it is.`, `I make ${f.recipe} now. It's out of an old book.`])
     : !src ? `${who} makes ${f.recipe}, out of an old book.` : `${src} says ${who} makes ${f.recipe}, from an old book.`;
   if (f.kind === 'boat') return f.maker === sp ? vp('tb0', ["I've made a canoe.", "The canoe's finished."])
@@ -2250,7 +2359,7 @@ function maybeRemark(dt){
   const told = n._toldYou || (n._toldYou = new Set());
   const rank = f => (f.kind === 'omen' ? 3 : f.kind === 'kind' ? 2 : f.kind === 'food' || f.kind === 'boat' ? 1 : 0);
   const fact = n.news && [...n.news.values()]
-    .filter(f => !told.has(f.key + f.t) && !(f.kind === 'saw' && f.subj && Math.hypot(f.subj.x - pos.x, f.subj.z - pos.z) < 20))
+    .filter(f => mayHear(f, PLAYER) && !told.has(f.key + f.t) && !(f.kind === 'saw' && f.subj && Math.hypot(f.subj.x - pos.x, f.subj.z - pos.z) < 20))
     .sort((a, b) => rank(b) - rank(a) || b.t - a.t)[0];
   let move;
   if (fact){
@@ -2303,7 +2412,10 @@ function peasantTree(npc, sky){
   const traded = !lt || now - lt.t > 0.12 ? null
     : lt.folk === npc ? v('d-traded', [`Just back from ${villageOf(lt.house)}. ${cap(qty(lt.gn, lt.gave))} got me ${qty(lt.qn, lt.got)}.`, `I've been trading at ${villageOf(lt.house)}. ${cap(qty(lt.qn, lt.got))}, for ${qty(lt.gn, lt.gave)}.`])
     : v('d-traded-v', [`${lt.folk.player ? 'You' : lt.folk.name || 'One of the folk'} came to the door. ${cap(qty(lt.gn, lt.gave))} for ${qty(lt.qn, lt.got)}.`, `Had a trade at the door. ${cap(qty(lt.qn, lt.got))} went for ${qty(lt.gn, lt.gave)}.`]);
-  const doing = npc.actionLabel === 'canoe-work' ? v('d-canoe', ["Making a canoe. The bark's on. Now it's the ribs and the seams.", "Sewing the canoe. It goes quicker with two.", "Working on the canoe. It takes days."])
+  const fr = npc.actionLabel === 'rite' && npc.brain?._rite;
+  const doing = fr && fr.F.id === 'fiddlers' ? (fr.sat ? v('d-fiddlers', ["It's the fiddlers' meet. Full moon, and everyone's brought something to play.", "The fiddlers' meet. We play the night through, when the moon's full."])
+                                                       : v('d-fiddlers-go', ["Off to the fiddlers' meet. It's the full moon.", "Going to the fiddlers' meet. Come and listen, if you like."]))
+    : npc.actionLabel === 'canoe-work' ? v('d-canoe', ["Making a canoe. The bark's on. Now it's the ribs and the seams.", "Sewing the canoe. It goes quicker with two.", "Working on the canoe. It takes days."])
     : npc.actionLabel === 'peel-bark'  ? v('d-bark', ["Peeling birch bark. It's for a canoe.", "Getting bark off this birch, for the canoe.", "Bark for a canoe. It comes away in a sheet if you're careful."])
     : npc.actionLabel === 'canoe-bring'? v('d-cbring', ["Taking this to the canoe.", "This is for the canoe down by the water."])
     : npc.chopping              ? v('d-chop', ["Cutting firewood — the woodpile's run low.", "Felling a shrub for the fire. Hungry work.", "Wood for the hearth. It never stops needing it."])
@@ -2468,10 +2580,11 @@ function peasantTree(npc, sky){
   const spare = () => house ? Object.entries(house.spare).filter(([, k]) => k > 0) : [];
   const asKind = k => VALUABLES.has(k) ? 'trinket' : k;
   const held = g => g === 'trinket' ? (npc.trinkets || 0) : countOf(npc, g) + rawOf(npc, g);
-  const tradeable = () => Object.keys(basket).filter(k => basket[k] > 0 && (isWild(k) || VALUABLES.has(k)));
+  const isInst = k => ingredient(k)?.use === 'play';
+  const tradeable = () => Object.keys(basket).filter(k => basket[k] > 0 && (isWild(k) || VALUABLES.has(k) || (isInst(k) && !instrumentOf(npc))));
   let deal = null, dealt = '';
   const offerOf = k => {
-    const gn = Math.min(basket[k] || 0, 3), g = asKind(k), now = agents.time;
+    const gn = isInst(k) ? 1 : Math.min(basket[k] || 0, 3), g = asKind(k), now = agents.time;
     const gb = worth(npc, g, held(g), now);
     let best = null;
     for (const [c, have] of spare()){
@@ -2490,7 +2603,8 @@ function peasantTree(npc, sky){
     house.spare[d.get] -= d.qn;
     myPack.add(d.get, d.qn, provHere('traded', displayName(npc)));
     jot('traded', `${d.give} for ${d.get} with ${displayName(npc)}`);
-    if (g === 'trinket'){ npc.trinkets = (npc.trinkets || 0) + d.gn; if (!npc.trinketKind) npc.trinketKind = d.give; }
+    if (isInst(g)) giveInstrument(npc, g);
+    else if (g === 'trinket'){ npc.trinkets = (npc.trinkets || 0) + d.gn; if (!npc.trinketKind) npc.trinketKind = d.give; }
     else if (RAW_KINDS.has(g)) addRaw(npc, g, d.gn);
     else addFood(npc, g, d.gn, now);
     const rec = { t: now, folk: PLAYER, villager: npc, house, gave: d.give, gn: d.gn, got: d.get, qn: d.qn };
@@ -2530,6 +2644,8 @@ function peasantTree(npc, sky){
   let cookSaid = '';
   const unknownTo = () => [...recipesRead].filter(id => RECIPES[id] && stepsKnown(npc, id, agents.time) < RECIPES[id].steps.length);
   const theirBook = () => BOOK_RECIPES.filter(id => stepsKnown(npc, id, agents.time) > 0);
+  const untaughtCrafts = () => [...craftsRead].filter(k => (craftsKnown(npc).get(k) || 0) < 2);
+  const untaughtTunes = () => [...tunesRead].filter(id => !knowsTune(npc, id, agents.time));
   const givable = () => [...new Set(theirBook().flatMap(id => recipeWants(id).flat()))].filter(k => (basket[k] || 0) > 0);
   const cookNodes = {
     get saved(){ return { text: cookSaid }; },
@@ -2561,6 +2677,64 @@ function peasantTree(npc, sky){
         } })) };
     },
     get given(){ return { text: cookSaid }; },
+    // tunes (docs/music.md, music-sim.js): teaching one you've read by playing it to them,
+    // giving them an instrument, and asking them to play
+    get tuneTeach(){
+      const ids = untaughtTunes(), kind = carriedInstrument();
+      if (!ids.length || !kind) return { text: `"${v('tt-know', ['I know all of those.', "I've had those off you already."])}"` };
+      return { text: `"${v('tt-which', ['A tune? Go on, which?', 'Play it, then. Which one?'])}"`,
+        choices: ids.map(id => ({ label: `${cap(id)}.`, next: 'tuned', run: () => {
+          const r = teachTune(npc, id, agents.time), all = r.got >= phraseCount(id), inst = instrumentOf(npc);
+          playTune(id, kind, excerpt(partNotes(id, DRUMS.has(kind) ? 'drum' : 'melody', null, kind)));   // the opening, not the whole tune
+          jot('taught', `${displayName(npc)} ${all ? '' : 'some of '}${id}`);
+          const said = all ? (r.ear === 'good' ? v('tt-good', ['I have it now.', "That's it. I've got it."]) : v('tt-all', ['That\'s the whole of it now, I think.', "I've got it all now."]))
+            : r.ear === 'none' ? v('tt-none', ["I can't hold a tune. The first bit, maybe.", "I've no ear for it. The start, maybe."])
+            : v('tt-some', ["I've the start of it. Play it me again some time.", "I've got some of it. Not the end yet."]);
+          const tail = inst ? '' : ` ${v('tt-noinst', ["Not that I've anything to play it on.", "I'd need something to play it on, mind."])}`;
+          cookSaid = `You play ${id} through on your ${ingredient(kind).label}, slowly, a bit at a time. "${said}${tail}"`;
+        } })) };
+    },
+    get tuned(){ return { text: cookSaid }; },
+    // instrument making (making.js): showing them how, and asking for a hide or gut off a kill
+    get craftTeach(){
+      return { text: `"${v('ct-which', ['Go on, then. Which?', 'Show me. What is it?'])}"`,
+        choices: untaughtCrafts().map(k => ({ label: `A ${ingredient(k).label}.`, next: 'tuned', run: () => {
+          const r = teachCraft(npc, k, musicalCamp(npc)), name = ingredient(k).label;
+          jot('taught', `${displayName(npc)} ${r.got ? 'how to make' : 'some of how to make'} a ${name}`);
+          cookSaid = `You show ${fem ? 'her' : 'him'} how a ${name} is made, step by step. "${r.got
+            ? v('ct-got', ["I see. I could make one of those.", "That's not so hard. I'll make one."])
+            : v('ct-some', ["Show me again some time. I nearly have it.", "I've half of it. Not the rest yet."])}"`;
+        } })) };
+    },
+    get askGoods(){
+      const h = Math.min(1, goodsOf(npc, 'hide')), g = Math.min(2, goodsOf(npc, 'gut'));
+      const got = [];
+      if (h && myPack.room('hide', 1)){ takeGoods(npc, 'hide', 1); stow('hide', 1, provHere('given', displayName(npc))); got.push('a hide'); }
+      if (g && myPack.room('gut', g)){ takeGoods(npc, 'gut', g); stow('gut', g, provHere('given', displayName(npc))); got.push(g > 1 ? `${g} lengths of gut` : 'a length of gut'); }
+      return { text: got.length ? `"${v('ag-yes', ['Off the last kill. Take it.', "Here. I've no use for it just now."])}" ${Pron} gives you ${got.join(' and ')}.` : `"${v('ag-room', ["You've no room for it.", 'Where would you put it?'])}"` };
+    },
+    get instGive(){
+      const ks = Object.keys(myPack.counts).filter(k => myPack.counts[k] > 0 && ingredient(k)?.use === 'play');
+      if (!ks.length || instrumentOf(npc)) return { text: `"${v('ig-have', ["I've one already, thanks.", 'I have my own.'])}"` };
+      return { text: `"${v('ig-which', ['Something to play? What is it?', "For me? Let's see."])}"`,
+        choices: ks.map(k => ({ label: `${cap(ingredient(k).label)}.`, next: 'instGiven', run: () => {
+          if (tunePlaying?.kind === k && !(myPack.counts[k] > 1)) stopTune();
+          myPack.take(k, 1); giveInstrument(npc, k);
+          jot('gave', `${displayName(npc)} my ${ingredient(k).label}`);
+          const knows = tunesOf(npc, agents.time).length;
+          cookSaid = `You give ${fem ? 'her' : 'him'} the ${ingredient(k).label}. "${knows ? v('ig-play', ["I'll play it by the fire tonight.", 'Thank you. I know a tune or two for this.'])
+            : v('ig-learn', ["I'll have to learn something to play on it.", "Thank you. I don't know any tunes, mind."])}"`;
+          if (invOpen) openInventory();
+        } })) };
+    },
+    get instGiven(){ return { text: cookSaid }; },
+    get playMe(){
+      const id = tunesOf(npc, agents.time)[0], kind = instrumentOf(npc), k = phrasesKnown(npc, id, agents.time);
+      const band = playForYou(npc, id, kind, k);
+      const part = k < phraseCount(id), names = band.map(p => `${displayName(p.npc)} on ${p.npc.gender === 'female' ? 'her' : 'his'} ${ingredient(p.kind).label}`);
+      const lead = DRUMS.has(kind) ? `${Pron} beats out ${id} on ${their} ${ingredient(kind).label}` : `${Pron} plays ${id} on ${their} ${ingredient(kind).label}`;
+      return { text: `${lead}${names.length ? `, and ${names.join(' and ')} join${names.length > 1 ? '' : 's'} in` : ''}.${part ? ` ${Pron} stops partway. "${v('pm-part', ["That's as far as I know it.", 'I forget how it goes after that.'])}"` : ''}` };
+    },
     // the still-room (stillroom.js): a stargazer makes the fairy salve, if what you bring
     // was rightly got and the moon is new
     get salve(){
@@ -2596,6 +2770,11 @@ function peasantTree(npc, sky){
     : `Goodbye, ${(npc.race || 'stranger').replace(/^./, c => c.toUpperCase())}`;
   const tree = { speaker: displayName(npc), portrait: npc.portrait, portraitBg: markBackdrop(npc.group?.id), root: 'hi', farewell, nodes: {
     get hi(){
+      const rite = atSecretRite(npc);
+      if (rite && !isMember(PLAYER, rite.F.id))
+        return { text: !rite.sat ? `"${v('fs-going', ["Can't stop now.", "Another time. I'm wanted somewhere."])}"`
+          : npc.id % 2 ?   /* some ignore you, some tell you to go */ v('fs-ignore', [`${Pron} looks past you and says nothing.`, `${Pron} doesn't answer. None of them look round.`])
+          : `"${v('fs-leave', ['Not tonight. Go on home.', "You shouldn't be here. Go back the way you came."])}"` };
       const greet = npc.known
         ? v('greet-k', ["Ah — you again. Well met.", "Back again? Good to see you.", "Hello again, friend.", "You! Twice in a day — the Lea's small.", "Oh, it's you. Sit a moment, if you like.", "Well, look who it is."])
         : v('greet', ["Oh — hello, stranger.", "Well met, traveller.", "Hail, friend — didn't hear you coming.", "Oh! A face I don't know.", "Good day to you.", "Hullo there. Lost, are you?", "Mind yourself — oh, just a traveller.", "A stranger, out here? Well met all the same.", "Peace to you, wanderer.", "Didn't expect company. Hello."]);
@@ -2611,6 +2790,11 @@ function peasantTree(npc, sky){
       }
       if (house && (sky?.day ?? 1) > 0.3) c.push({ label: v('q-trade', ['Got anything to trade?', 'Anything put by to trade?', 'Will you trade?']), next: 'trade' });
       if (unknownTo().length) c.push({ label: v('q-teach-them', ['I found an old recipe…', "I've a recipe from an old book…"]), next: 'teach' });
+      if (carriedInstrument() && untaughtTunes().length) c.push({ label: v('q-tune-teach', ["I've a tune for you…", 'Want to learn a tune?']), next: 'tuneTeach' });
+      if (!npc.home && untaughtCrafts().length) c.push({ label: v('q-craft-teach', ['I could show you how to make an instrument…', "I've learnt how to make something to play…"]), next: 'craftTeach' });
+      if (!npc.home && (goodsOf(npc, 'hide') || goodsOf(npc, 'gut'))) c.push({ label: v('q-ask-goods', ['Have you a hide or any gut to spare?', 'Any hide or gut going spare?']), next: 'askGoods' });
+      if (!instrumentOf(npc) && carriedInstrument()) c.push({ label: v('q-give-inst', ["I've brought you something to play.", 'Would you like an instrument?']), next: 'instGive' });
+      if (instrumentOf(npc) && tunesOf(npc, agents.time).length) c.push({ label: v('q-play', ['Will you play something?', 'Play me a tune?']), next: 'playMe' });
       if (givable().length) c.push({ label: v('q-give-cook', ["I've brought something for your cooking.", 'Here, for your cooking.']), next: 'give' });
       // a portion they've put by for you, from a pot of a book dish (recipes.js putBy)
       let greetAll = greet;
@@ -2712,7 +2896,7 @@ const levels = new Map();               // levels built this session: what you'v
 const views = new Map();
 let down = null;                        // { L, view, name } while you're underground
 const upos = new THREE.Vector3();
-let nearEntrance = null, nearFind = null, nearExit = -1, nearSconce = null, nearShelf = null;
+let nearEntrance = null, nearFind = null, nearExit = -1, nearSconce = null, nearShelf = null, nearDoor = null, nearChest = null;
 const fadeEl = document.createElement('div');
 fadeEl.style.cssText = 'position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .35s;z-index:40';
 document.body.appendChild(fadeEl);
@@ -2766,11 +2950,12 @@ const STAIR_UP = { chapel: 'to the chapel floor', hall: "to the old hall's floor
 // out of a palace, through its door, onto the spot in front of the portal. After dawn the
 // salve has done: the door is gone behind you, and Puck remarks on how long you were
 // away (the tales' night inside that's a year outside is for later: docs/magic.md)
+let cameBy = null;   // the door you went through (askPortal): you come out by it, if it led into this palace
 function leavePalace(){
-  const p = portalOf(down.L.id), h = (((sky.time ?? 0) % 1) + 1) % 1 * 24, day = h >= 5 && h < 19;
+  const p = cameBy?.level === down.L.id ? cameBy : portalOf(down.L.id), h = (((sky.time ?? 0) % 1) + 1) % 1 * 24, day = h >= 5 && h < 19;
   pos.x = p.stand[0]; pos.z = p.stand[1]; pos.y = height(pos.x, pos.z) + EYE;
   yaw = Math.atan2(-Math.cos(p.face), -Math.sin(p.face)); pitch = 0;
-  down = null; nearFind = null; nearExit = -1;
+  down = null; nearFind = null; nearExit = -1; cameBy = null;
   maps.setLevel(null);
   if (day){
     sight = null; faerie.stop();
@@ -2783,7 +2968,7 @@ function askPortal(p){
   const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
   talkTree({ speaker: cap(p.name), root: 'ask', farewell: 'Stay in the Lea.', nodes: { ask: {
     text: `An oval of black hangs in the air, a door into nothing. Lights spiral into it, and out again. Go through into ${p.name}?`,
-    choices: [{ label: 'Go through.', next: null, run: () => fade(() => goDown({ level: p.level, mouth: 0 })) }] } } }, { onClose });
+    choices: [{ label: 'Go through.', next: null, run: () => fade(() => { cameBy = p; goDown({ level: p.level, mouth: 0 }); }) }] } } }, { onClose });
 }
 function askDown(e){
   const name = underNames()[e.level].name;
@@ -2801,7 +2986,22 @@ function askUp(k){
     text: m.ask ? m.ask : down.L.site === 'palace' ? 'The door you came in by. Beyond it, the Lea. Go back through?' : down.L.kind === 'cave' ? 'Daylight, up ahead. Climb out?' : `The stair climbs ${STAIR_UP[down.L.site] || STAIR_UP.chapel}. Go back up?`,
     choices: [{ label: m.go || 'Climb out.', next: null, run: () => fade(() => comeUp(k)) }] } } }, { onClose });
 }
+// a locked door into a room (gen/under.js doors()): its key opens it, and you keep the key (one
+// opens several); without it, the door says what key it wants. Open, it stays open all session
+function tryDoor(d){
+  if (!((basket[d.key] || 0) > 0)){ setForageMsg(`Locked. ${cap(d.sign)} is worked in iron on it.`, 3500); return; }
+  d.open = true; d.prop.solid = false;
+  setForageMsg(`The ${d.key} turns in the lock. The doors swing in.`, 3500);
+  disturb();
+}
+// a chest: lift the lid, and what it holds can be taken like any find
+function openChest(c){
+  c.open = true; disturb();
+  const ci = down.L.chests.indexOf(c), what = down.L.finds.filter(f => f.chest === ci && !f.taken);
+  setForageMsg(what.length ? `You lift the lid. Inside: ${words(what.map(f => `a ${ingredient(f.kind)?.label || f.kind}`))}.` : 'You lift the lid. It is empty.', 3500);
+}
 function takeFind(f){
+  disturb();
   const got = stow(f.kind, f.n, provHere('found'));
   f.n -= got; if (f.n <= 0) f.taken = true;   // what didn't fit stays where it was
 }
@@ -2825,6 +3025,7 @@ const recipesRead = new Set();   // kitchen recipes and preparations alike, by i
 // recipesRead, which the folk's cooking and Puck's finding read as things to make.
 const faerieRead = new Set();
 const PALACE_SHELF = ['A bookcase', 'Every book on it whole, bound in vellum, the edges gilt.'];
+const LECTERN = ['A lectern', 'A choir book lies open on it, kept dry under a fold of oilcloth.'];
 const SHELF_LABEL = {
   book:   ['A bookshelf', 'Mostly ruined with damp, but one book is still whole.'],
   ruined: ['A bookshelf', 'A few books left, swollen and grey with mould.'],
@@ -2851,8 +3052,13 @@ function prepPage(id){
            margins: rare.map(k => `${cap(k)}: only ${RARE_WHERE[RARE[k]]}.`) };
 }
 function readShelf(sh){
+  const mb = shelfMusic(sh), cr = !mb && shelfCraft(sh);
+  if (mb || cr) disturb();
+  if (mb){ readMusic(mb, shelfTune(sh)); return; }
+  if (cr){ readCraft(cr); return; }
   const id = bookRecipe(sh);
   if (id && FAERIE_BOOKS[id]){ readFaerieBook(id); return; }
+  if (id) disturb();
   if (!id){ setForageMsg(SHELF_LABEL[sh.state][1], 3000); return; }
   const fresh = !recipesRead.has(id), prep = !!PREPARATIONS[id];
   recipesRead.add(id);
@@ -2878,14 +3084,238 @@ function readFaerieBook(id){
   readPage({ paper: 'vellum', book: B.from, title: cap(id), body: [B.intro, ...B.body], margins: B.margins || [],
              aside: fresh ? 'You copy it into your book of recipes.' : null, onClose });
 }
+// Music books (docs/music.md; tunes.js): the one dry book on a mouldy shelf, a choir book in
+// a cloister or a songbook in an undercroft, or one of the Gentry's on a palace shelf.
+// Reading one copies its tunes onto the Tunes page of the spellbook, and with an instrument
+// in the pack you can play one there and then.
+const tunesRead = new Set();
+// Maker's books (making.js): one on a shelf of its own in each crypt. Reading one copies the
+// making into your book (the Crafts page); with what it wants in your pack you make the
+// instrument there and then, and you can show the folk how (talk).
+const craftsRead = new Set();
+function readCraft(kind){
+  const C = CRAFTS[kind], name = ingredient(kind).label, fresh = !craftsRead.has(kind);
+  craftsRead.add(kind);
+  if (fresh){
+    jot('found', `how to make a ${name}, in ${C.book.charAt(0).toLowerCase() + C.book.slice(1)}`);
+    journal.task(`craft:${kind}`, `How to make a ${name}. It wants ${needsText(kind)}.`);
+  }
+  inDialog = true; document.exitPointerLock?.();
+  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
+  const make = { label: `Make a ${name}.`, run: el => { el.textContent = makeCraft(kind); } };
+  readPage({ book: C.book, title: cap(name), ...(C.verse ? { verse: C.verse } : { body: [C.about, `It wants ${needsText(kind)}.`] }),
+             margins: [...(C.margin ? [C.margin] : []), ...C.needs.filter(([m]) => ingredient(m)?.from === 'nowhere yet').map(([m]) => `${cap(ingredient(m).label)}: none to be had yet.`)],
+             aside: fresh ? 'You copy it into your book.' : null, actions: [make], onClose });
+}
+// make one now, if you've what it wants (instant): what happened, in a line
+function makeCraft(kind){
+  const name = ingredient(kind).label;
+  if (!canMake(myPack, kind)) return `You haven't what it needs: ${needsText(kind)}.`;
+  if (myPack.room(kind, 1) < 1) return `No room in your pack for a ${name}.`;
+  for (const [m, k] of CRAFTS[kind].needs) myPack.take(m, k);
+  myPack.add(kind, 1, provHere('made'));
+  jot('made', `a ${name}`);
+  if (invOpen) openInventory();
+  return `You make a ${name}. It's in your pack.`;
+}
+const words = a => a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a.at(-1)}`;
+function readMusic(bookId, tune){
+  const B = MUSIC_BOOKS[bookId], fresh = tunesRead.has(tune) ? [] : [tune];   // one tune to a shelf (tunes.js shelfTune)
+  fresh.forEach(t => tunesRead.add(t));
+  if (fresh.length) jot('found', `${B.from.charAt(0).toLowerCase() + B.from.slice(1)}, with ${words(fresh)} in it`);
+  inDialog = true; document.exitPointerLock?.();
+  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
+  const kind = carriedInstrument();
+  readPage({ paper: B.paper, book: B.from,
+             tunes: [tune].map(id => ({ title: cap(id), about: TUNES[id].about, svg: staffSvg(id, { square: B.head === 'square' }),
+                                        play: kind ? playNote(kind, liftFor(schedule(id).notes, kind)) : null })),
+             aside: fresh.length ? 'You copy it into your book.' : null,
+             actions: kind ? [tune].map(id => ({ label: `Play ${id} on your ${ingredient(kind).label}.`,
+               run: el => { if (tunePlaying?.id === id){ stopTune(); el.textContent = `Play ${id} on your ${ingredient(kind).label}.`; } else { playTune(id, kind); el.textContent = 'Stop playing.'; } } })) : [],
+             onClose });
+}
+// one note off the page (page.js playable) on instrument `kind`, `up` semitones above as
+// written (arrange.js liftFor, as the whole tune is played); a drum gives its deep stroke
+const playNote = (kind, up) => (midi, secs) => instruments.play(kind, { notes: [{ t: 0, dur: secs, midi: DRUMS.has(kind) ? 45 : midi + up }], length: secs })
+  .catch(e => console.warn('instruments:', e));
+// the first instrument in the pack, or null
+const carriedInstrument = () => Object.keys(myPack.counts).find(k => myPack.counts[k] > 0 && ingredient(k)?.use === 'play') || null;
+// Playing (js/instruments.js). One tune at a time; the music of the land drops away under it.
+async function playTune(id, kind, sched = id ? partNotes(id, DRUMS.has(kind) ? 'drum' : 'melody', null, kind) : null){
+  stopTune();
+  const p = tunePlaying = { id, kind, perf: null };
+  const perf = await instruments.play(kind, sched).catch(e => { console.warn('instruments:', e); return null; });
+  if (tunePlaying !== p){ perf?.stop(); return; }
+  if (!perf){ tunePlaying = null; return; }
+  p.perf = perf;
+  perf.done.then(() => { if (tunePlaying === p) tunePlaying = null; });
+}
+function stopTune(){ if (!tunePlaying) return; tunePlaying.perf?.stop(); tunePlaying = null; }
+// the first `secs` of a part (partNotes), dying away over its last `fade`: a taste of a tune,
+// as you play a villager the start of it (the whole thing ran on too long)
+function excerpt({ notes }, secs = 6, fade = 2){
+  const out = notes.filter(n => n.t < secs).map(n => ({ ...n, dur: Math.min(n.dur, secs - n.t),
+    vel: (n.vel ?? 0.82) * Math.max(0.1, Math.min(1, (secs - n.t) / fade)) }));
+  return { notes: out, length: secs };
+}
+// an instrument clicked in the pack: stop it if it's playing; else a tune you know (asked
+// which, if you know several), or without one a few notes up and down
+const NOODLE = [62, 64, 67, 69, 67, 64, 62].map((midi, i) => ({ t: i * 0.32, dur: i === 6 ? 0.9 : 0.3, midi }));
+function playFromPack(box){
+  const kind = box.kind, name = ingredient(kind).label;
+  if (tunePlaying?.kind === kind){ stopTune(); return 'You stop playing.'; }
+  const known = [...tunesRead];
+  if (!known.length){ playTune(null, kind, { notes: NOODLE, length: 2.8 }); return `You play a few notes on the ${name}. You don't know a tune for it yet; the old books have some.`; }
+  if (known.length === 1){ playTune(known[0], kind); return `You play ${known[0]} on the ${name}.`; }
+  inDialog = true;
+  talkTree({ root: 'pick', speaker: cap(name), nodes: { pick: { text: 'Play which tune?',
+    choices: known.map(id => ({ label: `${cap(id)}.`, next: null, run: () => playTune(id, kind) })) } } },
+    { onClose: () => { inDialog = false; } });
+  return null;
+}
+
+// Listening in (docs/music.md): the folk's tunes at the fires (music-sim.js stepMusic), and a
+// tune someone plays you in talk, each player sounded from where they sit and fading with
+// distance, each on their part (arrange.js: the tune, a counter-line, the tune low, the drum).
+// A tune already going when you come in earshot is joined where it's got to. All of it is
+// heard in the room you're in (instruments.js ROOMS).
+const HEAR_R = 90, BAND_R = 10;
+const heardFires = new Map();     // fire → { M, players: [{ npc, perf }] }
+let playedForYou = null;          // [{ npc, perf }]
+// one player's part, from `at` seconds in (null if they've nothing left to play)
+function playPart(id, p, at, still){
+  const s = partNotes(id, p.part, DRUMS.has(p.kind) ? null : knownSet(p.k), p.kind);
+  const notes = s.notes.filter(n => n.t >= at).map(n => ({ ...n, t: n.t - at }));
+  if (!notes.length) return null;
+  const r = { npc: p.npc, perf: null, until: performance.now() / 1000 + s.length - at };
+  instruments.play(p.kind, { notes, length: s.length - at }, { gain: 0 }).then(perf => { if (still()) r.perf = perf; else perf?.stop(); });
+  return r;
+}
+// npc plays you a tune, and anyone near them with an instrument and some of it joins in (a
+// drummer always can); returns who joined
+function playForYou(npc, id, kind, k){
+  for (const r of playedForYou || []) r.perf?.stop();
+  const band = [{ npc, kind, k: DRUMS.has(kind) ? phraseCount(id) : k }];
+  for (const o of npcApi.npcs){
+    if (o === npc || Math.hypot(o.x - npc.x, o.z - npc.z) > BAND_R || !instrumentOf(o)) continue;
+    const ok = DRUMS.has(o.instrument) ? phraseCount(id) : phrasesKnown(o, id, agents.time);
+    if (ok) band.push({ npc: o, kind: o.instrument, k: ok });
+  }
+  parts(band, id).forEach((part, i) => { band[i].part = part; });
+  const rec = playedForYou = [];
+  for (const p of band){ const r = playPart(id, p, 0, () => playedForYou === rec); if (r) rec.push(r); }
+  return band.slice(1);
+}
+function placeSound(r){
+  if (!r.perf) return 0;
+  const dx = r.npc.x - pos.x, dz = r.npc.z - pos.z, d = Math.hypot(dx, dz);
+  camera.getWorldDirection(_fwd);
+  const fl = Math.hypot(_fwd.x, _fwd.z) || 1, rx = -_fwd.z / fl, rz = _fwd.x / fl;   // the right hand
+  const g = down ? 0 : Math.pow(Math.max(0, 1 - d / HEAR_R), 1.6);
+  r.perf.place(g, d > 0.5 ? (dx * rx + dz * rz) / d : 0);
+  return g;
+}
+function listenTick(){
+  instruments.setRoom(!down ? 'open' : down.L.site === 'palace' ? 'palace' : down.L.kind === 'cave' ? 'cave' : 'crypt');
+  for (const f of agents.fires){
+    const M = f.music?.tune ? f.music : null, d = Math.hypot(f.x - pos.x, f.z - pos.z);
+    let h = heardFires.get(f);
+    if (h && (h.M !== M || down || d > HEAR_R + 10)){ for (const r of h.players) r.perf?.stop(); heardFires.delete(f); h = null; }
+    if (!h && M && !down && d < HEAR_R){
+      const hh = h = { M, players: [] }, at = M.length - M.left;
+      heardFires.set(f, h);
+      for (const p of M.players){ const r = playPart(M.tune, p, at, () => heardFires.get(f) === hh); if (r) hh.players.push(r); }
+    }
+    if (h) for (const r of h.players) placeSound(r);
+  }
+  for (const r of playedForYou || []) placeSound(r);
+  palaceBandTick();
+}
+// The Gentry's musicians (docs/music.md "The Gentry's way"): in a palace's great halls (its
+// rooms of kind 'hall' or 'crossing', the biggest four), four of them in a ring in the middle,
+// playing the Gentry's tunes one after another, their way (arrange.js gentryParts). Only the
+// band nearest you plays; walk to another hall and that one starts up. Elf billboards, unlit.
+const BAND_KINDS = ['silver pipes', 'vielle', 'harp', 'harp'], PALACE_HEAR = 45, BANDS_MAX = 4;
+const GENTRY_TUNES = Object.keys(TUNES).filter(id => TUNES[id].style === 'gentry');
+const elfTex = ['male', 'female'].map(g => { const t = new THREE.TextureLoader().load(`sprites/billboards/${g}-peasant-elf.png`); t.colorSpace = THREE.SRGBColorSpace; return t; });
+let palaceBand = null;   // { L, bands: [{ x, y, z, sprites, players: [{ npc, kind, part }] }], at: the band playing, perfs, next, tune }
+function makePalaceBands(L){
+  const big = R => R.kind === 'hall' || R.kind === 'crossing';
+  const rooms = L.regions.filter(R => R.type === 'room' && R.kind !== 'landing' && R.kind !== 'head');
+  const halls = (rooms.some(big) ? rooms.filter(big) : rooms)          // (a palace dealt no great hall: its biggest rooms)
+    .sort((a, b) => b.w * b.h - a.w * a.h).slice(0, BANDS_MAX);
+  const bands = halls.map((R, h) => {
+    const players = BAND_KINDS.map((kind, i) => {
+      let x = R.cx, z = R.cz;
+      for (const rad of [2.4, 1.6, 0.8]){                 // in a ring, closer in if a pillar's in the way
+        const a = (i + 0.5) * Math.PI / 2 + h, px = R.cx + Math.cos(a) * rad, pz = R.cz + Math.sin(a) * rad;
+        if (L.walkable(px, pz)){ x = px; z = pz; break; }
+      }
+      return { npc: { x, z }, kind };
+    });
+    const sprites = players.map((p, i) => {
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: elfTex[i % 2], transparent: true, alphaTest: 0.1, color: 0xe8e0ff }));
+      s.scale.set(1.0, 2.05, 1); s.position.set(p.npc.x, R.y + 1.02, p.npc.z);
+      return s;
+    });
+    return { x: R.cx, y: R.y, z: R.cz, sprites, players };
+  });
+  return { L, bands, at: null, perfs: [], next: 0, tune: (L.seed ?? 0) % Math.max(1, GENTRY_TUNES.length) };
+}
+const stopBandMusic = P => { for (const r of P.perfs) r.perf?.stop(); P.perfs = []; };
+function stopPalaceBand(){ if (!palaceBand) return; stopBandMusic(palaceBand); for (const b of palaceBand.bands) for (const s of b.sprites) s.removeFromParent(); palaceBand = null; }
+function palaceBandTick(){
+  if (down?.L.site !== 'palace' || !GENTRY_TUNES.length){ stopPalaceBand(); return; }
+  if (palaceBand?.L !== down.L){ stopPalaceBand(); palaceBand = makePalaceBands(down.L); }
+  const P = palaceBand, now = performance.now() / 1000;
+  if (!P.bands.length) return;
+  for (const b of P.bands) for (const s of b.sprites) if (s.parent !== down.view.scene) down.view.scene.add(s);
+  const dist = b => Math.hypot(b.x - upos.x, (b.y - upos.y) * 3, b.z - upos.z);   // (another floor's hall is far)
+  const near = P.bands.reduce((a, b) => dist(b) < dist(a) ? b : a);
+  if (near !== P.at){ stopBandMusic(P); P.at = near; P.next = now + 2; }
+  const B = P.at;
+  if (now >= P.next){                                    // the next tune, a few seconds after the last
+    const id = GENTRY_TUNES[P.tune++ % GENTRY_TUNES.length], ps = B.players, mine = P.perfs = [];
+    parts(ps, id).forEach((part, i) => { ps[i].part = part; });
+    let len = 0;
+    for (const p of ps){
+      const s = partNotes(id, p.part, null, p.kind), r = { npc: p.npc, perf: null };
+      len = Math.max(len, s.length);
+      instruments.play(p.kind, s, { gain: 0 }).then(perf => { if (palaceBand === P && P.perfs === mine) r.perf = perf; else perf?.stop(); });
+      mine.push(r);
+    }
+    P.next = now + len + 5;
+  }
+  camera.getWorldDirection(_fwd);
+  const fl = Math.hypot(_fwd.x, _fwd.z) || 1, rx = -_fwd.z / fl, rz = _fwd.x / fl, dy = Math.abs(B.y - upos.y) * 3;
+  for (const r of P.perfs){
+    if (!r.perf) continue;
+    const dx = r.npc.x - upos.x, dz = r.npc.z - upos.z, d = Math.hypot(dx, dz), D = Math.hypot(d, dy);
+    r.perf.place(Math.pow(Math.max(0, 1 - D / PALACE_HEAR), 1.4), d > 0.5 ? (dx * rx + dz * rz) / d : 0);
+  }
+}
+// who's playing right now, for the notes over their heads (talk-view.js): the fires' players
+// while their part lasts, and a band playing for you
+function playingNow(){
+  if (down) return [];
+  const out = [], now = performance.now() / 1000;
+  for (const f of agents.fires){
+    const M = f.music; if (!M?.tune) continue;
+    const at = M.length - M.left;
+    for (const p of M.players) if (at < p.len) out.push(p.npc);
+  }
+  for (const r of playedForYou || []) if (now < r.until && !out.includes(r.npc)) out.push(r.npc);
+  return out;
+}
+
 // underground, what's in front of you: a find to take, or the way out
 function underFocus(){
   camera.getWorldDirection(_fwd);
   const L = down.L;
   let best = null, bd = 0.9;
   for (const f of L.finds){
-    if (f.taken) continue;
-    const y = (f.y ?? L.floorAt(f.x, f.z)) + 0.2, dx = f.x - upos.x, dy = y - upos.y, dz = f.z - upos.z, d = Math.hypot(dx, dy, dz);
+    if (f.taken || (f.chest != null && !L.chests[f.chest].open)) continue;   // (what's in a shut chest can't be seen)
+    const y = (f.view ? f.view.position.y : f.y ?? L.floorAt(f.x, f.z)) + 0.2, dx = f.x - upos.x, dy = y - upos.y, dz = f.z - upos.z, d = Math.hypot(dx, dy, dz);   // (where it's drawn: a key hovers over its chest)
     if (d > TALK_RANGE) continue;
     const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / d;
     if (dot > bd){ bd = dot; best = f; }
@@ -2906,24 +3336,44 @@ function underFocus(){
     const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / d;
     if (dot > bd){ bd = dot; sh = s; sc = null; best = null; }
   }
-  nearFind = best; nearSconce = sc; nearShelf = sh;
+  // a locked door (aimed at by its lock), and a shut chest (by its lid); open ones are only furniture
+  let dr = null, ch = null;
+  for (const d of L.doors || []){
+    if (d.open) continue;
+    const dx = d.x - Math.cos(d.a) * 0.1 - upos.x, dy = d.y + 1.6 - upos.y, dz = d.z - Math.sin(d.a) * 0.1 - upos.z, dd = Math.hypot(dx, dy, dz);
+    if (dd > TALK_RANGE + 1) continue;
+    const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / dd;
+    if (dot > Math.min(bd, 0.75)){ bd = dot; dr = d; sh = sc = best = null; }            // (a broad thing: a wider cone)
+  }
+  for (const c of L.chests || []){
+    if (c.open) continue;
+    const dx = c.x - upos.x, dy = c.y + c.h - upos.y, dz = c.z - upos.z, dd = Math.hypot(dx, dy, dz);
+    if (dd > TALK_RANGE) continue;
+    const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / dd;
+    if (dot > bd){ bd = dot; ch = c; dr = sh = sc = best = null; }
+  }
+  nearFind = best; nearSconce = sc; nearShelf = sh; nearDoor = dr; nearChest = ch;
   nearExit = L.mouths.findIndex(m => Math.hypot(m.x - upos.x, m.z - upos.z) < 6 && (m.fy == null || Math.abs(m.fy - (upos.y - EYE)) < 2.5));   // (the stair's doors: only at their own height)
   hoverPanel.style.display = 'flex'; hoverFace.style.display = 'none'; hoverName.style.display = ''; hoverAmbient.style.display = '';
   // the lake's canoe: in it, nothing else is in reach but the water; beside it, it's yours to take
   const canoe = down.view.canoe;
   if (boating){
-    nearFind = nearSconce = nearShelf = null; nearExit = -1;
+    nearFind = nearSconce = nearShelf = nearDoor = nearChest = null; nearExit = -1;
     nearFish = L.eelsAt(upos.x, upos.z) ? L.eels : null;
     if (nearFish){ hoverName.textContent = 'Black water'; hoverAmbient.textContent = L.eels.stock < 0.3 ? 'Deep and still. Fished hard, lately.' : 'Deep and still. Eels lie down there in the dark.'; }
     else { hoverName.textContent = 'The lake'; hoverAmbient.textContent = 'Shallow here. Paddle out to the deep water to fish.'; }
     return;
   }
-  if (canoe && !best && !sc && !sh && Math.hypot(canoe.x - upos.x, canoe.z - upos.z) < 3.5){
+  if (canoe && !best && !sc && !sh && !dr && !ch && Math.hypot(canoe.x - upos.x, canoe.z - upos.z) < 3.5){
     nearBoat = canoe; nearExit = -1;
     hoverName.textContent = 'A bark canoe'; hoverAmbient.textContent = 'Drawn up at the edge of the black water, a paddle across it.';
     return;
   }
-  if (sh){ const [t, d] = sh.palace ? PALACE_SHELF : SHELF_LABEL[sh.state]; hoverName.textContent = t; const b = bookRecipe(sh); hoverAmbient.textContent = b && (recipesRead.has(b) || faerieRead.has(b)) ? `${cap(b)}: copied into your book.` : b && sh.state !== 'book' ? 'Mould on all of them but one, in a leather case.' : d; }
+  if (sh){ const [t, d] = sh.lectern ? LECTERN : sh.palace ? PALACE_SHELF : SHELF_LABEL[sh.state]; hoverName.textContent = t; const b = bookRecipe(sh), mb = shelfMusic(sh), cr = shelfCraft(sh);
+    hoverAmbient.textContent = cr ? (craftsRead.has(cr) ? `${CRAFTS[cr].book}: copied into your book.` : 'Kept dry: one book, its spine marked with a drawing of an instrument.') : mb ? (tunesRead.has(shelfTune(sh)) ? `${cap(shelfTune(sh))}: copied into your book.` : sh.palace || sh.lectern ? d : 'Mould on all of them but one, in a leather case.')
+      : b && (recipesRead.has(b) || faerieRead.has(b)) ? `${cap(b)}: copied into your book.` : b && sh.state !== 'book' ? 'Mould on all of them but one, in a leather case.' : d; }
+  else if (dr){ hoverName.textContent = 'A locked door'; hoverAmbient.textContent = `Oak, banded with iron. ${cap(dr.sign)} is worked in iron across its two leaves.`; }
+  else if (ch){ hoverName.textContent = 'A chest'; hoverAmbient.textContent = 'An oak coffer, bound in iron, shut but not locked.'; }
   else if (sc){ const [t, d] = (LIGHT_LABEL[sc.kind || 'torch'] || LIGHT_LABEL.torch)[sc.lit ? 1 : 0]; hoverName.textContent = t; hoverAmbient.textContent = d; }
   else if (best){ const [t, d] = FIND_LABEL[best.kind] || [best.kind, '']; hoverName.textContent = t; hoverAmbient.textContent = d; }
   else if (nearExit >= 0){ const m = L.mouths[nearExit]; hoverName.textContent = m.label ? cap(m.label) : 'The way out'; hoverAmbient.textContent = m.desc || 'Daylight, and the air of the world above.'; }
@@ -2977,7 +3427,8 @@ const POOR = 'Not enough strength left in you.';
 function relock(){ if (playing && !document.body.classList.contains('cursor-mode')){ try { canvas.requestPointerLock(); } catch (_){} } }
 function openSpellbook(){
   spellEl.innerHTML = `<div class="book"><h2>Spellbook</h2><p class="sub">What you know of the old craft. Spell points: ${Math.floor(me.sp)} of ${SP_MAX}.</p><div class="spells"></div>` +
-    recipesPage() + '<div class="foot">click a spell or press its number · C or Esc to close</div></div>';
+    recipesPage() + tunesPage() + craftsPage() + '<div class="foot">click a spell or press its number · C or Esc to close</div></div>';
+  for (const el of spellEl.querySelectorAll('[data-make]')) el.onclick = () => { setForageMsg(makeCraft(el.dataset.make), 3000); openSpellbook(); };
   const list = spellEl.querySelector('.spells');
   SPELLS.forEach((sp, i) => {
     const can = sp.can(), ok = can && affords(sp), el = document.createElement('div');
@@ -3013,6 +3464,25 @@ function recipesPage(){
   }).join('');
   return `<h3>Recipes</h3><p class="sub">Copied from the old books. Marked: what you carry; starred: found only in hard places.</p><div class="recipes">${rows}</div>`
     + (lore ? `<h3>From the Gentry's library</h3><p class="sub">Out of mortal books, kept in Faerie. Most want things not yet found in the Lea.</p><div class="recipes">${lore}</div>` : '');
+}
+// the tunes you've read (docs/music.md): each with what it's for, and the book it's out of
+function tunesPage(){
+  if (!tunesRead.size) return '';
+  const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rows = [...tunesRead].map(id => `<div class="recipe"><div class="name">${esc(cap(id))}</div><div class="wants">${esc(TUNES[id].about)}${TUNES[id].book ? ` — from ${esc(MUSIC_BOOKS[TUNES[id].book].from.toLowerCase())}` : ''}</div></div>`).join('');
+  return `<h3>Tunes</h3><p class="sub">Copied from the music books. Play one on an instrument from your pack.</p><div class="recipes">${rows}</div>`;
+}
+// the instruments you know how to make (making.js): what each wants, marked where you carry
+// it; click one you've everything for to make it
+function craftsPage(){
+  if (!craftsRead.size) return '';
+  const esc = t => t.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const rows = [...craftsRead].map(k => {
+    const wants = CRAFTS[k].needs.map(([m, n]) => `<span class="${(basket[m] || 0) >= n ? 'have' : ''}">${esc(`${n > 1 ? n + ' ' : ''}${ingredient(m)?.label || m}`)}</span>`).join(' · ');
+    const can = canMake(myPack, k);
+    return `<div class="recipe"${can ? ` data-make="${esc(k)}" style="cursor:pointer"` : ''}><div class="name">${esc(cap(ingredient(k).label))}${can ? ' — click to make one' : ''}</div><div class="wants">${wants}</div></div>`;
+  }).join('');
+  return `<h3>Crafts</h3><p class="sub">Copied from the makers' books. Marked: what you carry.</p><div class="recipes">${rows}</div>`;
 }
 function closeSpellbook(lock = true){ spellEl.classList.add('hide'); spellOpen = false; if (lock) relock(); }
 function castSpell(i){
@@ -3089,7 +3559,104 @@ function seaProx(){
 // cheats: Enter opens a line to type one into (Enter runs it, Esc drops it); its keys
 // stop at the box, so typing doesn't walk you about or open panels
 const cheatEl = document.getElementById('cheat');
-const CHEATS = { SALVEMEUP: () => stow('fairy salve', 1, null) };
+const CHEATS = { SALVEMEUP: () => stow('fairy salve', 1, null), MUSICAL: musical, BONES: bones };
+// MUSICAL: every tune and every maker's book copied into your book, and one of each instrument you aren't carrying, as far as the pack holds them
+function musical(){
+  for (const id of Object.keys(TUNES)) tunesRead.add(id);
+  for (const k of Object.keys(CRAFTS)) craftsRead.add(k);            // and how to make every instrument that can be made
+  const kinds = Object.keys(INGREDIENTS).filter(k => INGREDIENTS[k].use === 'play' && !(myPack.counts[k] > 0));
+  const missed = kinds.filter(k => !myPack.add(k, 1, null)).map(k => ingredient(k).label || k);
+  setForageMsg(`You know every tune.${missed.length ? ` No room in your pack for the ${words(missed)}.` : ' Every instrument is in your pack.'}`, 5000);
+  if (invOpen) openInventory();
+}
+// BONES: a heap of bones 4u in front of you (js/skeleton.js), above ground or below. Come near
+// and it pulls itself together and shows you what it can do, an animation every few seconds;
+// walk off and it falls back to pieces. A look at the puppet in the world: the crypts' own
+// heaps, and the chase, come later
+const heaps = [];                                    // { s, where: the level's id, or null on the Lea }
+const SHOW = ['wave', 'talk', 'laugh', 'dance', 'reach', 'look', 'walk', 'run', 'carry', 'stagger', 'idle'];
+function bones(){
+  const here = down ? upos : pos, where = down ? down.L.id : null, floorAt = down ? down.L.floorAt : height;
+  const x = here.x - Math.sin(yaw) * 4, z = here.z - Math.cos(yaw) * 4;
+  loadSkeletonKit().then(kit => {
+    const s = makeSkeleton(kit, { x, z, floorAt, lit: where !== null, pile: true, seed: heaps.length + 1 });
+    heaps.push({ s, where, show: 0, t: 0 });
+    setForageMsg('A heap of old bones lies in front of you.', 3000);
+  });
+}
+// the crypts' own skeletons (gen/under.js guards(), js/skeleton-guards.js), made the first time
+// you go down into a level and kept with it, so they lie where they fell when you come back
+let skelKit = null, guardsHere = null;
+loadSkeletonKit().then(k => { skelKit = k; });
+// you took something down here (a find, a book, a chest opened, a door unlocked): the
+// crypt's bones grow restless, and rise when you walk into their room (skeleton-guards.js)
+function disturb(){ if (down?.L.skel) down.L.skel.disturb(); }
+function tickBones(dt, tint){
+  const where = down ? down.L.id : null, here = down ? upos : pos, sc = down ? down.view.scene : scene;
+  const L = down?.L, G = L?.guards?.length && skelKit ? (L.skel ||= makeGuards(L, skelKit)) : null;
+  if (G !== guardsHere){ guardsHere?.leave(); guardsHere = G; }
+  if (G) G.update(dt, { x: upos.x, z: upos.z, camera, scene: sc });
+  if (sc !== boltScene){ bolts.clear(); boltScene = sc; }
+  bolts.update(dt);
+  for (const H of heaps){
+    if (H.where !== where){ H.s.object.removeFromParent(); continue; }   // (and out of a level's scene before it's disposed)
+    if (H.s.object.parent !== sc) sc.add(H.s.object);
+    const d = Math.hypot(here.x - H.s.x, here.z - H.s.z), s = H.s;
+    if (H.stun > 0){ if ((H.stun -= dt) <= 0 && s.state === 'pile'){ s.stir = 0; s.assemble(); H.t = 0; } else s.stir = H.stun < 1.2 ? 0.8 : 0; }   // struck: up again soon
+    else if (s.state === 'pile'){ s.stir = Math.max(0, Math.min(1, (6 - d) / 2.5)); if (d < 3.5){ s.stir = 0; s.assemble(); H.t = 0; } }
+    else if (s.state === 'up'){
+      if (d > 9) s.collapse();
+      else if ((H.t += dt) > 4.5){ H.t = 0; s.play(SHOW[H.show++ % SHOW.length]); s.talking = s.anim === 'walk' || s.anim === 'idle'; }
+    }
+    s.update(dt, camera, tint);
+  }
+}
+// Light against the dead (docs/skeletons.md): click a skeleton on its feet, in the crypts or a
+// BONES heap, and a ball of light (light-bolt.js) flies from your hand and knocks it to bones,
+// for a few seconds. A dark torch, brazier or candle it lights. Pointer locked, you aim with the
+// crosshair; with the cursor free, where you click. In range, in sight (not through a wall),
+// and the nearest under the click. Each throw costs a spell point.
+const bolts = makeBolts(), SPELL_RANGE = 30, SPELL_PX = 70, SPELL_SP = 1, _spellV = new THREE.Vector3();
+let boltScene = null;
+function skeletonsToStrike(){
+  const out = [];
+  if (guardsHere) for (const m of guardsHere.targets()) out.push({ s: m.s, hit: () => guardsHere.strike(m) });
+  const where = down ? down.L.id : null;
+  for (const H of heaps) if (H.where === where && (H.s.state === 'up' || H.s.state === 'rising'))
+    out.push({ s: H.s, hit: () => { H.s.collapse({ scatter: { r: 1.4, ok: down ? down.L.walkable : null } }); H.stun = 4; } });
+  const floorAt = down ? down.L.floorAt : height;
+  for (const t of out){ const s = t.s; t.at = v => v.set(s.x, floorAt(s.x, s.z) + 1.15, s.z); }
+  return out;
+}
+function lightsToStrike(){
+  return down ? (down.L.sconces || []).filter(s => !s.lit).map(s => ({ s, at: v => v.set(s.x, s.aimY ?? s.y + 0.45, s.z),
+    hit: () => { s.lit = true; setForageMsg(`The light catches, and ${LIGHT_VERB[s.kind || 'torch']} burns.`); } })) : [];
+}
+function castAt(cx, cy){
+  if (inDialog || !playing) return false;
+  const here = down ? upos : pos, W = innerWidth, H = innerHeight;
+  let best = null, bestD = Infinity;
+  for (const t of [...skeletonsToStrike(), ...lightsToStrike()]){
+    const d3 = Math.hypot(t.s.x - here.x, t.s.z - here.z);
+    if (d3 > SPELL_RANGE) continue;
+    t.at(_spellV).project(camera);
+    if (_spellV.z > 1) continue;
+    const px = Math.hypot((_spellV.x + 1) * 0.5 * W - cx, (-_spellV.y + 1) * 0.5 * H - cy);
+    if (px > SPELL_PX || d3 >= bestD) continue;
+    if (down){                                       // not through rock
+      const n = Math.ceil(d3 / 0.5); let clear = true;
+      for (let q = 1; q < n && clear; q++) clear = down.L.openAt(here.x + (t.s.x - here.x) * q / n, here.z + (t.s.z - here.z) * q / n);
+      if (!clear) continue;
+    }
+    best = t; bestD = d3;
+  }
+  if (!best) return false;
+  if (!spend(me, SPELL_SP)){ setForageMsg(POOR, 2500); return true; }   // (it was aimed at something: don't fall through to a click)
+  const from = new THREE.Vector3(0.25, -0.3, -0.5).applyQuaternion(camera.quaternion).add(camera.position);   // from your right hand
+  const aim = new THREE.Vector3(), t = best;
+  bolts.cast(down ? down.view.scene : scene, from, () => t.at(aim), t.hit);
+  return true;
+}
 function openCheat(){
   for (const k in keys) keys[k] = false;
   document.exitPointerLock?.();
@@ -3155,6 +3722,8 @@ addEventListener('keydown', e => {
     if (boating){ if (playerFish) reelIn('You reel in.'); else if (nearFish) castLine(nearFish); else disembark(); }
     else if (nearBoat) board(nearBoat);
     else if (nearShelf) readShelf(nearShelf);
+    else if (nearDoor) tryDoor(nearDoor);
+    else if (nearChest) openChest(nearChest);
     else if (nearSconce){ nearSconce.lit = !nearSconce.lit; setForageMsg(nearSconce.lit ? 'You light it from your own torch.' : 'You put it out.'); }
     else if (nearFind) takeFind(nearFind); else if (nearExit >= 0) askUp(nearExit);
   } else if (e.code === 'KeyE' && _inLook && !inDialog && playerFish){
@@ -3252,7 +3821,8 @@ function worldTick(simDt, tint, walking){
   myc.update(simDt, agents.time);
   myc.sense({ trailWear: (x, z) => trail.wearAt(x, z), shrubs: forage.shrubs, fires: agents.openFires });
   if (avatar) avatar.update(camera, simDt, tint);
-  if (pucks) pucks.update(camera, simDt, pos, tint, { outside: !down });   // flock owns Puck's movement
+  if (pucks) pucks.update(camera, simDt, pos, tint, { outside: !down });
+  for (const T of trolls) T.update(camera, !down, tint);   // flock owns Puck's movement
   tickJournal(simDt);                                  // what comes of walking about, for the journal
   if (puckGuide) puckGuide.tick(simDt);                // and, on a trip, what he says along the way
   if (warren) warren.update(camera, simDt, tint);      // draw the rabbits
@@ -3393,7 +3963,7 @@ function loop(now){
   if (keys.KeyD){ dx += fz; dz -= fx; }
   const len = Math.hypot(dx, dz) || 1;
   dx = dx/len*speed; dz = dz/len*speed;
-  if (rest) dx = dz = 0;                          // passing time: you stay put
+  if (rest || shove) dx = dz = 0;                 // passing time: you stay put; jumping back from a troll, you're not steering
   if (down){
     // underground: the level's own floor and walls; rough going in a cave
     const L = down.L;
@@ -3440,13 +4010,27 @@ function loop(now){
     if (walkable(pos.x, pos.z+dz)) pos.z += dz;
     const [rx, rz] = agents.pushOut(pos.x, pos.z);   // slide out of a trunk, never stick
     if (walkable(rx, rz)){ pos.x = rx; pos.z = rz; }
+    // a troll: too close and he roars, and you jump back (below); pushOut keeps you out of him meanwhile
+    for (const T of trolls){
+      if (!shove && T.tooClose(pos.x, pos.z)) roarAt(T);
+      const [tx, tz] = T.pushOut(pos.x, pos.z); if (walkable(tx, tz)){ pos.x = tx; pos.z = tz; }
+    }
+    let hop = 0;
+    if (shove){
+      const s0 = ease(shove.t / shove.dur); shove.t = Math.min(shove.dur, shove.t + dt);
+      const s1 = ease(shove.t / shove.dur), step = (s1 - s0) * shove.dist;
+      if (walkable(pos.x + shove.dx * step, pos.z)) pos.x += shove.dx * step;
+      if (walkable(pos.x, pos.z + shove.dz * step)) pos.z += shove.dz * step;
+      hop = Math.sin(Math.PI * shove.t / shove.dur) * shove.hop;
+      if (shove.t >= shove.dur) shove = null;
+    }
     const groundY = height(pos.x, pos.z) + EYE;
     // smooth camera height (settings): ease toward the ground instead of riding
     // every bump, so small terrain wobble doesn't shift the low-res image a pixel.
     // High up (a flight just ended), drift down rather than drop.
     if (Number.isFinite(pos.y) && pos.y > groundY + 1.5) pos.y = Math.max(groundY, pos.y - 7 * dt);
     else pos.y = gfx.smooth && Number.isFinite(pos.y) ? pos.y + (groundY - pos.y) * Math.min(1, dt * 8) : groundY;
-    camera.position.set(pos.x, pos.y, pos.z);
+    camera.position.set(pos.x, pos.y + hop, pos.z);
   }
   camera.rotation.set(0, 0, 0, 'YXZ');
   camera.rotateY(yaw); camera.rotateX(pitch);
@@ -3477,14 +4061,15 @@ function loop(now){
   const _tAgents = performance.now();
   worldTick(simDt, tint, (dx || dz) && !fly && !down);
   perf.sim += performance.now() - _tAgents;
-  if (playing) music.update(down ? 'rock' : terrainType(pos.x, pos.z), simDt);
+  listenTick();
   footsteps.update(simDt, {
     moving: !!(dx || dz) && !fly && !boating,
     running,
     terrain: down ? 'rock' : terrainType(pos.x, pos.z),
   }, down ? [] : npcApi.npcs, { x: pos.x, z: pos.z, yaw, terrainAt: terrainType });   // underground, nobody's footsteps but yours
   boats.update(simDt, now * 0.001);                  // bob the moored canoes
-  if (playing) ambience.update(dt, down ? { here: { x: upos.x, z: upos.z, yaw }, fires: [], npcs: [], wind: 0, sea: { prox: 0, pan: 0 } }   // underground: the world's sounds die away
+  if (playing) ambience.update(dt, down ? { here: { x: upos.x, z: upos.z, yaw }, under: true, fires: [], npcs: [], wind: 0, sea: { prox: 0, pan: 0 },   // underground: the world's sounds die away,
+    drips: down.L.site === 'palace' || down.L.faerie || !['cave', 'crypt'].includes(down.L.kind) ? null : down.L.kind }   // and water drips in the dark (not in Faerie)
     : {                                              // fire / sea / wind / chopping
     here: { x: pos.x, z: pos.z, yaw },
     fires: agents.openFires, npcs: npcApi.npcs,
@@ -3520,6 +4105,7 @@ function loop(now){
     ground.lod(camera, FOG_FAR + 20);                  // ground tiles past the fog draw coarse
   }
   if (down) down.view.update(dt, camera);            // the torch goes with you
+  if (heaps.length || down || guardsHere || boltScene) tickBones(dt, tint);
   const _tDraw = performance.now();
   renderer.render(down ? down.view.scene : scene, camera);
   perf.draw += performance.now() - _tDraw;
@@ -3531,7 +4117,7 @@ function loop(now){
   canvas.style.filter = _sat < 0.995 ? `saturate(${_sat.toFixed(3)})` : '';
   if (playing && !down) maps.updatePlace(pos.x, pos.z);
   if (down) maps.reveal(upos.x, upos.z);              // the automap fills in as you go
-  talkView.update(simDt, pos.x, pos.z);              // after the camera moved this frame
+  talkView.update(simDt, pos.x, pos.z, playingNow());              // after the camera moved this frame
   if (playing && down) tickFishing(dt);
   if (playing && !down){ tickFishing(dt); fishView.update(fishersNear(), agents.fishingWater || (agents.fishingWater = [...agents.fishing, ...agents.grounds]), pos.x, pos.z, dt, sky?.evening ?? 0); }
   if (playing && !down) maybeRemark(dt);
@@ -3545,9 +4131,11 @@ function loop(now){
     `${npcApi.npcs.length} peasants`,
     `P: copy pose  ${DEBUG ? 'F: fly  ' : ''}B: npc  C: spells  I: pack  J: journal  R: rest`,
     nearFind    && `E: take the ${nearFind.kind}`,
-    nearShelf   && (bookRecipe(nearShelf) ? 'E: read the book' : 'E: look at the shelf'),
+    nearShelf   && (bookRecipe(nearShelf) || shelfMusic(nearShelf) || shelfCraft(nearShelf) ? 'E: read the book' : 'E: look at the shelf'),
+    nearDoor    && ((basket[nearDoor.key] || 0) > 0 ? `E: unlock it with the ${nearDoor.key}` : 'E: try the door'),
+    nearChest   && 'E: open the chest',
     nearSconce  && `E: ${nearSconce.lit ? 'put out' : 'light'} ${LIGHT_VERB[nearSconce.kind || 'torch']}`,
-    nearExit >= 0 && !nearFind && !nearSconce && !nearShelf && `E: climb out`,
+    nearExit >= 0 && !nearFind && !nearSconce && !nearShelf && !nearDoor && !nearChest && `E: climb out`,
     nearEntrance && `E: go down`,
     nearTalker  && `E: talk to ${nearTalker.name}`,
     nearFruit   && `E: gather ${nearFruit.kind}`,

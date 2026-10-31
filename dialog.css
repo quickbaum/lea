@@ -59,3 +59,8 @@
   #dlg-portrait { display: none; }
   #dlg-box      { margin-bottom: 0; }
 }
+
+/* a voice that sings (dialog.js sing): words come up on the beat, the choices once they're all there */
+#dlg-text.singing .dlg-w:not(.sung) { opacity: 0; }
+#dlg-text .dlg-w.sung { opacity: 1; transition: opacity 0.12s; }
+#dlg-choices.waiting { visibility: hidden; }

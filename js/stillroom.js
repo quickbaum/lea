@@ -9,8 +9,10 @@
 // new moon, of a four-leaf clover picked at dawn in a fairy ring, foxfire, and beeswax.
 
 import { BOOK_RECIPES } from './recipes.js';
+import { CRAFT_IDS } from './making.js';
 import { isDawn } from './provenance.js';
 import { FAERIE_BOOK_IDS } from './faerie-books.js';
+import { FAERIE_MUSIC } from './tunes.js';
 
 const dawn = p => !!p && isDawn(p.hour);
 const inRing = p => !!p && (p.thin || []).includes('fairy ring');
@@ -35,13 +37,20 @@ export const PREP_IDS = Object.keys(PREPARATIONS);
 // was where the learned books were kept, in cases: a mouldy shelf there (state 'ruined')
 // has lost its others but still holds a still-room book, dry in its case.
 // A Faerie palace's shelves (gen/under.js, `palace`) are all whole, and hold the Gentry's
-// own library (faerie-books.js), dealt round across the palaces by number.
+// own library (faerie-books.js), dealt round across the palaces by number, with their music
+// books among them (tunes.js FAERIE_MUSIC; shelfMusic gives those).
+const LIBRARY = () => FAERIE_BOOK_IDS.length + FAERIE_MUSIC.length;
 export function shelfBook(sh){
-  if (sh.palace) return FAERIE_BOOK_IDS[sh.book % FAERIE_BOOK_IDS.length];
+  if (sh.palace){ const i = sh.book % LIBRARY(); return i < FAERIE_BOOK_IDS.length ? FAERIE_BOOK_IDS[i] : null; }
+  if (sh.maker != null || sh.tune) return null;            // a maker's shelf (shelfCraft), a song's (tunes.js shelfTune)
+  if (sh.prep) return sh.prep;                              // the salve's own, behind its locked door (gen/under.js salveShelf)
   if (sh.state === 'book') return BOOK_RECIPES[sh.book % BOOK_RECIPES.length];
-  if (sh.state === 'ruined' && sh.room === 'chapterhouse') return PREP_IDS[Math.abs(sh.seed | 0) % PREP_IDS.length];
   return null;
 }
+
+// the maker's book on a maker's shelf (gen/under.js: each crypt has one, `maker` the crypt's
+// number), as the instrument it makes (making.js CRAFTS), or null. One book to a shelf
+export const shelfCraft = sh => sh.maker != null ? CRAFT_IDS[sh.maker % CRAFT_IDS.length] : null;
 
 // what you carry of each want, rightly got: [{ want, have, rightly }] (pack: makePack)
 export function wantsMet(pack, id){

@@ -24,7 +24,8 @@ export function addPlan(n, p){
   const i = n.plans.findIndex(q => samePlan(q, p));
   if (i >= 0) n.plans.splice(i, 1);
   n.plans.push(p);
-  if (n.plans.length > AGENDA_MAX) n.plans.splice(0, n.plans.length - AGENDA_MAX);   // the oldest give way
+  // the oldest give way, and lapse as they go: a task it held goes back to the others
+  if (n.plans.length > AGENDA_MAX) for (const q of n.plans.splice(0, n.plans.length - AGENDA_MAX)) q.onLapse?.(q);
   n._plansMade = (n._plansMade || 0) + 1;
   return p;
 }

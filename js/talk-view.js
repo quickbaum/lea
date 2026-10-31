@@ -6,6 +6,8 @@
 // bubble — hearts, or a scowl. Walk up close and a conversation opens into its
 // spoken lines (lineFor, from main.js); once you've heard one it stays words to
 // its end, even as you walk off. say() is one of them speaking to you.
+// Whoever's playing an instrument (main.js: the fires' players, and a band playing for you)
+// has a note over their head while their part lasts, bobbing; beside their bubble if they talk.
 //
 // Plain HTML over the canvas, NOT in the 3D scene: the world is drawn at a
 // fraction of screen resolution and upscaled pixelated, and the icons must stay
@@ -14,6 +16,8 @@
 import * as THREE from 'three';
 import { ICONS } from './talk-icons.js';
 import { height } from './terrain.js';
+import { ringLine } from './dialog.js';
+const escH = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 
 const REACT_AT  = 0.45;   // when, as a share of the move, the reaction mark appears
 const GLANCE_S  = 3;
@@ -21,6 +25,7 @@ const RANGE     = 40;     // bubbles further than this from the player aren't dr
 const NEAR_TEXT = 7;      // closer than this, a conversation shows its words
 const MAX_SHOWN = 5;      // bubbles on screen at once (nearest win)
 const SAY_S     = 5;      // a remark to the player stays up this long
+const PLAY_RANGE = 60;    // a player's note shows from further than talk (you hear music further)
 
 const CSS = `
 #talk{position:fixed;inset:0;pointer-events:none;z-index:20;overflow:hidden;}
@@ -48,6 +53,11 @@ const CSS = `
 #talk .tb.glance{padding:3px 5px;}
 #talk .tb.glance svg{width:24px;height:24px;}
 #talk .tb.glance.like svg{fill:#c0453a;}
+#talk .tp{position:absolute;left:0;top:0;width:26px;height:26px;border-radius:50%;
+  background:#fbf8ef;border:2px solid #2e2a24;box-shadow:0 2px 6px rgba(0,0,0,.25);
+  display:flex;align-items:center;justify-content:center;will-change:transform;transition:opacity .2s;}
+#talk .tp svg{width:18px;height:18px;fill:#2e2a24;animation:tp-bob .9s ease-in-out infinite alternate;}
+@keyframes tp-bob{from{transform:translateY(1.5px) rotate(-8deg)}to{transform:translateY(-1.5px) rotate(8deg)}}
 `;
 
 function svg(name){
@@ -61,6 +71,7 @@ export function makeTalkView({ camera, canvas, lineFor }){
   const lines = [];      // { move, who, t, dur, convo } — one per conversation at a time
   const glances = [];    // { who, like, t }
   const pool = [];       // bubble elements, reused
+  const notes = [];      // the players' notes, reused
   const v = new THREE.Vector3();
 
   function onSocial(e){
@@ -75,7 +86,7 @@ export function makeTalkView({ camera, canvas, lineFor }){
   function say(who, move){
     const l = { move, who, t: 0, dur: SAY_S, convo: { heard: true, said: true } };
     const i = lines.findIndex(x => x.who === who && x.convo.said);
-    if (i >= 0) lines[i] = l; else lines.push(l);
+    if (i >= 0){ lines[i].move.ring?.stop(); lines[i] = l; } else lines.push(l);   // (a line cut off stops singing)
   }
 
   function bubble(i){
@@ -98,7 +109,7 @@ export function makeTalkView({ camera, canvas, lineFor }){
       ic.innerHTML = `<span class="face"><img src="${subj.portrait}" alt="">${m.icon === 'gift' ? svg('gift') : ''}</span>`;
       ic.querySelector('img').onerror = () => { ic.innerHTML = svg(m.icon); };
     } else ic.innerHTML = svg(m.icon);
-    el.children[1].textContent = '';
+    el.children[1].textContent = ''; el._ringM = null;
     el.children[2].className = 're'; el.children[2].textContent = '';
   }
 
@@ -107,7 +118,8 @@ export function makeTalkView({ camera, canvas, lineFor }){
     return v.set(n.x, gy + (n.h || 1.7) * (n._curPose === 'sitting' ? 0.66 : 1.0) + 0.35, n.z);
   }
 
-  function update(dt, px, pz){
+  // players: the npcs playing an instrument right now
+  function update(dt, px, pz, players = []){
     for (let i = lines.length - 1; i >= 0; i--) if ((lines[i].t += dt) >= lines[i].dur) lines.splice(i, 1);
     for (let i = glances.length - 1; i >= 0; i--) if ((glances[i].t += dt) >= GLANCE_S) glances.splice(i, 1);
 
@@ -126,6 +138,7 @@ export function makeTalkView({ camera, canvas, lineFor }){
 
     const w = canvas.clientWidth, h = canvas.clientHeight;
     let used = 0;
+    const talking = new Map();       // who has a bubble up → where it is on screen
     for (const s of shown){
       if (used >= MAX_SHOWN) break;
       headPos(s.who).project(camera);
@@ -145,7 +158,19 @@ export function makeTalkView({ camera, canvas, lineFor }){
         if (near && m.line == null && lineFor){
           try { m.line = lineFor(m) || ''; } catch (e){ m.line = ''; console.warn('talk: no words for', m.key, e); }   // never stop the frame over words
         }
-        if (near && !el.children[1].textContent) el.children[1].textContent = m.line || '';
+        // a voiced line (move.voice: Puck's guide lines) sings, its words coming up on their notes
+        if (near && m.voice && m.line && m.ring === undefined){
+          m.ring = ringLine(m.line, m.voice);
+          if (m.ring) l.dur = Math.max(l.dur, m.ring.length + 2.5);
+        }
+        if (m.ring){
+          const now = m.ring.t0 == null ? -1 : (performance.now() - m.ring.t0) / 1000;
+          const n = m.ring.words.filter(w => w.t <= now + 0.01).length;
+          if (el._ringM !== m || el._ringN !== n){
+            el._ringM = m; el._ringN = n;
+            el.children[1].innerHTML = m.ring.words.map((w, i) => i < n ? escH(w.text) : `<span style="opacity:0">${escH(w.text)}</span>`).join(' ');
+          }
+        } else if (near && !el.children[1].textContent) el.children[1].textContent = m.line || '';
         const re = el.children[2];
         if (l.t >= l.dur * REACT_AT && m.react){
           re.className = 're ' + (m.react > 0 ? 'up' : 'down');
@@ -157,8 +182,26 @@ export function makeTalkView({ camera, canvas, lineFor }){
       el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, calc(-100% - 10px)) scale(${sc.toFixed(3)})`;
       el.style.opacity = '1';
       el.style.zIndex = String(MAX_SHOWN - used);     // the nearest talk on top
+      talking.set(s.who, sc);
     }
     for (let i = used; i < pool.length; i++){ pool[i].style.opacity = '0'; pool[i]._key = null; }
+
+    // a note over each player's head (over to the side of a bubble, if they're talking)
+    let k = 0;
+    for (const n of players){
+      const d = Math.hypot(n.x - px, n.z - pz);
+      if (d > PLAY_RANGE) continue;
+      headPos(n).project(camera);
+      if (v.z > 1 || v.z < -1 || Math.abs(v.x) > 1.1 || Math.abs(v.y) > 1.1) continue;
+      let el = notes[k];
+      if (!el){ el = document.createElement('div'); el.className = 'tp'; el.innerHTML = svg('music'); layer.appendChild(el); notes[k] = el; }
+      k++;
+      const sc = Math.max(0.7, 1 - d / (PLAY_RANGE * 1.6)), side = talking.has(n) ? 70 * talking.get(n) : 0;
+      const x = (v.x * 0.5 + 0.5) * w + side, y = (-v.y * 0.5 + 0.5) * h;
+      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, calc(-100% - 10px)) scale(${sc.toFixed(3)})`;
+      el.style.opacity = '1';
+    }
+    for (let i = k; i < notes.length; i++) notes[i].style.opacity = '0';
   }
 
   return { onSocial, update, say };

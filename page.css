@@ -43,6 +43,7 @@
 }
 .old-page p { margin: 0 0 10px; text-align: justify; hyphens: auto; text-indent: 1.2em; }
 .old-page p.page-first { text-indent: 0; font-style: italic; }
+.old-page p.page-verse { white-space: pre-line; text-align: left; hyphens: manual; text-indent: 0; font-style: italic; margin: 6px 0 14px 1.2em; }   /* a poem: its own lines */
 .old-page p.page-first + p { text-indent: 0; }
 .old-page p.page-first + p::first-letter {      /* a drop cap opening the recipe proper */
   float: left; font: 3.1em/.85 'IM Fell English', Georgia, serif; font-style: normal;
@@ -68,6 +69,18 @@
 
 /* what the game says about reading it: outside the page, in the ordinary voice */
 .page-aside { font: italic 15px Georgia, serif; color: #dccfa0; text-shadow: 0 1px 3px #000; }
+.page-action { cursor: pointer; text-decoration: underline dotted; margin-top: 4px; }
+.page-action:hover { color: #fff4cc; }
+
+/* a music book (tunes.js): each tune under its name, drawn on the staff (notation.js) */
+.old-page h3.page-tune { font: 18px 'IM Fell English SC', 'IM Fell English', Georgia, serif; margin: 14px 0 2px; letter-spacing: .04em; }
+.old-page.bare:not(.vellum) { padding-right: 52px; }   /* no notes in the margin, so no wide margin kept for them */
+.page-staff svg { display: block; width: 100%; height: auto; margin: 4px 0 10px; font-family: 'IM Fell English', Georgia, serif; }
+/* with an instrument in the pack, the notes play (page.js playable): one sounding is inked
+   blue, as the illuminators' second colour after red */
+.page-staff.playable { cursor: pointer; touch-action: none; user-select: none; }
+.page-staff .note { transition: color .25s; }
+.page-staff .note.sounding { color: #2c5fa0; transition: none; filter: drop-shadow(0 0 2px rgba(60, 120, 210, .6)); }
 
 @media (max-width: 560px) {
   .old-page { padding: 26px 22px 24px; font-size: 17px; }

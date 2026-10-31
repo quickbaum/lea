@@ -5,19 +5,21 @@ import { alongPath } from './gen/faerie.js';
 // in the Lea all along under glamour. While your eye is anointed, the whole Lea over:
 //   · the portals to the Gentry's palaces (gen/faerie.js planPortals): an upright oval of
 //     black, lights spiralling into it from the front and out of it again
+//     with a glow round it; over a palace's own door, a tall faint beam that shows from anywhere
 //   · the Gentry, tall pale figures walking the paths between the portals; one you come
 //     near fades away, and is further along its path when you look again
 // Pure scene decoration, no rules: main.js decides when the sight opens and closes, and
 // what E does at a portal. Nothing here is drawn until start().
 
 const SPIRAL = 90;          // lights round each portal
-const OVAL = [1.5, 2.6];    // a portal's half-width and half-height
+export const OVAL = [1.5, 2.6];   // a portal's half-width and half-height (main.js aims at it)
 const SPACING = 60;         // one figure on a path for every so many units of it
 const SHOWN = 14;           // at most this many figures drawn, the nearest
 const SEE = 140;            // and none further than this
 const SHY = 7;              // closer than this and a figure fades away
 const PACE = 1.1;           // how fast they walk (u/s)
 const FADE = 1.2;           // seconds to fade the whole sight in or out
+const BEAM = [2.4, 70];     // a door's beam: its width and height
 
 // a tall, soft, pale shape, head and shoulders and a long fall of robe: drawn once,
 // every figure shares it
@@ -42,6 +44,17 @@ function moteTexture(){
   g.fillStyle = r; g.fillRect(0, 0, 32, 32);
   return new THREE.CanvasTexture(c);
 }
+// a soft upright shaft, brightest at its foot and fading up and to its edges
+function beamTexture(){
+  const c = document.createElement('canvas'); c.width = 32; c.height = 128;
+  const g = c.getContext('2d');
+  for (let x = 0; x < 32; x++){
+    const across = Math.exp(-(((x + 0.5) / 32 - 0.5) ** 2) / 0.03), up = g.createLinearGradient(0, 128, 0, 0);
+    up.addColorStop(0, `rgba(255,255,255,${across})`); up.addColorStop(0.25, `rgba(255,255,255,${0.45 * across})`); up.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = up; g.fillRect(x, 0, 1, 128);
+  }
+  return new THREE.CanvasTexture(c);
+}
 const TINTS = [[0.75, 1, 0.8], [1, 0.95, 0.65], [0.7, 0.9, 1]];
 
 export class FaerieSight {
@@ -52,6 +65,11 @@ export class FaerieSight {
     this.moteTex = moteTexture(); this.figTex = figureTexture();
     this.portals = []; this.paths = []; this.walkers = []; this.figs = [];
     this.ovalMat = new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, transparent: true, opacity: 0, fog: false });
+    this.haloMat = new THREE.MeshBasicMaterial({ map: this.moteTex, color: 0xb8ffd8, side: THREE.DoubleSide, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    this.beamMat = new THREE.MeshBasicMaterial({ map: beamTexture(), color: 0xc8ffe0, side: THREE.DoubleSide, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false });
+    this.beamGeo = new THREE.PlaneGeometry(BEAM[0], BEAM[1]).translate(0, BEAM[1] / 2, 0);
     this.moteMat = new THREE.PointsMaterial({ size: 0.3, map: this.moteTex, vertexColors: true, transparent: true, opacity: 0,
       blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true });
     for (let q = 0; q < SHOWN; q++){
@@ -61,21 +79,30 @@ export class FaerieSight {
   }
   // the portals and the paths between them (gen/faerie.js): once, before the first start()
   setWorld(portals, paths){
-    this.portals = portals.map(p => {
-      const g = new THREE.Group();
-      g.position.set(p.x, p.y, p.z);
-      g.rotation.y = Math.PI / 2 - p.face;          // its plane across the way it faces
-      const oval = new THREE.Mesh(new THREE.CircleGeometry(1, 48), this.ovalMat);
-      oval.scale.set(OVAL[0], OVAL[1], 1); oval.position.y = OVAL[1] + 0.1; g.add(oval);
-      const geo = new THREE.BufferGeometry(), P = new Float32Array(SPIRAL * 3), C = new Float32Array(SPIRAL * 3);
-      for (let i = 0; i < SPIRAL; i++) C.set(TINTS[i % 3], i * 3);
-      geo.setAttribute('position', new THREE.BufferAttribute(P, 3)); geo.setAttribute('color', new THREE.BufferAttribute(C, 3));
-      const pts = new THREE.Points(geo, this.moteMat); pts.frustumCulled = false; g.add(pts);
-      this.group.add(g);
-      return { p, g, pts, seeds: Array.from({ length: SPIRAL }, (_, i) => ({ s: Math.random(), a: Math.random() * Math.PI * 2, out: i % 2, v: 0.08 + Math.random() * 0.08 })) };
-    });
+    for (const p of portals) this.addPortal(p);
     this.paths = paths;
     this.walkers = paths.flatMap((P, pi) => { const n = Math.max(2, Math.ceil(P.len / SPACING)); return Array.from({ length: n }, (_, q) => ({ pi, s: P.len * (q + Math.random() * 0.5) / n, dir: q % 2 ? -1 : 1, a: 0, gone: 0, d: Infinity })); });
+  }
+  // one door: its oval, its lights, its glow, and its beam (which isn't culled with the rest)
+  addPortal(p){
+    const g = new THREE.Group();
+    g.position.set(p.x, p.y, p.z);
+    g.rotation.y = Math.PI / 2 - p.face;          // its plane across the way it faces
+    const oval = new THREE.Mesh(new THREE.CircleGeometry(1, 48), this.ovalMat);
+    oval.scale.set(OVAL[0], OVAL[1], 1); oval.position.y = OVAL[1] + 0.1; g.add(oval);
+    const geo = new THREE.BufferGeometry(), P = new Float32Array(SPIRAL * 3), C = new Float32Array(SPIRAL * 3);
+    for (let i = 0; i < SPIRAL; i++) C.set(TINTS[i % 3], i * 3);
+    geo.setAttribute('position', new THREE.BufferAttribute(P, 3)); geo.setAttribute('color', new THREE.BufferAttribute(C, 3));
+    const pts = new THREE.Points(geo, this.moteMat); pts.frustumCulled = false; g.add(pts);
+    // the glow, in the oval's own plane (so it turns with the door, not with you), drawn
+    // before it so its middle stays black
+    const halo = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.haloMat);
+    halo.scale.set(OVAL[0] * 4.5, OVAL[1] * 3.2, 1); halo.position.y = OVAL[1] + 0.1; halo.renderOrder = -1; g.add(halo);
+    // a beam only over a palace's own door: over every thin place's, the Lea would be a forest of them
+    const beam = p.extra ? null : new THREE.Mesh(this.beamGeo, this.beamMat);
+    if (beam){ beam.position.set(p.x, p.y, p.z); beam.frustumCulled = false; this.group.add(beam); }
+    this.group.add(g);
+    this.portals.push({ p, g, pts, beam, seeds: Array.from({ length: SPIRAL }, (_, i) => ({ s: Math.random(), a: Math.random() * Math.PI * 2, out: i % 2, v: 0.08 + Math.random() * 0.08 })) });
   }
   start(){ this.on = true; this.group.visible = true; }
   stop(){ this.on = false; }
@@ -86,9 +113,12 @@ export class FaerieSight {
     this.t += dt;
     this.ovalMat.opacity = this.k * 0.92;
     this.moteMat.opacity = this.k * (0.8 + 0.2 * Math.sin(this.t * 1.7));
+    this.haloMat.opacity = this.k * (0.55 + 0.15 * Math.sin(this.t * 1.1));
+    this.beamMat.opacity = this.k * 0.35;
     // the lights round each portal near enough to see: half spiral in to its middle from
     // in front, half spiral out of it behind and drift away
     for (const P of this.portals){
+      if (P.beam) P.beam.rotation.y = Math.atan2(cam.x - P.p.x, cam.z - P.p.z);   // turned to face you, upright
       const near = Math.hypot(P.p.x - cam.x, P.p.z - cam.z) < SEE;
       P.g.visible = near; if (!near) continue;
       const A = P.pts.geometry.attributes.position.array;

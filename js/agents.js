@@ -21,6 +21,10 @@ import { addNews, pruneNews, knowCanoe, knownCanoes, GOSSIP_RANGE, GOSSIP_CD } f
 import { nudge, regard } from './ties.js';
 import { ate as hadFood, lack, worth, strike, ends, wishOf, cropAt, isCrop, CROPS } from './trade.js';
 import { Conversation, DEFAULT_TALK, parted } from './convo.js';
+import { stepMusic, instrumentOf, tunesOf, dancePose, craftsKnown, giveInstrument } from './music-sim.js';
+import { CRAFTS, addGoods, takeGoods, goodsOf, missingFor } from './making.js';
+import { DRUMS } from './arrange.js';
+import { FELLOWSHIPS, FELLOWSHIP_IDS, REACH as FELLOW_REACH, meetingOpen, occasion, memberHash, isMember } from './fellowships.js';
 
 export const NEEDS = ['warmth', 'food', 'company', 'rest'];
 
@@ -69,8 +73,11 @@ function makePersona(rng = Math.random){
   };
 }
 
-// how fast each need drifts toward "unmet" (per second). Small = legible.
-const DRIFT = { warmth: 0.045, food: 0.022, company: 0.030, rest: 0.020 };
+// how fast each need drifts toward "unmet" (per second). Small = legible. Against a 600s day
+// (an hour is 25s): hungry every couple of hours, lonely a few times a day, tired once,
+// and cold at night in half an hour off the fire (×2 at night, below). They were 3–8× this
+// till 2026-10-30, and every need came due every few seconds: nobody stayed anywhere.
+const DRIFT = { warmth: 0.015, food: 0.008, company: 0.010, rest: 0.004 };
 
 const WALK = 2.0;            // walking speed on a level meadow (u/s); terrain.js pace scales it
 const DIST_COST = 0.022;     // utility lost per world-unit of travel, at the land's typical going (TRIP_NORM)
@@ -78,6 +85,12 @@ const DIST_COST = 0.022;     // utility lost per world-unit of travel, at the la
 // ~1.5× that; dividing by it keeps a typical trip weighing what DIST_COST was
 // tuned on, so pace reorders where the folk go without shrinking their range
 const TRIP_NORM = 1.5;
+// music (music-sim.js, docs/music.md): a fire where a tune is being played draws listeners,
+// lonely ones most, from further than its warmth would (you hear it before you see it);
+// and someone with an instrument and a tune to play (or a drum) goes to a lit fire after dark,
+// from further off than anyone else would, and the more to one where someone's playing
+// already, to join in
+const MUSIC_PULL = 0.6, MUSIC_REACH = 120, PLAYER_PULL = 0.5, PLAYER_REACH = 180, MUSIC_DARK = 0.35;
 const ACT_MIN   = 0.05;      // below this best-score, just wander
 
 // Reverence — the finest want of all, above even beauty: a content, unlonely soul
@@ -95,6 +108,10 @@ const CIRCLE_STEPS = 8;      // waypoints per lap — enough to read as a circle
 const MOOT_COMPANY = 0.22;   // company sated per second at a moot (cf. the night fire)
 const MOOT_DRAW    = 1.6;    // how strongly folk already sitting the ring draw others in
 const ROOTWISE_CHANCE = 0.22; // who can hear what the wood carries (cf. stargazers)
+// fellowships (js/fellowships.js, docs/fellowships.md): the night out to a meeting
+const RITE_CALM    = 0.85;   // colder than this and you don't set out
+const RITE_WRAPPED = 0;      // the cold doesn't get at you while out at a rite: you go wrapped for the night
+const RITE_SIGN_CD = 4;      // seconds between one sitter's looks round for anyone watching
 const SHRINE_TOL  = 2.2;     // stop at the trunk's edge, within the glade
 const HARD_R    = 0.5;       // body radius: two NPCs never get closer than this
 const INTIMATE  = 0.7;       // personal space shrinks in intimate settings (the fire circle)
@@ -114,6 +131,10 @@ const FUEL_PER_LOG   = 0.18; // fuel each log restores when the fire eats one of
 // visible communal reserve, and the fire draws logs off that pile as it burns.
 export const WOOD_CAP = 12;  // logs a hearth's woodpile holds (also the visible stack's size — read by campfire-view.js)
 const WOOD_LOW    = 4;       // below this the pile wants restocking — someone goes to chop
+// ...by day. Toward evening it wants the night's worth: a log burns ~30s (FUEL_PER_LOG /
+// BURN_RATE), a night ~9 of them, so the pile is filled to WOOD_CAP before dark — nobody
+// should have to go into the dark woods for wood (docs/npc-behavior.md, "The night in")
+const WOOD_NIGHT_AT = 0.1;   // evening at which the night's stacking starts
 const WOOD_START  = 5;       // logs a fresh hearth is laid with (so it doesn't die at once)
 const STACK_KEEP  = 0;       // logs a person keeps in their pack after stacking the rest
 const CHOP_BIAS   = 1.3;     // pull toward chopping when the woodpile runs low
@@ -153,6 +174,34 @@ const FERRY_CALM     = 0.72; // only ferry when no survival need is past this (n
 // `evening` signal gives lead time), and if too far from any camp, lay one early.
 const CURFEW_BIAS   = 1.7;   // pull toward camp, scaled by how far into the evening it is
 const FAR_FROM_CAMP = 45;    // farther than this from any reachable fire at dusk → build your own
+// A camp is a place you come back to (docs/agents.md, "Camp"). Each of the folk keeps one
+// fire as theirs: the one they spent last evening at (a villager's own hearth). By day
+// they roam round it, not away from it — anything past CAMP_RANGE of it costs more to go
+// for, the more so toward evening — and at dusk they make for it from as far as STRANDED.
+// Only past that, with night coming, do they lay a hearth where they stand.
+const CAMP_RANGE = 80;       // the day's round: no extra cost within this of camp
+const LEASH_COST = 0.012;    // utility lost per unit a target lies past CAMP_RANGE (×3 by dusk)
+const LEASH_MAX  = 0.8;      // ...but never more than this: a preference, which hunger outweighs
+const STRANDED   = 220;      // farther than this from camp at dusk: too far to get back, build
+const HOME_DIST  = 0.3;      // the walk home is weighed at this share of an errand's distance cost
+// An evening at the fire: after dark a lit fire with folk at it draws you for its own
+// sake, not only for warmth, and once you've sat down you stay a while (STAY seconds,
+// an hour is 25), longer if there's music. It's a pull, not a lock: hunger still wins.
+const EVENING_PULL = 0.9;    // after dark, toward a lit fire someone's sitting at (× night)
+const STAY = 50, STAY_BIAS = 1.1, STAY_MUSIC = 0.6;   // seconds; pull to keep your seat; more while a tune plays
+const KEEP_BIAS = 0.15;      // a small preference for carrying on with what you're doing
+// The night in: after dark nobody goes past the firelight for anything but the fire itself.
+// What's past it costs DARK_COST (× night), which only real hunger cuts down. The day's
+// end is for getting ready — wood stacked (woodWant), the pack filled (PROVISION).
+const LIGHT_R   = 22;        // the firelight round a lit fire
+const DARK_COST = 2.2;
+const PROVISION = 1.5;       // extra pull to fill the pack, × evening
+// errands that take you out gathering wait for morning even inside the firelight (what's done
+// at the fire itself, cooking, stacking, tending, making, doesn't). Chopping is let off when
+// the pile's bare: a dying fire is the one thing worth the dark
+const DAY_WORK = new Set(['food', 'plan-food', 'chop', 'cut-thatch', 'cut-elder', 'fish', 'boat-fish', 'hunt',
+  'stake-hut', 'frame-hut', 'thatch-hut', 'strike-hut', 'peel-bark', 'gather-flower', 'collect', 'canoe-work', 'canoe-bring']);
+const NIGHT_STACK = 1.6;     // the late-afternoon stacking, × how short the pile is of a night's worth
 const SIGHT_RANGE   = 18;    // how close a groupmate must be to be "seen" (sighting memory)
 // Neighbour bin size for AgentWorld.near(). Must be >= the largest radius anyone
 // asks for (SIGHT_RANGE is the widest), or the 3×3 block searched around a point
@@ -449,6 +498,12 @@ const CANOE_BREAK  = 0.02;      // days off between spells (about 12 s): the res
 const CANOE_WANT   = 120;       // seconds of wanting a canoe and knowing none before resolving to make one (time to ask round first)
 const CANOE_CD     = 3;         // days between one person's canoes
 const CANOE_SITE_R = 150;       // how far from where they are they'll make one
+const MAKE_BIAS    = 0.9;       // the pull of making an instrument (making.js), × how much it's wanted
+const MAKE_REST    = 1;         // days between one made and starting the next
+const ELDER_REACH  = 140;       // how far they'll go for an elder bush
+const ELDER_T      = 5;         // seconds to cut and strip a stem
+const SWAP_R       = 4;         // how near someone must be to be offered a spare instrument
+const SWAP_PAY     = 2;         // what one of another camp gives for it (food)
 const CANOE_BIAS   = 1.6;       // pull of the work to the one making it (a hut's raising pulls about as hard)
 const CANOE_HELP   = 1.15;      // …to kin and to anyone who said they'd help
 const CANOE_CREW   = 0.5;       // company advertised by a bed where others are at work
@@ -466,6 +521,32 @@ const FLOWER_BIAS   = 1.4;   // strong enough to win from ~35 units at avg beaut
 const FLOWER_MAX    = 7;     // flowers needed to complete a crown
 
 const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+// A spatial hash over a list of things that stay where they are (shrubs, food plants, elders),
+// so a lookup touches the cells round a point and not the whole Lea: at 3200 that's ~29,000
+// shrubs and ~8,800 food plants, which every choose() used to walk in full. Built on first
+// use, rebuilt if the list is swapped or grows (the harness adds glade shrubs late).
+const GRID_CELL = 16, GRIDS = new WeakMap();
+const cellKey = (cx, cz) => (cx + 32768) * 65536 + (cz + 32768);
+function gridOf(list){
+  let g = GRIDS.get(list);
+  if (!g || g.n !== list.length){
+    g = { n: list.length, m: new Map() };
+    for (const it of list){ const k = cellKey(Math.floor(it.x / GRID_CELL), Math.floor(it.z / GRID_CELL));
+      let a = g.m.get(k); if (!a) g.m.set(k, a = []); a.push(it); }
+    GRIDS.set(list, g);
+  }
+  return g;
+}
+// the things in `list` within r of (x, z)
+function near(list, x, z, r){
+  const g = gridOf(list), out = [];
+  for (let cx = Math.floor((x - r) / GRID_CELL); cx <= Math.floor((x + r) / GRID_CELL); cx++)
+    for (let cz = Math.floor((z - r) / GRID_CELL); cz <= Math.floor((z + r) / GRID_CELL); cz++){
+      const a = g.m.get(cellKey(cx, cz)); if (a) for (const it of a) if (Math.hypot(it.x - x, it.z - z) < r) out.push(it);
+    }
+  return out;
+}
 const cap1 = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
 // ------------------------------------------------------------ campfire siting
@@ -556,7 +637,10 @@ export class Campfire {
     if (this.built >= 0.6) this.fuel = Math.max(this.fuel, ((this.built - 0.6) / 0.4) * 0.7);  // kindle
     return this.built >= 1;
   }
-  needsWood(){ return this.woodpile < WOOD_LOW; }   // the pile wants restocking
+  // the pile wants restocking: a few logs by day, a night's worth from late afternoon
+  woodWant(){ const w = this.world, ev = w?.evening || 0, night = w?.night || 0;
+    return ev > WOOD_NIGHT_AT && night < 0.5 ? WOOD_CAP : WOOD_LOW; }
+  needsWood(){ return this.woodpile < this.woodWant(); }
   addWood(logs){ this.woodpile = Math.min(WOOD_CAP, this.woodpile + logs); }
   extinguish(){ this.fuel = 0; }   // damped out; the view hides the flame & kills the light next frame
 
@@ -713,8 +797,10 @@ export class Campfire {
     // is this a night gathering? (lit, dark out, enough folk actually seated round it)
     let seated = 0;
     for (const n of this.world.npcs)
-      if (n.sitting && Math.hypot(n.x - this.x, n.z - this.z) < this.ringR + 2) seated++;
+      if ((n.sitting && Math.hypot(n.x - this.x, n.z - this.z) < this.ringR + 2) || n.dance?.f === this) seated++;   // up dancing counts
     this.gathering = this.lit && this.world.night > NIGHT_GATHER && seated >= GATHER_MIN;
+    // and at a gathering, whoever has an instrument plays (music-sim.js, docs/music.md)
+    stepMusic(this, this.world, dt);
 
     this.view?.update(dt);           // the meshes mirror the new state (if we have any)
   }
@@ -1229,6 +1315,7 @@ class Brain {
     this._hutSiteT -= dt; this._cutSpotT -= dt;
 
     // 0. let old "unreachable" grudges expire (a fire may be reachable from elsewhere)
+    if (this._stayT > 0) this._stayT -= dt;
     for (const [f, left] of this._blacklist){
       if (left - dt <= 0) this._blacklist.delete(f); else this._blacklist.set(f, left - dt);
     }
@@ -1243,7 +1330,7 @@ class Brain {
     // rotted one and you wake cold and go out to the fire, which is exactly the
     // pressure that should send someone to cut an armful of grass in the morning.
     const sleepChill = 1 - SLEEP_CHILL * roof;
-    n.warmth  = clamp01(n.warmth  + DRIFT.warmth  * dt * (0.4 + 1.6 * w.night) * p.warmth * rainChill * sleepChill);
+    n.warmth  = clamp01(n.warmth  + DRIFT.warmth  * dt * (0.4 + 1.6 * w.night) * p.warmth * rainChill * sleepChill * (this._rite ? RITE_WRAPPED : 1));
     n.food    = clamp01(n.food    + DRIFT.food    * dt * p.food);
     n.company = clamp01(n.company + DRIFT.company * dt * p.company);
     n.rest    = clamp01(n.rest    + DRIFT.rest    * dt * p.rest);
@@ -1326,6 +1413,20 @@ class Brain {
       }
     }
 
+    // a spare instrument made (makeInstrument): offered to whoever's near with none, now and then
+    this._swapT = (this._swapT || 0) - dt;
+    if (npc.spares?.length && this._swapT <= 0){ this._swapT = 3; this.swapSpare(npc); }
+
+    // dancing to a tune at the fire (music-sim.js dancePose): the tune's clock has the feet
+    const D = npc.dance ? dancePose(npc) : null;
+    npc.dancing = D;                                     // read by AnimNPC: the hop and the sway
+    if (D){
+      if (walkable(D.x, D.z)){ npc.x = D.x; npc.z = D.z; }
+      npc.heading = D.heading; npc.moving = D.moving; npc.sitting = false;
+      npc.fireGlow = (1 - Math.min(1, Math.hypot(npc.dance.f.x - npc.x, npc.dance.f.z - npc.z) / 6)) * (0.25 + 0.55 * w.night);
+      return;
+    }
+
     // 2/3. an active ferry owns movement outright (walk to a boat → glide across →
     // step off the far bank); otherwise maybe begin one, else run the normal loop.
     this._ferryCd -= dt;
@@ -1333,6 +1434,7 @@ class Brain {
       this._ferryCd = FERRY_CD[0] + Math.random() * (FERRY_CD[1] - FERRY_CD[0]);
       this.maybeFerry();
     }
+    if (!this._ferry) this.maybeRite();
     if (this._ferry){ this.ferryStep(dt); }
     else {
     // 2. re-decide periodically (or if we have nothing). But a half-laid hearth is a
@@ -1351,6 +1453,8 @@ class Brain {
       const h = this._buildingHut;
       this.target = { kind: 'stake-hut', x: h.x, z: h.z, ref: h, tol: h.rad + 1.0,
         satisfy: (a, dt2) => this.stakeHutRite(a, dt2) };
+    } else if (this._rite){
+      this.riteStep(dt);               // out at a fellowship's meeting: seen through till it's over
     } else if (this._sleep){
       // turned in for the night: the camp stays abed until dawn, or until a real
       // need wakes someone — hunger, or the cold of a hut with no fire in it.
@@ -1461,9 +1565,34 @@ class Brain {
   }
 
   // pick the affordance with the highest (advertised × deficit − distance) score
+  // the fire that's ours (CAMP_RANGE): a villager's own hearth; else the one we last
+  // spent an evening at; else, to start with, the nearest
+  campOf(){
+    const npc = this.npc, ok = f => f && f.done && this.fires.includes(f) && !this._blacklist.has(f);
+    if (npc.home) return ok(npc.home.fire) ? npc.home.fire : null;
+    // a camp you're past getting back to is given up for the nearest (your own, once laid)
+    const far = c => Math.hypot(c.x - npc.x, c.z - npc.z) > STRANDED;
+    if (!ok(this._camp) || far(this._camp)){
+      this._camp = null; let d = Infinity;
+      for (const f of this.fires){
+        if (!ok(f) || f.home) continue;
+        const e = Math.hypot(f.x - npc.x, f.z - npc.z);
+        if (e < d){ d = e; this._camp = f; }
+      }
+    }
+    return this._camp;
+  }
+
   choose(){
     const npc = this.npc, w = this.world, n = npc.needs;
     const p = npc.persona || DEFAULT_PERSONA;
+    // sat down at a fire of an evening: that's where we stay a while, and it's our camp now
+    const seat = this.target?.sit && this.target.ref instanceof Campfire && npc.sitting ? this.target.ref : null;
+    if (seat && w.night > MUSIC_DARK && !seat.home){
+      if (this._stayFire !== seat){ this._stayFire = seat; this._stayT = STAY; }
+      if (seat.music?.tune) this._stayT = Math.max(this._stayT, 12);   // nobody leaves mid-tune
+      if (w.night > 0.5) this._camp = seat;
+    } else if (!seat) this._stayFire = null;
     // Maslow-ish gating: belonging waits on survival, and the finer wants (a taste
     // for beautiful things) wait on both. So a starving or freezing person ignores
     // company and trinkets; a content one indulges them. `eff` is the need vector
@@ -1473,6 +1602,18 @@ class Brain {
     const beautyGate  = clamp01(1 - 0.75 * Math.max(surv, n.company));
     const eff = { warmth: n.warmth, food: n.food, rest: n.rest, company: n.company * companyGate };
     let best = null, bestScore = ACT_MIN;
+    const camp = this.campOf(), ev = w.evening || 0;
+    const homeward = Math.max(ev, w.night);              // dusk and the first of the dark
+    const cur = this.target;
+    // further from camp than you could get back from, there's no round to keep to
+    const leashed = camp && !npc.home && Math.hypot(camp.x - npc.x, camp.z - npc.z) < STRANDED;
+    // the fire whose light we're in after dark (or our camp's, if it's alight and we're out of it)
+    let hearth = null;
+    if (w.night > 0.5 && !npc.home){
+      let hd = LIGHT_R;
+      for (const f of this.fires){ if (!f.lit) continue; const d = Math.hypot(f.x - npc.x, f.z - npc.z); if (d < hd){ hd = d; hearth = f; } }
+      if (!hearth && camp?.lit && Math.hypot(camp.x - npc.x, camp.z - npc.z) < STRANDED) hearth = camp;
+    }
     const consider = (kind, x, z, ad, ref, opts = {}) => {
       const dist = Math.hypot(x - npc.x, z - npc.z);
       if (dist > (opts.reach || 70)) return;
@@ -1481,13 +1622,31 @@ class Brain {
       const trip = w.nav && w.nav.h ? w.nav.travelCost(npc.x, npc.z, x, z) / TRIP_NORM : dist;
       let s = -(opts.distCost ?? DIST_COST) * trip + (opts.bias || 0);
       for (const k in ad) s += ad[k] * eff[k];
+      // the day's round is about camp: what lies past it costs more, the more so at dusk
+      if (leashed && opts.leash !== false){
+        const past = Math.hypot(x - camp.x, z - camp.z) - CAMP_RANGE;
+        if (past > 0) s -= Math.min(LEASH_MAX, LEASH_COST * past * (1 + 2 * homeward));
+      }
+      if (cur && cur.kind === kind && cur.ref === ref && ref) s += KEEP_BIAS;   // carry on
+      // after dark, the firelight is the edge of the world
+      if (hearth && kind !== 'fire' && opts.leash !== false && (Math.hypot(x - hearth.x, z - hearth.z) > LIGHT_R
+          || (DAY_WORK.has(kind) && !(kind === 'chop' && hearth.woodpile <= 0))))
+        s -= DARK_COST * w.night * (n.food > 0.9 ? 0.3 : 1);
       if (s > bestScore){ bestScore = s; best = { kind, x, z, ref, ...opts,
         satisfy: opts.satisfy || (ref && ref.satisfy ? (a, dt) => ref.satisfy(a, dt) : () => {}) }; }
     };
 
     for (const fire of this.fires){
       if (this._blacklist.has(fire) || !fire.done) continue;   // skip unreachable & still-being-built hearths
-      consider('fire', fire.x, fire.z, fire.advertise(), fire, { sit: true });
+      const tune = fire.music?.tune, inst = instrumentOf(npc);
+      const player = fire.lit && w.night > MUSIC_DARK && inst && (DRUMS.has(inst) || tunesOf(npc, w.time).length);
+      // an evening at the fire, for its own sake: folk sitting at a lit one after dark
+      const others = fire.lit && w.night > MUSIC_DARK ? fire.slots.size - (fire.slots.has(npc) ? 1 : 0) : 0;
+      const evening = others > 0 ? EVENING_PULL * w.night * Math.min(1, 0.5 + others / 4) : 0;
+      // once sat down of an evening, you stay a while; a tune keeps you longer
+      const staying = this._stayFire === fire && this._stayT > 0 ? STAY_BIAS + (tune ? STAY_MUSIC : 0) : 0;
+      consider('fire', fire.x, fire.z, fire.advertise(), fire, { sit: true, reach: player ? PLAYER_REACH : tune ? MUSIC_REACH : 70,
+        bias: (tune ? MUSIC_PULL * (0.4 + n.company) : 0) + (player ? PLAYER_PULL * (tune ? 2 : 1) : 0) + evening + staying });
     }
 
     // duty of the hearth: a lit fire — above all one with a stew in the pot — must
@@ -1555,10 +1714,10 @@ class Brain {
           }
         } });
     };
-    const goChop = (bias) => {
+    const goChop = (bias, distCost) => {
       goStrike(bias);                              // a derelict frame is wood too
       const shrub = w.nearestShrub(npc.x, npc.z);
-      if (shrub) consider('chop', shrub.x, shrub.z, {}, shrub, { tol: 1.5, bias, satisfy: chopSatisfy(shrub) });
+      if (shrub) consider('chop', shrub.x, shrub.z, {}, shrub, { tol: 1.5, bias, distCost, satisfy: chopSatisfy(shrub) });
     };
 
     // firewood economy. First, a *reachable* fire whose woodpile is running low:
@@ -1573,6 +1732,7 @@ class Brain {
       if (d < homeD){ homeD = d; homeFire = f; }
       if (f.needsWood() && d < dd){ dd = d; lowFire = f; }
     }
+    if (leashed && camp.needsWood()) lowFire = camp;   // your own camp's pile first (if you can get back to it)
     if (npc.home && lowFire !== npc.home.fire) lowFire = null;   // a villager's wood is for their own hearth
     const haveReachableFire = !!homeFire;
     // any fire (including half-built) within this radius counts as "a hearth is forming here"
@@ -1581,23 +1741,37 @@ class Brain {
     // curfew: anticipate nightfall. As the evening draws on, make for the nearest
     // fire to settle before dark (a pull that grows with `evening`, independent of
     // how cold we are yet). If we've wandered too far from any camp, build one.
-    const ev = w.evening || 0;
-    const farFromCamp = !homeFire || homeD > FAR_FROM_CAMP;
-    if (ev > 0.15 && homeFire && !farFromCamp)
+    // ...and that's your own camp, from as far as you can get back from before dark (a
+    // villager's is the hearth at home, gone to by the house's own business instead)
+    const campD = camp ? Math.hypot(camp.x - npc.x, camp.z - npc.z) : Infinity;
+    const farFromCamp = npc.home ? (!homeFire || homeD > FAR_FROM_CAMP) : campD > STRANDED;
+    if (ev > 0.15 && npc.home && homeFire && !farFromCamp)
       consider('fire', homeFire.x, homeFire.z, {}, homeFire, { sit: true, bias: CURFEW_BIAS * ev });
+    else if (camp && !npc.home && !farFromCamp){
+      // after dark, only to a fire that's alight; and near camp with its night's wood still
+      // to stack, the dusk pull waits: that's the chore before the sitting
+      const stocking = campD < CAMP_RANGE && camp.needsWood() && w.night < 0.5;
+      const pull = stocking ? 0 : Math.max(ev, camp.lit ? w.night : 0);
+      if (pull > 0.15) consider('fire', camp.x, camp.z, camp.advertise(), camp, { sit: true, reach: STRANDED,
+        distCost: DIST_COST * HOME_DIST, bias: CURFEW_BIAS * pull });
+    }
 
     if (lowFire){
-      const urgency = (1 - lowFire.woodpile / WOOD_LOW) * (0.45 + 0.55 * n.warmth) * (0.5 + 0.5 * w.night);
+      // by day a pile wants wood as people feel the cold; the night's stacking is a chore
+      // done before dark however warm you are
+      const forNight = lowFire.woodWant() > WOOD_LOW;
+      const short = 1 - lowFire.woodpile / lowFire.woodWant();
+      const urgency = forNight ? NIGHT_STACK * (0.6 + 0.4 * short) : short * (0.45 + 0.55 * n.warmth) * (0.5 + 0.5 * w.night);
       if ((npc.firewood || 0) > STACK_KEEP)
         consider('stack', lowFire.x, lowFire.z, {}, lowFire, { tol: 1.2, bias: STACK_BIAS * urgency,
           satisfy: (a) => { lowFire.addWood((a.firewood || 0) - STACK_KEEP); a.firewood = STACK_KEEP; this.target = null; } });
-      else goChop(CHOP_BIAS * urgency);
-    } else if (!npc.home && !anyFireClose && ((n.warmth > 0.45 && !haveReachableFire) || (ev > 0.35 && farFromCamp))){   // (a villager goes home to warm up)
+      else goChop(CHOP_BIAS * urgency, forNight ? PLAN_DIST : undefined);
+    } else if (!npc.home && !anyFireClose && ((n.warmth > 0.45 && (!haveReachableFire || farFromCamp)) || (Math.max(ev, w.night) > 0.35 && farFromCamp))){   // (night out: make a fire, whatever the hour)   // (a villager goes home to warm up)
       // Stranded & cold, OR dusk is closing in and there's no camp within reach:
       // make our own. Gather an armful, then lay a hearth here and stack the wood.
-      const want = Math.max(n.warmth, ev);
+      const want = Math.max(n.warmth, ev, w.night);
       if ((npc.firewood || 0) >= BUILD_LOGS)
-        consider('build', npc.x, npc.z, {}, null, { tol: 2.0, bias: BUILD_BIAS * want,
+        consider('build', npc.x, npc.z, {}, null, { tol: 2.0, bias: BUILD_BIAS * want, leash: false,
           satisfy: (a, dt) => this.buildRite(a, dt) });   // laid as a ritual over several seconds
       else goChop(CHOP_BIAS * want);
     }
@@ -1648,7 +1822,7 @@ class Brain {
     // gather to keep stocked. Raw-edible foods go in the eating pack; things that
     // must be cooked go in a separate raw bag, bound for the pot.
     if (pack < cap || raw < rawCap)
-      for (const pl of w.food){
+      for (const pl of near(w.food, npc.x, npc.z, 150)){   // (150: the furthest a food is ever considered from)
         if (!pl.ripe) continue;                       // already picked — nothing here
         if (npc.home && Math.hypot(pl.x - npc.home.x, pl.z - npc.home.z) > VILLAGE_WILD) continue;   // a villager keeps to the village
         const cookable = needsCooking(pl.kind);
@@ -1657,7 +1831,7 @@ class Brain {
         // keep a stock of snacks on hand — the more foresight, the more, and the keeping kind
         const snack = SNACKS.includes(pl.kind) ? Math.max(0, 1 - snackCount(npc) / snackTarget(npc)) * (isKeeper(pl.kind) ? foresight(npc) : 0.6) : 0;
         consider('food', pl.x, pl.z, {}, pl, { tol: 1.4, reach: wants.has(pl.kind) ? 150 : 70,
-          bias: FORAGE_BIAS * (deficit * p.food + SNACK_BIAS * snack) + PLAN_BIAS * (wants.get(pl.kind) || 0),
+          bias: FORAGE_BIAS * (deficit * p.food * (1 + PROVISION * (w.night < 0.5 ? ev : 0)) + SNACK_BIAS * snack) + PLAN_BIAS * (wants.get(pl.kind) || 0),
           satisfy: (a) => {                           // pick it: the fruit vanishes & regrows later
             if (pl.ripe){ const y = pl.collect(); if (y > 0){
               if (needsCooking(pl.kind)) addRaw(a, pl.kind, Math.min(rawCap - (a.raw || 0), y));
@@ -1741,6 +1915,29 @@ class Brain {
           consider('canoe-work', job.x, job.z, { company: job.crew > 0 ? CANOE_CREW : 0 }, job, { tol: 2.0, sit: true, reach: CANOE_SEEK, distCost: PLAN_DIST,
             bias: spell ? want * 2 : want * (job.crew > 0 ? 1.25 : 1),
             satisfy: (a, dt2) => this.workCanoe(job, a, dt2) });
+      }
+    }
+    // --- making an instrument (making.js; docs/music.md "Making instruments"): someone who
+    //     knows how makes one for themselves, then for kin without one, then a spare to swap,
+    //     resting a day between. By day: cut an elder stem if one's wanted, then sit to the
+    //     work, at the camp's fire if it's near. A hide and gut only come off a kill. ---
+    if (!npc.home && w.night < 0.35 && w.time >= (npc._makeRest || 0)){
+      const C = craftsKnown(npc), known = [...C.keys()].filter(k => C.get(k) >= 2);
+      const kinLacks = npc.group && npc.group.npcs.some(o => o !== npc && !instrumentOf(o));
+      const want = !instrumentOf(npc) ? 1.4 : kinLacks ? 1 : !(npc.spares || []).length ? 0.6 : 0;
+      // what to make: whatever has everything to hand, or else what wants only elder
+      const kind = want && (known.find(k => !missingFor(npc, k)) || known.find(k => CRAFTS[k].needs.every(([m, c]) => m === 'elder' || goodsOf(npc, m) >= c)));
+      if (kind){
+        const need = missingFor(npc, kind);
+        if (need === 'elder'){
+          const bush = this._elder?.ripe ? this._elder : (this._elder = w.nearestElder(npc.x, npc.z, ELDER_REACH));
+          if (bush) consider('cut-elder', bush.x, bush.z, {}, bush, { tol: 1.6, reach: ELDER_REACH, distCost: CHORE_DIST, bias: MAKE_BIAS * want,
+            satisfy: (a, dt2) => this.cutElder(bush, a, dt2) });
+        } else if (!need){
+          const at = campFire && cd < 30 ? campFire : null;
+          consider('make-inst', at ? at.x : npc.x, at ? at.z : npc.z, {}, at, { tol: at ? 3 : 1, sit: true, reach: 40, distCost: CHORE_DIST, bias: MAKE_BIAS * want,
+            satisfy: (a, dt2) => this.makeInstrument(kind, a, dt2) });
+        }
       }
     }
     // hungry, nothing edible to hand (no rations, no reachable cache) but carrying
@@ -1888,6 +2085,7 @@ class Brain {
             a._huntCd = CATCH_CD;
             if (Math.random() < CATCH_CHANCE * (p.perception || 1) * (0.7 + 0.3 * (p.strength || 1))){
               addRaw(a, 'meat', q.caught()); this.target = null;
+              addGoods(a, 'hide'); addGoods(a, 'gut', 2);   // and the hide and gut, kept for making (making.js)
             }
             // else: missed — it's bolting now; chase on, or it gets away
           }
@@ -2285,6 +2483,100 @@ class Brain {
       this._pilgrim = { shrine: best.ref, stage: 0, dwell: 0, lap: 0, laid: false, heard: false };
   }
 
+  // ── fellowships (js/fellowships.js) ───────────────────────────────────────────
+  // A member sets out when their fellowship's meeting opens (a time from the real sky),
+  // once a night, if nothing presses and nothing else is half done. From then the rite
+  // runs itself (riteStep) until the meeting's over or a real need breaks it.
+  maybeRite(){
+    const npc = this.npc, w = this.world, n = npc.needs;
+    if (this._rite || !npc.fellowships || !npc.fellowships.size || !w.fellowships.length) return;
+    if ((this._building && !this._building.done) || (this._buildingShel && !this._buildingShel.done)
+        || (this._buildingHut && this._buildingHut.staked < 1) || this._pilgrim || npc.dance) return;
+    if (n.warmth > RITE_CALM) return;                    // too cold to go out (hunger and sleep don't stop you: it's a fast and a vigil)
+    for (const F of w.fellowships){
+      if (!npc.fellowships.has(F.id) || !meetingOpen(F.def, w)) continue;
+      const occ = occasion(w);
+      if (F.went.get(npc) === occ) continue;             // once a night, even if it was broken off
+      const site = w.fellowSite(F, occ);
+      if (!site) continue;
+      F.went.set(npc, occ);
+      if (this.target && this.target.ref instanceof Campfire) this.target.ref.release(npc);
+      this._sleep = null; this._stayFire = null;
+      this._rite = { F, occ, site, stage: 0, lap: 0, sat: false, signT: 0,
+                     a0: Math.atan2(npc.x - site.x, npc.z - site.z) };   // rounds start on the side you came from
+      this.target = null; this.path = null; this._sx = npc.x; this._sz = npc.z; this._stuckSampleT = STUCK_TIME;
+      npc.actionLabel = 'rite';
+      F.stats.out++;
+      // seen setting off in the dark: what an outsider can tell of it (mysteries.md §6)
+      if (F.def.secrecy !== 'open') for (const o of w.near(npc.x, npc.z, SIGHT_RANGE))
+        if (o !== npc && !o.sleeping && !isMember(o, F.id))
+          addNews(o, { kind: 'sign', what: 'went', fid: F.id, key: 'sign:' + F.id + ':went:' + npc.id, subj: npc,
+                       place: site.name || null, x: site.x, z: site.z, t: w.time });
+      return;
+    }
+  }
+
+  riteStep(dt){
+    const npc = this.npc, w = this.world, R = this._rite, F = R.F, S = R.site;
+    if (!meetingOpen(F.def, w) || occasion(w) !== R.occ){ this.endRite(); return; }   // over, come dawn
+    npc.actionLabel = 'rite';
+    const step = F.def.rite[Math.min(R.stage, F.def.rite.length - 1)];
+    const r = (S.r || 4) * (step.r || 0.6);
+    if (step.do === 'rounds' && R.stage < F.def.rite.length - 1){
+      // round the place, all one way (the pattern days' rounds, mysteries.md §5)
+      if (R.lap < (step.laps || 1) * CIRCLE_STEPS){
+        const t = R.a0 + (R.lap / CIRCLE_STEPS) * Math.PI * 2;
+        this.target = { kind: 'rite', x: S.x + Math.sin(t) * r, z: S.z + Math.cos(t) * r, tol: 1.2, ref: S,
+          satisfy: () => { R.lap++; this.target = null; this.path = null; } };
+        return;
+      }
+      R.stage++; R.lap = 0; this.target = null; return;
+    }
+    // sit the night out: at the meeting's fire, or in a ring round the place, facing in
+    if (S.fire){
+      this.target = { kind: 'rite', x: S.fire.x, z: S.fire.z, ref: S.fire, sit: true,
+        satisfy: (a, dt2) => { S.fire.satisfy(a, dt2); this.riteSat(dt2); } };
+      return;
+    }
+    const i = Math.max(0, F.members.indexOf(npc)), t = Math.PI * 2 * i / F.members.length;   // each member's own place in the ring
+    this.target = { kind: 'rite', x: S.x + Math.sin(t) * r, z: S.z + Math.cos(t) * r, tol: 1.0, sit: true, ref: S,
+      satisfy: (a, dt2) => {
+        a.heading = Math.atan2(S.x - a.x, S.z - a.z);
+        a.needs.company = clamp01(a.needs.company - MOOT_COMPANY * dt2);
+        this.riteSat(dt2);
+      } };
+  }
+
+  // sat down at the meeting: counted present; and now and then a look round for anyone
+  // outside it who can see them there
+  riteSat(dt){
+    const R = this._rite, F = R.F, w = this.world;
+    if (!R.sat){
+      R.sat = true;
+      let here = F.present.get(R.occ); if (!here){ here = new Set(); F.present.set(R.occ, here); }
+      here.add(this.npc);
+    }
+    if (F.def.secrecy === 'open' || (R.signT -= dt) > 0) return;
+    R.signT = RITE_SIGN_CD;
+    for (const o of w.near(R.site.x, R.site.z, SIGHT_RANGE))
+      if (!o.sleeping && !isMember(o, F.id))
+        addNews(o, { kind: 'sign', what: 'gathered', fid: F.id, key: 'sign:' + F.id + ':' + R.occ,
+                     n: F.present.get(R.occ).size, place: R.site.name || null, x: R.site.x, z: R.site.z, t: w.time });
+  }
+
+  // the meeting's over (or broken off): home, carrying what the fellowship's own know of it
+  endRite(){
+    const npc = this.npc, w = this.world, R = this._rite;
+    this._rite = null;
+    if (this.target && this.target.ref instanceof Campfire) this.target.ref.release(npc);
+    this.target = null; this.path = null; npc.sitting = false; this.decideT = 0;
+    if (!R.sat) return;
+    const here = R.F.present.get(R.occ);
+    addNews(npc, { kind: 'fellow', fid: R.F.id, key: 'fellow:' + R.F.id + ':' + R.occ, n: here ? here.size : 1,
+                   place: R.site.name || null, fire: !!R.site.fire, x: R.site.x, z: R.site.z, t: w.time });
+    R.F.stats.sat++;
+  }
+
   // The rite (Alexander 66 HOLY GROUND): pass the gateways in turn, outermost
   // first, pausing at each with a view toward the next inner precinct (134 ZEN
   // VIEW); lay a stone in whichever precinct is still being built; then sit with
@@ -2652,6 +2944,51 @@ class Brain {
     const b = w.addCanoeBuild(site, npc);
     addPlan(npc, { kind: 'canoe', build: b, until: w.time + CANOE_IDLE * 2 });
   }
+  // an elder stem or two: cut, the leaves stripped (making.js)
+  cutElder(bush, a, dt){
+    if (!bush.ripe){ this._elder = null; this.target = null; return; }   // someone was quicker
+    a.chopping = true; a.actionLabel = 'cut-elder';
+    a._elderT = (a._elderT || 0) + dt;
+    if (a._elderT >= ELDER_T){
+      a._elderT = 0; a.chopping = false;
+      const got = bush.collect(); if (got > 0) addGoods(a, 'elder', got);
+      this._elder = null; this.target = null;
+    }
+  }
+  // a spell at the making: when it's done, the instrument is theirs, or kin's who has none,
+  // or a spare to swap (agents.js swapSpare)
+  makeInstrument(kind, a, dt){
+    const w = this.world;
+    if (missingFor(a, kind)){ this.target = null; return; }
+    if (!a._making || a._making.kind !== kind) a._making = { kind, work: 0 };
+    a.actionLabel = 'make-inst';
+    a._making.work += dt;
+    if (a._making.work < CRAFTS[kind].work) return;
+    for (const [m, c] of CRAFTS[kind].needs) takeGoods(a, m, c);
+    a._making = null; this.target = null; a._makeRest = w.time + MAKE_REST;
+    const S = w.makeStats ??= { made: 0, kept: 0, given: 0, swapped: 0, kinds: {} };
+    S.made++; S.kinds[kind] = (S.kinds[kind] || 0) + 1;
+    const kin = a.group && a.group.npcs.find(o => o !== a && !instrumentOf(o));
+    if (!instrumentOf(a)){ giveInstrument(a, kind); S.kept++; }
+    else if (kin){ giveInstrument(kin, kind); S.given++; }
+    else (a.spares ??= []).push(kind);
+  }
+  // a spare instrument, to whoever's near with none: kin for nothing, anyone else for a
+  // couple of whatever food they've most of (or nothing, if they've none to give)
+  swapSpare(a){
+    const w = this.world;
+    for (const o of w.near(a.x, a.z, SWAP_R)){
+      if (o === a || o.home || instrumentOf(o) || o.sleeping) continue;
+      const kind = a.spares.shift();
+      giveInstrument(o, kind);
+      if (o.group !== a.group){
+        const pay = takeFood(o, SWAP_PAY, w.time);
+        if (pay.length) giveAll(a, pay, w.time);
+      }
+      (w.makeStats ??= { made: 0, kept: 0, given: 0, swapped: 0, kinds: {} }).swapped++;
+      return;
+    }
+  }
   // a sheet of bark off a birch: score round the trunk and down, and peel it away
   peelBark(tree, a, dt){
     const w = this.world;
@@ -2869,7 +3206,13 @@ class Brain {
   wanderStep(dt){
     const npc = this.npc;
     this.wanderT -= dt;
-    if (this.wanderT <= 0){ this.wanderH = Math.random() * Math.PI*2; this.wanderT = 2 + Math.random() * 4; }
+    if (this.wanderT <= 0){
+      this.wanderH = Math.random() * Math.PI*2; this.wanderT = 2 + Math.random() * 4;
+      // with nothing to do, an idle stroll drifts back toward camp rather than away
+      const c = !npc.home && this._camp;
+      if (c && Math.hypot(c.x - npc.x, c.z - npc.z) > CAMP_RANGE * 0.6)
+        this.wanderH = Math.atan2(c.x - npc.x, c.z - npc.z) + (Math.random() - 0.5) * 1.6;
+    }
     const spd = 1.2 * dt;
     const vx = Math.sin(this.wanderH) * spd, vz = Math.cos(this.wanderH) * spd;
     const nx = npc.x + vx, nz = npc.z + vz;
@@ -3013,6 +3356,8 @@ export class AgentWorld {
     this.fires = [];
     this.trees = [];      // trunk [x,z] list, used to site hearths in clearings
     this.shrines = [];    // the great faced trees folk revere & visit (docs/mycelium.md)
+    this.fellowships = []; // groups folk are initiated into, placed and peopled (setFellowships)
+    this.yearDays = 360;  // the sky's year, for the fellowships' calendar (syncSky)
     this.shrubs = [];     // choppable shrubs (firewood)
     this.food = [];       // forage plants (visited, not depleted, by NPCs)
     this.valuables = [];  // rare finds people gather & trade (shells/stones/amber/quartz)
@@ -3193,6 +3538,16 @@ export class AgentWorld {
   // build the pathfinding grid (water/bounds + large static obstacles). Call once
   // after setObstacles; the nav grid is static thereafter.
   buildNav(){ this.nav.build(this._obstacles); }
+  // obstacles within r of (x,z) — every one, however far out the cells run. obstaclesNear's
+  // 3x3 window reaches only ~4u, short of a hut's radius plus a trunk plus its clearance
+  obstaclesWithin(x, z, r){
+    const cx = (x / OB_CELL) | 0, cz = (z / OB_CELL) | 0, span = Math.ceil(r / OB_CELL), out = [];
+    for (let i = -span; i <= span; i++) for (let j = -span; j <= span; j++){
+      const b = this._obGrid.get((cx + i) + ',' + (cz + j));
+      if (b) for (const o of b) if (Math.hypot(o.x - x, o.z - z) < r + o.r) out.push(o);
+    }
+    return out;
+  }
   // obstacles in the 3x3 cells around (x,z)
   obstaclesNear(x, z){
     const cx = (x / OB_CELL) | 0, cz = (z / OB_CELL) | 0, out = [];
@@ -3288,6 +3643,9 @@ export class AgentWorld {
   // the communal boats (a Boats manager, or a raw list). NPCs find/claim/ride them.
   setBoats(boats){ this.boats = boats && boats.list ? boats.list : (boats || []); this._boatYard = boats && boats.add ? boats : null; }
   setBirches(list){ this.birches = (list || []).map(t => ({ x: t.x, z: t.z, peeled: null })); }
+  // elder bushes (gen/flora.js, kind 'elder'): cut for stems to make instruments of (making.js)
+  setElders(list){ this.elders = list || []; }
+  nearestElder(x, z, R){ let best = null, bd = R; for (const e of near(this.elders || [], x, z, R)){ if (!e.ripe) continue; const d = Math.hypot(e.x - x, e.z - z); if (d < bd){ bd = d; best = e; } } return best; }
   nearestBirch(x, z, r){
     let best = null, bd = r;
     for (const t of this.birches){ if (t.peeled) continue; const d = Math.hypot(t.x - x, t.z - z); if (d < bd){ bd = d; best = t; } }
@@ -3352,6 +3710,62 @@ export class AgentWorld {
   // list: [{ x, z, hear? }] — `hear()` is injected by main.js and returns whatever
   // the wood is carrying at that tree (a fact from the mycelium), or null. The sim
   // stays ignorant of the network: it only knows some trees can be listened to.
+  // Fellowships (js/fellowships.js): place each where it meets, and seed who belongs —
+  // folk living within REACH of it (and with a way there), picked by a hash of who they
+  // are. A fellowship that meets at a stone circle takes the circle with the most such
+  // folk near it; one that meets at a fire is anchored on its first member, and meets at
+  // the open hearth nearest that on the night (fellowSite). Too few within reach, and
+  // this Lea hasn't one. Call after the folk are attached and settled.
+  //   circles: [{ x, z, r, name }]
+  setFellowships({ circles = [] } = {}){
+    const who = { any: () => true, musician: n => !!instrumentOf(n) };
+    const reach = (n, p) => Math.hypot(n.x - p.x, n.z - p.z) < FELLOW_REACH
+      && (!this.nav || !!this.nav.findPath(n.x, n.z, p.x, p.z));
+    this.fellowships = [];
+    for (const n of this.npcs) n.fellowships = n.fellowships || new Map();
+    for (const id of FELLOWSHIP_IDS){
+      const def = FELLOWSHIPS[id], ok = who[def.who] || who.any;
+      const folk = this.npcs.filter(ok).sort((a, b) => memberHash(id, a) - memberHash(id, b));
+      let site = null, anchor = null;
+      if (def.site === 'circle'){
+        let best = 0;
+        for (const c of circles){
+          const k = folk.filter(n => Math.hypot(n.x - c.x, n.z - c.z) < FELLOW_REACH).length;
+          if (k > best){ best = k; site = c; }
+        }
+        anchor = site;
+      } else if (folk.length) anchor = { x: folk[0].x, z: folk[0].z };
+      if (!anchor) continue;
+      const near = folk.filter(n => reach(n, anchor));
+      let mem = near.filter(n => memberHash(id, n) < def.share);
+      if (mem.length < def.min) mem = near.slice(0, def.min);
+      mem = mem.slice(0, def.max);
+      if (mem.length < def.min) continue;
+      for (const n of mem) n.fellowships.set(id, { grade: 0, since: this.time });
+      this.fellowships.push({ id, def, site, anchor, members: mem,
+        went: new Map(),      // member -> the night they last set out
+        present: new Map(),   // night -> who sat the meeting
+        fires: new Map(),     // night -> the hearth it met at (a fire-meeting fellowship)
+        stats: { out: 0, sat: 0 } });
+    }
+  }
+  // where a fellowship meets tonight: its circle, or the open hearth nearest its anchor
+  // (a lit one, if any is), chosen once a night so every member goes to the same one
+  fellowSite(F, occ){
+    if (F.def.site !== 'fire') return F.site;
+    if (!F.fires.has(occ)){
+      let best = null, bd = Infinity;
+      for (const f of this.fires){
+        if (!f.done || f.home) continue;
+        const d = Math.hypot(f.x - F.anchor.x, f.z - F.anchor.z) - (f.lit ? 1000 : 0);
+        if (d < bd){ bd = d; best = f; }
+      }
+      F.fires.set(occ, best ? { fire: best, x: best.x, z: best.z, r: best.ringR || 3 } : null);
+    }
+    const s = F.fires.get(occ);
+    return s && this.fires.includes(s.fire) ? s : null;
+  }
+
   setShrines(list){
     this.shrines = (list || []).map(s => {
       const sh = new Shrine(s.x, s.z, this.rng);
@@ -3372,7 +3786,7 @@ export class AgentWorld {
   }
   nearestShrub(x, z, range = 45){
     let best = null, bd = range;
-    for (const s of this.shrubs){
+    for (const s of near(this.shrubs, x, z, range)){
       if (!s.alive) continue;
       const d = Math.hypot(s.x - x, s.z - z);
       if (d < bd && !this.inSacredGlade(s.x, s.z)){ bd = d; best = s; }
@@ -3458,8 +3872,8 @@ export class AgentWorld {
     if (terrainType(x, z) !== 'grass') return false;
     if (builtBand(x, z) >= 2) return false;                         // not on a settlement's green, lanes or yards
     if (ringSpread(x, z, rad) > MAX_FIRE_SPREAD) return false;      // not on a hillside, across the whole floor
-    for (const o of this.obstaclesNear(x, z)){
-      if (o.alive === false) continue;
+    // (a felled shrub counts too: it grows back, and it would grow back through the floor)
+    for (const o of this.obstaclesWithin(x, z, rad + HUT_TREE_CLEAR)){
       const clear = o.r >= 0.85 ? HUT_TREE_CLEAR : HUT_SHRUB_CLEAR;
       if (Math.hypot(x - o.x, z - o.z) < o.r + rad + clear) return false;   // the whole dome, and a path round it
     }
@@ -3473,18 +3887,7 @@ export class AgentWorld {
     return true;
   }
   // food plants near a point, by a coarse grid built once (plants don't move)
-  foodNear(x, z, r){
-    if (!this._foodGrid || this._foodGridOf !== this.food){
-      this._foodGrid = new Map(); this._foodGridOf = this.food;
-      for (const pl of this.food){ const k = Math.floor(pl.x / 8) + ',' + Math.floor(pl.z / 8); let a = this._foodGrid.get(k); if (!a) this._foodGrid.set(k, a = []); a.push(pl); }
-    }
-    const out = [];
-    for (let cx = Math.floor((x - r) / 8); cx <= Math.floor((x + r) / 8); cx++)
-      for (let cz = Math.floor((z - r) / 8); cz <= Math.floor((z + r) / 8); cz++){
-        const a = this._foodGrid.get(cx + ',' + cz); if (a) for (const pl of a) if (Math.hypot(pl.x - x, pl.z - z) < r) out.push(pl);
-      }
-    return out;
-  }
+  foodNear(x, z, r){ return near(this.food, x, z, r); }
   // The huts that ring a hearth — by PROXIMITY, not by which fire object they
   // were raised at. Cold hearths crumble (FIRE_RECLAIM) and a fire relit on the
   // same ground is a new object, so identity would let a camp grow a second full
@@ -3770,7 +4173,7 @@ export class AgentWorld {
   }
 
   syncSky(sky){ this.day = sky.day ?? 1; this.night = sky.night ?? 0; this.evening = sky.evening ?? 0; this.time = sky.time ?? this.time; this.cloud = sky.cloudCover ?? 0;
-    this.moonLon = sky.moonLon ?? 0; this.sunLon = sky.sunLon ?? 0; this.moonIllum = sky.moonIllum ?? 0; }   // for astrology
+    this.moonLon = sky.moonLon ?? 0; this.sunLon = sky.sunLon ?? 0; this.moonIllum = sky.moonIllum ?? 0; this.yearDays = sky.yearDays ?? 360; }   // for astrology
 
   update(dt){
     this._rebuildNeighbours();   // bins for near(); everything below asks it instead of scanning everyone

@@ -416,6 +416,24 @@ function makeFruitInst(mat, spots, size){
   return inst;
 }
 
+// an item's picture (ingredients.js `pic`) as a card's texture
+const itemTexture = src => { const t = new THREE.TextureLoader().load(src); t.colorSpace = THREE.SRGBColorSpace; return t; };
+
+// A fairy ring (main.js picks which mushroom patches are rings): its caps become a circle
+// of fairy mushrooms round the middle, where a door opens to the salve (gen/faerie.js)
+const RING_R = 2.2, RING_CAPS = 16, RING_CAP = 0.42;
+let _ringMat = null;
+export function makeFairyRing(p, rng){
+  _ringMat ??= new THREE.MeshLambertMaterial({ map: itemTexture('sprites/items/mushroom_faerie.png'), alphaTest: 0.5, side: THREE.DoubleSide });
+  const y0 = height(p.x, p.z), a0 = rng() * Math.PI * 2, spots = [];
+  for (let i = 0; i < RING_CAPS; i++){
+    const a = a0 + (i + (rng() - 0.5) * 0.5) / RING_CAPS * Math.PI * 2, r = RING_R * (0.92 + rng() * 0.16);
+    const dx = Math.cos(a) * r, dz = Math.sin(a) * r;
+    spots.push(new THREE.Vector3(dx, height(p.x + dx, p.z + dz) - y0 + RING_CAP * 0.5, dz));
+  }
+  p.reshape(_ringMat, spots, RING_CAP, 'fairy mushrooms');
+}
+
 // The shared forageable: a placed group with one harvestable mesh that toggles
 // off when picked (E) and back on after `regrow`. A single visibility flip.
 function forageable(scene, grp, harvest, { x, z, kind, yieldRange, regrow, rng, fruitSpots = null, fruitSize = 1, basicMat = false }){
@@ -424,6 +442,12 @@ function forageable(scene, grp, harvest, { x, z, kind, yieldRange, regrow, rng, 
   scene.add(grp);
   return {
     x, z, kind, ripe: true, timer: 0,
+    // grow something else here instead: new cards (a fairy ring's circle: makeFairyRing)
+    reshape(mat, spots, size, newKind){
+      grp.remove(harvest); harvest.dispose();
+      harvest = makeFruitInst(mat, spots, size); harvest.visible = this.ripe; grp.add(harvest);
+      fruitSpots = spots; fruitSize = size; this.kind = newKind;
+    },
     grp,                                      // so the per-frame pass can hide the whole plant when it's out of sight
     mat: basicMat ? harvest.material : null,  // non-null only for MeshBasicMaterial items that need sky tinting
     tick(dt){ if (!this.ripe){ this.timer -= dt; if (this.timer <= 0){ this.ripe = true; harvest.visible = true; } } },
@@ -480,7 +504,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
                                          oaks = D(320), grass = D(9600), reeds = D(4000), bushes = D(80), fruitTrees = D(32),
                                          pussywillows = D(1680), cattails = D(2080),
                                          hazels = D(56), daisies = D(120), roots = D(72), mushrooms = D(80), acornPatches = D(64),
-                                         cattailRoots = D(48),
+                                         cattailRoots = D(48), elders = D(48),
                                          shells = D(96), stones = D(120), ambers = D(40), quartzes = D(48),
                                          pines = D(150), alders = D(120), sedges = D(6000), cottongrass = D(2500), heather = D(9000) } = {}){
   const atlas = makeLeafAtlas(fork(rng));
@@ -857,7 +881,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
   // Real foragers live mostly on gathered plants — starchy roots, storable nuts,
   // fungi, wetland tubers — so each food grows where it actually would.
   const hazelMat   = fruitSprite(19);   // brown round fruit (hazelnut)
-  const mushMats   = [makeMushroomTexture([150, 60, 44]), makeMushroomTexture([176, 132, 70])]
+  const mushMats   = [itemTexture('sprites/items/mushroom1.png'), makeMushroomTexture([176, 132, 70])]   // the friendly caps drawn, the morels still painted
     .map(t => new THREE.MeshLambertMaterial({ map: t, alphaTest: 0.5, side: THREE.DoubleSide }));
 
   for (let i = 0; i < hazels; i++){                          // hazelnut bushes (woodland)
@@ -1039,6 +1063,20 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       scatterFlower(id, PER_SPECIES, sunPool.slice(i*PATCHES_PER, (i+1)*PATCHES_PER)));
     DAPPLE_IDS.forEach((id, i) =>
       scatterFlower(id, PER_SPECIES, dapplePool.slice(i*PATCHES_PER, (i+1)*PATCHES_PER)));
+  }
+
+  // elder bushes, tall and open, black berry clusters in among the leaves: cut for their
+  // straight stems, to make pipes and tabor hoops of (making.js). Placed last, so nothing
+  // grown before them moves.
+  {
+    const elderBodies = variants({ ...SHRUB_SPECIES[1], targetHeight: 2.6 });
+    for (let i = 0; i < elders; i++){
+      const s = landSpot(new Set(['grass', 'mud'])); if (!s) continue;
+      const body = pickBody(elderBodies);
+      const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 8, 0.3, 0.9, frng);
+      plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat,
+        fruitMat: fruitMats.blue, fruitSpots, fruitSize: 0.2, kind: 'elder', yieldRange: [1, 2], regrow: 50 }));
+    }
   }
 
   return {

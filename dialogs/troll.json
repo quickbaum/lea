@@ -1,0 +1,85 @@
+{
+  "root": "greeting",
+  "speaker": "The troll",
+  "portrait": "sprites/troll_sitting.png",
+  "farewell": "Goodbye.",
+  "nodes": {
+    "greeting": {
+      "text": "A troll sits in the cave mouth, knees up, his big hands round his shins. There's no way past him. His red eyes follow you.\n\n\"Oh. Someone's stopped. Not many do.\"",
+      "choices": [
+        {
+          "label": "What's in the cave?",
+          "next": "cave"
+        },
+        {
+          "label": "Why do you sit here?",
+          "next": "why"
+        },
+        {
+          "label": "Can I go in?",
+          "next": "in"
+        },
+        {
+          "label": "Goodbye.",
+          "next": null
+        }
+      ]
+    },
+    "cave": {
+      "text": "\"Dark, mostly. Water. Fish with no eyes. It goes a long way under the hill, and then it stops.\"",
+      "choices": [
+        {
+          "label": "Why do you sit here?",
+          "next": "why"
+        },
+        {
+          "label": "Can I go in?",
+          "next": "in"
+        },
+        {
+          "label": "Goodbye.",
+          "next": null
+        }
+      ]
+    },
+    "why": {
+      "text": "\"The stone's cool and it's quiet. And on still nights I hear them playing at the fires, down the valley. Just a bit of it. The wind takes the rest.\"",
+      "choices": [
+        {
+          "label": "You like music?",
+          "next": "music"
+        },
+        {
+          "label": "Can I go in?",
+          "next": "in"
+        },
+        {
+          "label": "Goodbye.",
+          "next": null
+        }
+      ]
+    },
+    "music": {
+      "text": "\"I'd give a lot to hear a tune all the way through. Nobody'll come up here and play one, though. They see me and they turn round.\"",
+      "choices": [
+        {
+          "label": "Can I go in?",
+          "next": "in"
+        },
+        {
+          "label": "Goodbye.",
+          "next": null
+        }
+      ]
+    },
+    "in": {
+      "text": "He doesn't move.\n\n\"Not for nothing. Play me a tune, a whole one, all the way through, and I'll shift. Bring friends if you like. More the better.\"",
+      "choices": [
+        {
+          "label": "Goodbye.",
+          "next": null
+        }
+      ]
+    }
+  }
+}

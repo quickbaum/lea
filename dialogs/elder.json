@@ -1,0 +1,39 @@
+{
+  "root": "greeting",
+  "speaker": "The old troll",
+  "portrait": "sprites/troll_elder_sitting.png",
+  "farewell": "Goodbye.",
+  "nodes": {
+    "greeting": {
+      "text": "An old troll sits in the great mouth of the cave, so big his head is up among the hanging rock. Skulls clack on his wrists when he shifts. His eyes are pale and lit, like water with the sun in it.\n\n\"Hm. A small one.\"",
+      "choices": [
+        { "label": "What's in there?", "next": "cave" },
+        { "label": "Whose skulls are those?", "next": "skulls" },
+        { "label": "Can I go in?", "next": "in" },
+        { "label": "Goodbye.", "next": null }
+      ]
+    },
+    "cave": {
+      "text": "\"A hall. Bigger than this mouth, and green all through, like the old palaces. Arches the roof forgot to take with it.\"",
+      "choices": [
+        { "label": "Whose skulls are those?", "next": "skulls" },
+        { "label": "Can I go in?", "next": "in" },
+        { "label": "Goodbye.", "next": null }
+      ]
+    },
+    "skulls": {
+      "text": "\"Old friends. They don't mind. I'd not leave them out in the damp.\"",
+      "choices": [
+        { "label": "What's in there?", "next": "cave" },
+        { "label": "Can I go in?", "next": "in" },
+        { "label": "Goodbye.", "next": null }
+      ]
+    },
+    "in": {
+      "text": "He looks at you a long while.\n\n\"Not yet. The other one, down the valley, wants a tune. I want something too. I've not decided what.\"",
+      "choices": [
+        { "label": "Goodbye.", "next": null }
+      ]
+    }
+  }
+}

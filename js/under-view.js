@@ -16,12 +16,15 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { Geo } from './settle-view.js';
 import { ashlar, flags, rock, hewn, marble, relief, reliefFromImage, fresco } from './stone-tex.js';
 import { glass, jewels, outlines, outlinePath } from './glass.js';
-import { juliaMaterial } from './julia-tex.js';
+import { juliaMaterial, juliaWhen } from './julia-tex.js';
 import { pavement, PAVEMENTS } from './pavement.js';
-import { CELL, bayAt, STONES } from './gen/under.js';
+import { CELL, bayAt, STONES, mouthShape, halfWidth, mouthFloor, MOUTH } from './gen/under.js';
 import { ingredient } from './ingredients.js';
 import { Boats } from './boats.js';
 import { mulberry32 } from './rng.js';
+import { material, placedBox } from './matlib.js';
+import { brazierGeo, brazierCoals, lecternGeo, lecternBook } from './ornament.js';
+import { arcadeMesh } from './gen/arcade.js';
 import { wisps } from './wisps.js';
 
 const TILE = 3;                      // world size of one texture tile underground (u)
@@ -68,6 +71,7 @@ function materials(){
     dark: new THREE.MeshLambertMaterial({ color: 0x1b1814 }),
     black: new THREE.MeshBasicMaterial({ color: 0x050403 }),
     rock: lam(rk),
+    crag: lam(rk, { vc: false }),
     plain: new THREE.MeshLambertMaterial({ vertexColors: true }),
     iron: new THREE.MeshLambertMaterial({ vertexColors: true }),
     daylight: new THREE.MeshBasicMaterial({ color: 0xd8e6ee, fog: false, side: THREE.DoubleSide }),
@@ -137,25 +141,29 @@ export function buildEntrances(scene){
   return group;
 }
 
-// the openings' sizes, shared by the drawing and by entranceHit()
-const ARCH = { back: 1.0, W: 2.6, SPR: 1.8, sink: 0.6 };   // a cave mouth: set back into the hill, half-width, springing height
+// a crypt stair's opening, shared by the drawing and by entranceHit()
 const WELL = { L: 4.6, W: 1.5 };                            // the crypt stair: length back from the mouth, half-width
 
+// A cave mouth (gen/under.js mouthShape): worn rock out of gen/arcade.js, leaning back into
+// the hill, and behind the opening a dark passage going down, in the cut land.js made for it
+// (cutMouths: e.floor, e.depth), black at its end. Where the passage stands above the hill
+// a rock shell covers it.
+
 // Does a view ray (from o along unit d) hit this entrance's opening within
-// `reach`? Returns the distance along the ray, or -1. A cave mouth is its arch,
-// a vertical opening in the hillside; the stair is a hole in the floor. This is
+// `reach`? Returns the distance along the ray, or -1. A cave mouth is its opening,
+// upright in the hillside; the stair is a hole in the floor. This is
 // what E aims at, so it is the shape you see, not a point near it.
 export function entranceHit(e, ox, oy, oz, dx, dy, dz, reach){
   const fx = Math.cos(e.face), fz = Math.sin(e.face), tx = -fz, tz = fx;
   if (e.kind === 'cave'){
-    const px = e.x - fx * ARCH.back, pz = e.z - fz * ARCH.back, y0 = height(px, pz) - ARCH.sink;
-    const den = dx * fx + dz * fz;                         // facing the arch: the ray runs into the hill
+    const M = mouthShape(e), lean = MOUTH.LEAN * 2.5;      // the plane partway up the lean
+    const px = M.px - fx * lean, pz = M.pz - fz * lean, y0 = e.floor;
+    const den = dx * fx + dz * fz;                         // facing the mouth: the ray runs into the hill
     if (den > -0.05) return -1;
     const t = ((px - ox) * fx + (pz - oz) * fz) / den;
     if (t < 0 || t > reach) return -1;
     const u = (ox + dx * t - px) * tx + (oz + dz * t - pz) * tz, v = oy + dy * t - y0;
-    const top = v <= ARCH.SPR ? ARCH.W : Math.sqrt(Math.max(0, ARCH.W * ARCH.W - ((v - ARCH.SPR) / 0.95) ** 2));
-    return v >= 0 && Math.abs(u) <= top + 0.4 ? t : -1;
+    return v >= -0.3 && Math.abs(u) <= halfWidth(M.o, Math.max(v, 0)) + 0.4 ? t : -1;
   }
   if (dy > -0.05) return -1;                               // the stairwell: looking down at it
   const y = height(e.x - fx * WELL.L / 2, e.z - fz * WELL.L / 2), t = (y - oy) / dy;
@@ -165,43 +173,84 @@ export function entranceHit(e, ox, oy, oz, dx, dy, dz, reach){
 }
 
 function caveMouth(group, e, r, mats){
-  const fx = Math.cos(e.face), fz = Math.sin(e.face), tx = -fz, tz = fx;
-  const px = e.x - fx * ARCH.back, pz = e.z - fz * ARCH.back, y0 = height(px, pz) - ARCH.sink, DEPTH = 5;
-  // the arch's outline, left foot round the top to right foot (across, up)
-  const W = ARCH.W, SPR = ARCH.SPR, out = [[-W, 0]];
-  for (let q = 0; q <= 10; q++){ const a = Math.PI - q / 10 * Math.PI; out.push([Math.cos(a) * W, SPR + Math.sin(a) * W * 0.95]); }
-  out.push([W, 0]);
-  const P = (u, v, back) => [px + tx * u - fx * back, y0 + v, pz + tz * u - fz * back];
-  const G = new Geo(), Z = [0, 0];
-  for (let k = 0; k + 1 < out.length; k++){
-    const [u0, v0] = out[k], [u1, v1] = out[k + 1], mu = (u0 + u1) / 2, mv = (v0 + v1) / 2 - SPR * 0.5;
-    G.quad(P(u0, v0, 0), P(u1, v1, 0), P(u1, v1, DEPTH), P(u0, v0, DEPTH), Z, Z, Z, Z, [-tx * mu, -mv, -tz * mu], [0.5, 0.47, 0.44]);
+  const M = mouthShape(e), { o, A, fx, fz, tx, tz, px, pz } = M, k = MOUTH.LEAN, DEPTH = e.depth;
+  // the stone: arcade.js's faces in its plane, laid on the hillside, each column of it on the
+  // ground where it stands, leaning back (the normals sheared with it)
+  const W = arcadeMesh(A, 0.4), P = [], N = [], U = [];
+  const ground = new Map(), g = s => { const q = Math.round(s * 4); if (!ground.has(q)) ground.set(q, height(px + tx * s, pz + tz * s)); return ground.get(q); };
+  for (let i = 0; i < W.pos.length; i += 3){
+    const s = W.pos[i], y = W.pos[i + 1], v = W.pos[i + 2] - k * Math.max(y, 0);
+    P.push(px + tx * s + fx * v, g(s) + y, pz + tz * s + fz * v);
+    const ns = W.nrm[i], ny = W.nrm[i + 1] + (y > 0 ? k * W.nrm[i + 2] : 0), nv = W.nrm[i + 2], l = Math.hypot(ns, ny, nv) || 1;
+    N.push((tx * ns + fx * nv) / l, ny / l, (tz * ns + fz * nv) / l);
   }
-  group.add(G.mesh(mats.dark));
-  // the dark at the back
-  const B = new Geo();
-  for (let k = 0; k + 1 < out.length; k++) B.tri(P(0, SPR * 0.6, DEPTH), P(...out[k], DEPTH), P(...out[k + 1], DEPTH), Z, Z, Z, [fx, 0, fz], [1, 1, 1]);
-  group.add(B.mesh(mats.black));
-  // boulders round it and a brow of rock over it
-  const R = new Geo();
-  const rock = (cx, cz, cy, sx, sy, sz, a) => {
-    const c = Math.cos(a), s = Math.sin(a), hx = sx / 2, hz = sz / 2, k = 0.85 + r() * 0.25, col = [k, k * 0.97, k * 0.93];
-    const C = (u, v, y) => [cx + c * u - s * v, y, cz + s * u + c * v];
-    const uv = (a1, y) => [a1 / TILE, y / TILE];
-    for (const [u0, v0, u1, v1, ox, oz] of [[-hx, -hz, hx, -hz, 0, -1], [hx, -hz, hx, hz, 1, 0], [hx, hz, -hx, hz, 0, 1], [-hx, hz, -hx, -hz, -1, 0]])
-      R.quad(C(u0, v0, cy), C(u1, v1, cy), C(u1 * 0.8, v1 * 0.8, cy + sy), C(u0 * 0.8, v0 * 0.8, cy + sy), uv(0, 0), uv(sx, 0), uv(sx, sy), uv(0, sy), [c * ox - s * oz, 0, s * ox + c * oz], col);
-    R.quad(C(-hx * 0.8, -hz * 0.8, cy + sy), C(hx * 0.8, -hz * 0.8, cy + sy), C(hx * 0.8, hz * 0.8, cy + sy), C(-hx * 0.8, hz * 0.8, cy + sy), Z, [sx / TILE, 0], [sx / TILE, sz / TILE], [0, sz / TILE], [0, 1, 0], col);
-  };
-  for (let k = 1; k < out.length - 1; k += 2){
-    const [u, v] = out[k], l = Math.hypot(u, v - SPR * 0.5) || 1, push = 1.1 + r() * 0.6;
-    const cu = u + u / l * push, cv = v + (v - SPR * 0.5) / l * push * 0.6, [cx, , cz] = P(cu, 0, 0.4 + r());
-    const s = 1.6 + r() * 1.4;
-    rock(cx, cz, y0 + Math.max(-0.4, cv - s * 0.6), s, s * (0.8 + r() * 0.5), s * (0.9 + r() * 0.6), e.face + (r() - 0.5));
+  for (let i = 0; i < W.uv.length; i++) U.push(W.uv[i] / TILE);
+  group.add(meshOf(P, N, U, mats.crag));
+  // the passage: the opening's outline above its floor, carried back and down into the hill
+  const t0 = Math.asin(Math.min(1, Math.pow(o.y / o.bb, o.n / 2))), ring = [];
+  for (let q = 0; q <= 24; q++){
+    const th = -t0 + (Math.PI + 2 * t0) * q / 24, c = Math.cos(th), sn = Math.sin(th);
+    ring.push([o.s - o.a * Math.sign(c) * Math.pow(Math.abs(c), 2 / o.n), Math.max(0, o.y + (sn >= 0 ? o.bt : o.bb) * Math.sign(sn) * Math.pow(Math.abs(sn), 2 / o.n))]);
   }
-  for (const side of [-1, 1]){ const [cx, , cz] = P(side * (W + 1.4), 0, 0.2); rock(cx, cz, y0 - 0.3, 2.2 + r(), 1.8 + r(), 2.4, e.face + r()); }
-  const [bx, , bz] = P(0, 0, DEPTH * 0.45);
-  rock(bx, bz, y0 + SPR + W * 0.8, W * 2 + 2.4, 1.6, DEPTH + 2, e.face + Math.PI / 2);
-  group.add(R.mesh(mats.rock));
+  const at = (s, y, u) => { const back = k * y + u; return [px - fx * back + tx * s, mouthFloor(e, u) + y, pz - fz * back + tz * s]; };
+  // a troll's cave: you never go in by it (he sits in the way), so no passage, just the opening
+  // filled with black a stride in, its foot under the ground (the passage showed too deep,
+  // and things poked through it); the shell still covers the cut behind
+  if (e.troll){
+    const B = new Geo(), Z = [0, 0], mid = at(0, o.y, 1.2);
+    for (let q = 0; q + 1 < ring.length; q++) B.tri(mid, at(ring[q][0], ring[q][1] || -0.6, 1.2), at(ring[q + 1][0], ring[q + 1][1] || -0.6, 1.2), Z, Z, Z, [fx, 0, fz], [1, 1, 1]);
+    B.tri(mid, at(ring[ring.length - 1][0], -0.6, 1.2), at(ring[0][0], -0.6, 1.2), Z, Z, Z, [fx, 0, fz], [1, 1, 1]);
+    group.add(B.mesh(mats.black));
+  }
+  const G = new Geo(), Z = [0, 0], col = [0.5, 0.47, 0.44], steps = [0, 2, 4, 7, 11, 16, 22, 30, 40].filter(u => u < DEPTH).concat(DEPTH);
+  for (let d = 0; d + 1 < (e.troll ? 0 : steps.length); d++){
+    const u0 = steps[d], u1 = steps[d + 1], f = Math.max(0.15, 1 - u0 / 12), c2 = col.map(c => c * f);
+    for (let q = 0; q + 1 < ring.length; q++){
+      const [s0, y0r] = ring[q], [s1, y1] = ring[q + 1];
+      G.quad(at(s0, y0r, u0), at(s1, y1, u0), at(s1, y1, u1), at(s0, y0r, u1), Z, Z, Z, Z, [-tx * (s0 + s1), -(y0r + y1 - o.y * 2), -tz * (s0 + s1)], c2);
+    }
+    const [sl] = ring[0], [sr] = ring[ring.length - 1];        // the floor, over the cut's last unevenness
+    G.quad(at(sl, 0.3, u0), at(sl, 0.3, u1), at(sr, 0.3, u1), at(sr, 0.3, u0), Z, Z, Z, Z, [0, 1, 0], c2.map(c => c * 0.6));
+  }
+  if (!e.troll) group.add(G.mesh(mats.dark));
+  const B = new Geo(), mid = at(0, o.y, DEPTH);
+  for (let q = 0; q + 1 < ring.length; q++) B.tri(mid, at(...ring[q], DEPTH), at(...ring[q + 1], DEPTH), Z, Z, Z, [fx, 0, fz], [1, 1, 1]);
+  B.tri(mid, at(ring[ring.length - 1][0], 0, DEPTH), at(ring[0][0], 0, DEPTH), Z, Z, Z, [fx, 0, fz], [1, 1, 1]);
+  if (!e.troll) group.add(B.mesh(mats.black));
+  // the shell over it: the outline swollen out 1.6u, from behind the stone to the end, its feet
+  // a little under the ground, facing out
+  const SH = 1.6, sp = [], sn = [], su = [];
+  const out = ring.map(([s, y]) => { const l = Math.hypot(s, y - o.y) || 1; return [s + s / l * SH, y <= 0 ? -1 : y + (y - o.y) / l * SH, s / l, (y - o.y) / l]; });
+  const u0 = Math.min(DEPTH, 2), seg = Math.max(1, Math.ceil((DEPTH - u0) / 3));
+  for (let d = 0; d < seg; d++){
+    const ua = u0 + (DEPTH - u0) * d / seg, ub = u0 + (DEPTH - u0) * (d + 1) / seg;
+    for (let q = 0; q + 1 < out.length; q++){
+      const [s0, y0s, n0s, n0y] = out[q], [s1, y1s, n1s, n1y] = out[q + 1];
+      const V = [[s0, y0s, ua, n0s, n0y], [s1, y1s, ua, n1s, n1y], [s1, y1s, ub, n1s, n1y], [s0, y0s, ua, n0s, n0y], [s1, y1s, ub, n1s, n1y], [s0, y0s, ub, n0s, n0y]];
+      for (const [s, y, u, ns, ny] of V){ sp.push(...at(s, y, u)); sn.push(tx * ns, ny, tz * ns); su.push(u / TILE, (s + y) / TILE); }
+    }
+  }
+  // its end, closed
+  for (let q = 0; q + 1 < out.length; q++){ for (const [s, y] of [[0, o.y], out[q], out[q + 1]]){ sp.push(...at(s, y, DEPTH)); sn.push(-fx, 0, -fz); su.push(s / TILE, y / TILE); } }
+  group.add(meshOf(sp, sn, su, mats.crag));
+}
+
+// a mesh from flat arrays, each triangle wound to face the way its normals say (the worn
+// stone's faces come out of gen/arcade.js in their own plane, and laying them out can mirror them)
+export function meshOf(P, N, U, mat){
+  for (let k = 0; k < P.length; k += 9){
+    const e1 = [P[k + 3] - P[k], P[k + 4] - P[k + 1], P[k + 5] - P[k + 2]], e2 = [P[k + 6] - P[k], P[k + 7] - P[k + 1], P[k + 8] - P[k + 2]];
+    const c = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    if (c[0] * (N[k] + N[k + 3] + N[k + 6]) + c[1] * (N[k + 1] + N[k + 4] + N[k + 7]) + c[2] * (N[k + 2] + N[k + 5] + N[k + 8]) >= 0) continue;
+    for (let q = 0; q < 3; q++){ const i = k + 3 + q, j = k + 6 + q; [P[i], P[j]] = [P[j], P[i]]; [N[i], N[j]] = [N[j], N[i]]; }
+    const u = k / 3 * 2; for (let q = 0; q < 2; q++){ const i = u + 2 + q, j = u + 4 + q; [U[i], U[j]] = [U[j], U[i]]; }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+  g.computeBoundingSphere();
+  return new THREE.Mesh(g, mat);
 }
 
 function stairwell(group, e, r, mats){
@@ -299,16 +348,31 @@ export function faerieKit(){
   const base = materials(), c = palaceMats(base.crypt);
   return { floor: c.floor, wall: c.walls.M, mosaic: c.ceil, verde: c.verde, porphyry: c.porphyry, gold: base.gold, water: base.water, env: palaceEnv(), tile: TILE };
 }
+// The elder's cave (gen/under.js `grand`) is verde all through, the Faerie palaces' green
+// (julia-calc.js verdeSlab): malachite-banded, as that green really grows in caves.
+// Not polished like a palace's columns: no metal, no clear coat, a slab every 9u. Plain green
+// until the slab's made. Shared, never disposed.
+let VERDE = null;
+function verdeCave(){
+  if (VERDE) return VERDE;
+  const m = new THREE.MeshStandardMaterial({ color: 0x2f6a52, roughness: 0.6, metalness: 0, vertexColors: true });
+  juliaWhen('verdeSlab', t => {
+    const own = x => { const c = x.clone(); c.repeat.set(TILE / 9, TILE / 9); c.needsUpdate = true; return c; };
+    Object.assign(m, { map: own(t.map), normalMap: own(t.normalMap), roughnessMap: own(t.orm), roughness: 1 });
+    m.color.set(0xffffff); m.normalScale.set(1.4, 1.4); m.needsUpdate = true;
+  });
+  return VERDE = { floor: m, wall: m, ceil: m };
+}
 export function buildLevelView(L){
   const base = materials(), stone = L.kind === 'crypt' && L.style ? L.style.stone : 'grey';
-  const mats = L.site === 'palace' ? { ...base, crypt: palaceMats(base.crypt) } : stone === 'grey' ? base : { ...base, crypt: tinted(base.crypt, stone) }, M = L.kind === 'cave' ? mats.cave : mats.crypt;
+  const mats = L.site === 'palace' ? { ...base, crypt: palaceMats(base.crypt) } : stone === 'grey' ? base : { ...base, crypt: tinted(base.crypt, stone) }, M = L.kind === 'cave' ? (L.grand ? verdeCave() : mats.cave) : mats.crypt;
   const scene = new THREE.Scene();
   // a Faerie palace (gen/faerie.js) is brightly lit, its far end lost in a pale haze, not the dark
   const palace = L.site === 'palace';
   if (palace) lightFaerie(scene);
   else {
     scene.background = new THREE.Color(0x000000);
-    scene.fog = new THREE.Fog(0x000000, 5, L.kind === 'cave' ? (L.cavern ? 55 : 34) : 70);   // a crypt's halls, and a cave's great cavern, are big enough to want further
+    scene.fog = new THREE.Fog(0x000000, 5, L.kind === 'cave' ? (L.grand ? 100 : L.cavern ? 55 : 34) : 70);   // a crypt's halls, and a cave's great cavern, are big enough to want further; the elder's hall further still
     // a crypt's dark is grey; a cave's is faintly the foxfire' blue-green, never quite black
     scene.add(L.kind === 'cave' ? new THREE.AmbientLight(GLOW, 0.05) : new THREE.AmbientLight(0x3a4250, 0.35));
   }
@@ -347,7 +411,7 @@ export function buildLevelView(L){
   // daylight at each mouth: the way out
   for (const m of L.mouths){
     if (m.grand){ grandDoor(scene, L, m, mats); continue; }
-    const w = L.kind === 'cave' ? 6 : 4.2, h = L.kind === 'cave' ? 5 : 4, y = L.floorAt(m.x, m.z) - 0.5;
+    const S = m.scale || 1, w = (L.kind === 'cave' ? 6 : 4.2) * S, h = (L.kind === 'cave' ? 5 : 4) * S, y = L.floorAt(m.x, m.z) - 0.5;
     const q = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mats.daylight);
     q.position.set(m.x + Math.cos(m.face) * 0.6, y + h / 2, m.z + Math.sin(m.face) * 0.6);
     q.rotation.y = Math.PI / 2 - m.face;            // the plane faces back down the passage
@@ -361,16 +425,22 @@ export function buildLevelView(L){
     scene.add(w);
   }
   if (L.drips && L.drips.length) dripstone(L, scene, mats);
+  if (L.grand) grandHall(L, scene);
   if (L.shelves && L.shelves.length) bookshelves(L, scene, mats);
+  const locks = (L.doors && L.doors.length) || (L.chests && L.chests.length) ? doorsAndChests(L, scene) : null;
   const glow = glowLights(L, scene);
   // the finds: each its own little group, hidden once taken
   for (const f of L.finds){
     const g = new THREE.Group(), r = mulberry32(Math.round(f.x * 13 + f.z * 7));
     const y = f.y ?? L.floorAt(f.x, f.z);
     const ing = ingredient(f.kind), pic = ing?.pic;
-    if (pic){                                                    // a picture of it, always facing you, standing on the floor
-      const s = new THREE.Sprite(picMat((f.n > 1 && pic[1]) || pic[0], ing.virtues?.includes('shine'))), w = f.n > 1 && pic[1] ? 0.85 : 0.6;
-      s.center.set(0.5, 0); s.scale.set(w, w * 96 / 90, 1); g.add(s);
+    if (pic){                                                    // a picture of it, standing up, turned to you
+      const pm = picMat((f.n > 1 && pic[1]) || pic[0], ing.virtues?.includes('shine')), card = new THREE.Mesh(CARD, pm.mat);
+      const span = ing.span || (f.n > 1 && pic[1] ? 0.9 : 0.64);   // its longer side, in u
+      const fit = a => card.scale.set(a >= 1 ? span : span * a, a >= 1 ? span / a : span, 1);
+      card.position.y = 0.01; card.userData.card = true;
+      if (pm.aspect) fit(pm.aspect); else { card.scale.set(0.001, 0.001, 1); pm.waiting.push(fit); }
+      g.add(card); f.card = card;
     } else if (f.kind === 'quartz') for (let q = 0; q < 3 + f.n; q++){
       const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.16, 0), mats.quartz);
       m.scale.set(1, 2.4 + r() * 1.6, 1); m.position.set((r() - 0.5) * 0.5, 0.2, (r() - 0.5) * 0.5);
@@ -399,6 +469,7 @@ export function buildLevelView(L){
       g.add(stem, cap);
     }
     g.position.set(f.x, y, f.z); g.visible = !f.taken; f.view = g;
+    if (f.chest != null && ing?.group === 'key') g.userData.hover = { y, ph: r() * 6.28 };   // a key rises out of its chest and hangs over it (update())
     scene.add(g);
   }
   // past the fog nothing shows, so don't draw it: the other floors, the far end of a cave
@@ -427,7 +498,13 @@ export function buildLevelView(L){
       }
       torch.position.set(camera.position.x, camera.position.y - 0.25, camera.position.z);
       torch.intensity = (palace ? 0 : TORCH.intensity) * (0.9 + 0.06 * Math.sin(t * 11) + 0.04 * Math.sin(t * 23.7));
-      for (const f of L.finds) if (f.view) f.view.visible = !f.taken;
+      for (const f of L.finds) if (f.view){
+        f.view.visible = !f.taken && (f.chest == null || L.chests[f.chest].t > 0.5);   // (what's in a chest shows once its lid is up)
+        if (f.card && f.view.visible) f.card.rotation.y = Math.atan2(camera.position.x - f.x, camera.position.z - f.z);
+        const hv = f.view.userData.hover;
+        if (hv && f.view.visible) f.view.position.y = hv.y + (0.45 + 0.04 * Math.sin(t * 1.6 + hv.ph)) * ease((L.chests[f.chest].t - 0.5) / 0.5);
+      }
+      if (locks) locks.update(dt);
       glow.update(camera, t);
       if (boats) boats.update(dt, t);
       if (crypt) crypt.update(dt, camera, t);
@@ -485,16 +562,24 @@ function grandDoor(scene, L, m, mats){
 }
 
 // a find's picture (ingredients.js `pic`), one material per image, kept for the next level.
-// A sprite takes no light, so it's never dark; what shines of itself (the foxfire) shows
-// through the fog too, and the rest fades into it like the rock
+// It takes no light, so it's never dark; what shines of itself (the foxfire) shows through
+// the fog too, and the rest fades into it like the rock. Pixels stay square at any distance
+// (nearest, no mipmaps). `aspect` (width / height) is known once the image is in; until then
+// `waiting` holds what wants it.
 const PIC_MAT = new Map();
 function picMat(src, shine){
   if (!PIC_MAT.has(src)){
-    const t = new THREE.TextureLoader().load(src); t.colorSpace = THREE.SRGBColorSpace; t.magFilter = THREE.NearestFilter;
-    PIC_MAT.set(src, new THREE.SpriteMaterial({ map: t, alphaTest: 0.5, fog: !shine }));
+    const e = { mat: null, aspect: 0, waiting: [] };
+    const t = new THREE.TextureLoader().load(src, tex => { e.aspect = tex.image.width / tex.image.height; for (const f of e.waiting.splice(0)) f(e.aspect); });
+    t.colorSpace = THREE.SRGBColorSpace; t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+    e.mat = new THREE.MeshBasicMaterial({ map: t, alphaTest: 0.5, fog: !shine, side: THREE.DoubleSide });
+    PIC_MAT.set(src, e);
   }
   return PIC_MAT.get(src);
 }
+// a stand-up card, its foot on the ground: it turns about its upright to face you (update()),
+// never tips, so it can't dip into what it stands on
+const CARD = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
 
 // a painted vault's material, made the first time a room needs it (stone-tex.js fresco)
 const FRESCO_MAT = new Map();
@@ -859,16 +944,16 @@ function cryptView(L, scene, mats){
   // torches on the walls: an iron bracket and a pitch-wrapped head; lit ones get
   // a flame, and lend themselves one of a few lights (a fixed pool, so the
   // scene's light count never changes and nothing recompiles)
-  const I = new Geo();
+  const I = new Geo(), braziers = [];
   for (const sc of L.sconces){
     if (sc.kind === 'brazier'){
-      // a standing brazier: three iron legs, a bowl, coals; a big fire when lit
-      for (let q = 0; q < 3; q++){ const a = q / 3 * Math.PI * 2; boxUV(I, sc.x + Math.cos(a) * 0.35, sc.z + Math.sin(a) * 0.35, sc.y - 0.1, sc.y + 1.0, 0.08, 0.08, a, [0.16, 0.15, 0.14]); }
-      boxUV(I, sc.x, sc.z, sc.y + 0.95, sc.y + 1.25, 1.0, 1.0, Math.PI / 4, [0.18, 0.17, 0.16]);
-      boxUV(I, sc.x, sc.z, sc.y + 1.25, sc.y + 1.32, 0.8, 0.8, 0, [0.1, 0.08, 0.07]);
+      // a standing brazier in wrought iron (ornament.js brazierGeo), its coals glowing when lit,
+      // and a big fire over them
+      braziers.push(sc);
+      const coals = new THREE.Mesh(brazierCoals(), sc.lit ? COALS.lit : COALS.dead); coals.position.set(sc.x, sc.y - 0.05, sc.z); coals.rotation.y = hash(sc.x | 0, sc.z | 0, 6) * 6.28;
       const fl = new THREE.Sprite(mats.flame); fl.scale.set(0.9, 1.4, 1); fl.position.set(sc.x, sc.y + 1.95, sc.z); fl.visible = sc.lit;
       const ha = new THREE.Sprite(mats.halo); ha.scale.set(5, 5, 1); ha.position.set(sc.x, sc.y + 1.8, sc.z); ha.visible = sc.lit;
-      scene.add(fl, ha); sc.view = { fls: [[fl, 0.9, 1.4]], ha, ph: hash(sc.x | 0, sc.z | 0, 5) * 10 };
+      scene.add(coals, fl, ha); sc.view = { fls: [[fl, 0.9, 1.4]], ha, coals, ph: hash(sc.x | 0, sc.z | 0, 5) * 10 };
       continue;
     }
     if (sc.kind === 'candles' || sc.kind === 'altarCandle'){
@@ -900,6 +985,11 @@ function cryptView(L, scene, mats){
     scene.add(fl, ha); sc.view = { fls: [[fl, 0.32, 0.62]], ha, ph: hash(sc.x | 0, sc.z | 0, 5) * 10 };
   }
   const im = I.mesh(mats.iron); if (im) scene.add(im);
+  if (braziers.length){
+    const inst = new THREE.InstancedMesh(brazierGeo(), ironTwoSided(), braziers.length), mx = new THREE.Matrix4();
+    braziers.forEach((sc, q) => { mx.makeRotationY(hash(sc.x | 0, sc.z | 0, 6) * 6.28); mx.setPosition(sc.x, sc.y - 0.05, sc.z); inst.setMatrixAt(q, mx); });
+    inst.computeBoundingSphere(); scene.add(inst);
+  }
   const POOL = L.site === 'palace' ? 0 : 5, pool = [];        // (a palace has no torches: gen/faerie.js)
   for (let q = 0; q < POOL; q++){ const l = new THREE.PointLight(0xff9a48, 0, 18, 1.4); scene.add(l); pool.push(l); }
 
@@ -924,6 +1014,7 @@ function cryptView(L, scene, mats){
       });
       for (const sc of L.sconces){
         const v = sc.view; v.ha.visible = sc.lit;
+        if (v.coals) v.coals.material = sc.lit ? COALS.lit : COALS.dead;
         v.fls.forEach(([fl, w, h], q) => {
           fl.visible = sc.lit;
           if (sc.lit){ const f = 0.9 + 0.12 * Math.sin(time * 13 + v.ph + q) * Math.sin(time * 7.3 + v.ph); fl.scale.set(w * (0.95 + 0.1 * Math.sin(time * 17 + v.ph + q * 2)), h * f, 1); }
@@ -933,6 +1024,15 @@ function cryptView(L, scene, mats){
   };
 }
 
+// the brazier's iron, two-sided for its thin petals, and its coals, dead or burning: shared
+// by every crypt (never disposed, like matlib's)
+let IRON2 = null;
+const ironTwoSided = () => IRON2 || (IRON2 = Object.assign(material('wrought iron').clone(), { side: THREE.DoubleSide }));
+const COALS = {
+  dead: new THREE.MeshStandardMaterial({ color: 0x1c1712, roughness: 0.95 }),
+  lit: new THREE.MeshStandardMaterial({ color: 0x2a140a, roughness: 0.9, emissive: 0xff5418, emissiveIntensity: 1.1 }),
+};
+
 // ---- books -----------------------------------------------------------------------------
 // The shelves (gen/under.js shelves()): an oak case against the wall, four boards. Whole
 // ('book'): rows of books in old dyed leather, one of them sound; 'ruined': a few left,
@@ -941,6 +1041,7 @@ function bookshelves(L, scene, mats){
   const G = new Geo(), oak = [0.42, 0.3, 0.2], dark = [0.3, 0.22, 0.15];
   const DYES = [[0.5, 0.18, 0.14], [0.22, 0.28, 0.42], [0.45, 0.36, 0.2], [0.24, 0.34, 0.22], [0.52, 0.44, 0.34], [0.32, 0.2, 0.26]];
   for (const sh of L.shelves){
+    if (sh.lectern) continue;
     const r = mulberry32(sh.seed), nx = Math.cos(sh.face), nz = Math.sin(sh.face), tx = -nz, tz = nx, a = Math.atan2(tz, tx);
     // a point `u` along the wall, `v` out from the back
     const P = (u, v) => [sh.x + tx * u + nx * (v - sh.d / 2), sh.z + tz * u + nz * (v - sh.d / 2)];
@@ -971,6 +1072,147 @@ function bookshelves(L, scene, mats){
     }
   }
   const m = G.mesh(mats.plain); if (m) scene.add(m);
+  lecterns(L, scene);
+}
+// A choir lectern (gen/under.js songs()): oak (ornament.js lecternGeo), its desk sloping down
+// to the reader at sh.face, the choir book open on it in square notation
+function lecterns(L, scene){
+  const list = L.shelves.filter(sh => sh.lectern);
+  if (!list.length) return;
+  const { boards, pages } = lecternBook(), mx = new THREE.Matrix4();
+  const parts = [[lecternGeo(), material('oak')], [boards, LEATHER], [pages, choirPage()]];
+  for (const [g, m] of parts){
+    const inst = new THREE.InstancedMesh(g, m, list.length);
+    list.forEach((sh, q) => { mx.makeRotationY(Math.PI / 2 - sh.face); mx.setPosition(sh.x, sh.y, sh.z); inst.setMatrixAt(q, mx); });   // local +z to the reader
+    inst.computeBoundingSphere(); scene.add(inst);
+  }
+}
+const LEATHER = new THREE.MeshStandardMaterial({ color: 0x4a2418, roughness: 0.8 });
+// two facing pages of a choir book: red four-line staves, black square notes, a red initial
+let PAGE = null;
+function choirPage(){
+  if (PAGE) return PAGE;
+  const W = 256, H = 96, cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'), r = mulberry32(0xc401);
+  g.fillStyle = '#d9c9a3'; g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(90,60,30,0.25)'; g.fillRect(W / 2 - 3, 0, 6, H);                       // the gutter
+  for (const x0 of [10, W / 2 + 8]){
+    for (let st = 0; st < 3; st++){
+      const y0 = 12 + st * 28;
+      g.fillStyle = '#a3301e'; for (let l = 0; l < 4; l++) g.fillRect(x0, y0 + l * 4, W / 2 - 18, 1);
+      g.fillStyle = '#1a1410';
+      for (let x = x0 + (st === 0 && x0 === 10 ? 16 : 4); x < x0 + W / 2 - 24; x += 6 + (r() * 6 | 0)){
+        const y = y0 - 2 + (r() * 6 | 0) * 2; g.fillRect(x, y, 3, 3);
+        if (r() < 0.3) g.fillRect(x + 2, y, 1, 7);                                            // a stem
+      }
+      g.fillStyle = 'rgba(40,30,20,0.6)'; for (let x = x0 + 4; x < x0 + W / 2 - 24; x += 4 + (r() * 4 | 0)) g.fillRect(x, y0 + 17, 2 + (r() * 2 | 0), 2);   // the words under
+    }
+  }
+  g.fillStyle = '#a3301e'; g.fillRect(10, 10, 12, 16);                                         // the initial
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.generateMipmaps = false;
+  return (PAGE = new THREE.MeshStandardMaterial({ map: t, roughness: 0.9, side: THREE.DoubleSide }));
+}
+
+// ---- doors and chests (gen/under.js doors(), chests(); docs/under.md "Keys and chests") ----
+// Their oak and iron are the Lea's shared materials (matlib.js).
+// a door's emblem (sprites/keys/cathedral_door_N.png: black lines on clear) as a white mask,
+// to be tinted iron by its material
+const MASKS = new Map();
+function emblemMask(src){
+  if (MASKS.has(src)) return MASKS.get(src);
+  const cv = document.createElement('canvas'); cv.width = 200; cv.height = 300;
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
+  const img = new Image();
+  img.onload = () => { const g = cv.getContext('2d'); g.drawImage(img, 0, 0, cv.width, cv.height); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); t.needsUpdate = true; };
+  img.src = src;
+  MASKS.set(src, t);
+  return t;
+}
+const ease = e => (e = Math.max(0, Math.min(1, e)), e * e * (3 - 2 * e));
+const merged = parts => { const g = mergeGeometries(parts); for (const q of parts) q.dispose(); return g; };
+// A pair of oak leaves hung just inside a locked room's doorway, inside the ring of voussoirs
+// on half-columns set in the passage's mouth round it (gen/under.js doors() adds that to
+// L.doorways). Banded in iron below the emblem, and short of it above; the lock under it at
+// the meeting of the leaves. The emblem is worked in iron across the two: each leaf carries
+// its half, so it parts down the middle as they open. Unlocked, they swing 90° into the
+// room (d.t, 0 → 1). Everything scales from the opening: d.half wide each, straight to
+// d.head, then a half-circle.
+// A chest: an oak coffer, iron-bound, its lid hinged at the back, lifting (c.t, 0 → 1).
+// What's in an open chest hovers over it if it's a key (update()).
+function doorsAndChests(L, scene){
+  const oakB = material('oak boards'), oak = material('oak'), iron = material('wrought iron');
+  const leaves = [], lids = [];
+  for (const d of L.doors || []){
+    const H = d.half, TH = 0.14, Dx = Math.cos(d.a), Dz = Math.sin(d.a), Tx = -Dz, Tz = Dx;
+    const EW = H * 0.8, EH = EW * 1.5, ey = 1.5 + EH / 2;          // the emblem, from 1.5u up: its top corners stay under the arch
+    // the leaf, hinge at x = 0, its free edge at x = H on the middle line, cut to the arch
+    const sh = new THREE.Shape(); sh.moveTo(0, 0.02); sh.lineTo(H - 0.012, 0.02); sh.lineTo(H - 0.012, d.head + H);
+    for (let q = 1; q <= 16; q++){ const x = H - 0.012 - (H - 0.012) * q / 16; sh.lineTo(x, d.head + Math.sqrt(Math.max(0, H * H - (H - x) * (H - x)))); }
+    const geo = new THREE.ExtrudeGeometry(sh, { depth: TH, bevelEnabled: false }); geo.translate(0, 0, -TH / 2);
+    // iron: straps across both faces (the upper two stopping short of the emblem), the hinge
+    // pins, and on the right leaf the lock, under the emblem at the leaves' meeting
+    const ironParts = side => {
+      const P = [];
+      for (const [y, x1] of [[0.45, H - 0.08], [1.05, side ? H - 0.48 : H - 0.08], [d.head - 0.35, H - EW / 2 - 0.12]]){   // (all under the springing, so none runs past the leaf's head)
+        P.push(placedBox(x1 / 2, y, 0, x1, 0.13, TH + 0.04, 0, 'x'));
+        P.push(placedBox(0.05, y, 0, 0.1, 0.24, TH + 0.07));
+      }
+      if (side){ P.push(placedBox(H - 0.22, 1.12, 0, 0.26, 0.36, TH + 0.05)); P.push(placedBox(H - 0.22, 1.36, -(TH / 2 + 0.04), 0.07, 0.07, 0.04)); }   // the lock, and the ring to pull
+      return merged(P);
+    };
+    const mask = emblemMask(d.pic);
+    for (const side of [0, 1]){                                     // 0: the left as you face it (hung at -T), 1: the right
+      const pivot = new THREE.Group(), sg = side ? -1 : 1;
+      pivot.position.set(d.x - Tx * H * sg + Dx * 0.1, d.y, d.z - Tz * H * sg + Dz * 0.1);   // the hinge, a hand in from the doorway's line
+      const phi = side ? Math.atan2(Tz, -Tx) : Math.atan2(-Tz, Tx);   // local x from the hinge to the middle
+      pivot.add(new THREE.Mesh(geo, oakB), new THREE.Mesh(ironParts(side), iron));
+      if (side){ const kh = new THREE.Mesh(new THREE.PlaneGeometry(0.05, 0.12), new THREE.MeshBasicMaterial({ color: 0x000000 })); kh.material.userData.own = true; kh.position.set(H - 0.22, 1.08, -(TH / 2 + 0.031)); kh.rotation.y = Math.PI; pivot.add(kh); }
+      // the emblem's half, in three layers stood off the face, so it reads as iron in relief
+      const pg = new THREE.PlaneGeometry(EW / 2, EH), uv = pg.attributes.uv;
+      for (let q = 0; q < uv.count; q++) uv.setX(q, uv.getX(q) * 0.5 + side * 0.5);
+      for (let k = 0; k < 3; k++){
+        const m = new THREE.MeshStandardMaterial({ map: mask, color: k === 2 ? 0x5a544e : 0x1c1916, metalness: 0.8, roughness: k === 2 ? 0.45 : 0.7, alphaTest: 0.5 });
+        m.userData.own = true;
+        const e = new THREE.Mesh(pg, m), z = TH / 2 + 0.006 + k * 0.011;
+        e.position.set(H - EW / 4, ey, side ? -z : z); if (side) e.rotation.y = Math.PI;   // on the room's face (the right leaf's room face is its -z)
+        pivot.add(e);
+      }
+      scene.add(pivot);
+      leaves.push({ d, pivot, phi, dir: side ? -1 : 1 });
+    }
+  }
+  for (const c of L.chests || []){
+    const g = new THREE.Group(); g.position.set(c.x, c.y, c.z); g.rotation.y = Math.atan2(Math.cos(c.face), Math.sin(c.face));   // local z out from the wall
+    const W = c.w, D = c.d, BH = c.h - 0.18, bh = (BH - 0.06) / 3, wood = [], irons = [];
+    for (let q = 0; q < 3; q++){ const y = 0.06 + q * bh + bh / 2 - 0.005;          // three boards to a side, the grain along them
+      wood.push(placedBox(0, y, D / 2 - 0.03, W, bh - 0.01, 0.06, 0, 'x'), placedBox(0, y, -D / 2 + 0.03, W, bh - 0.01, 0.06, 0, 'x'));
+      wood.push(placedBox(W / 2 - 0.03, y, 0, 0.06, bh - 0.01, D - 0.12, 0, 'z'), placedBox(-W / 2 + 0.03, y, 0, 0.06, bh - 0.01, D - 0.12, 0, 'z')); }
+    wood.push(placedBox(0, 0.09, 0, W - 0.12, 0.06, D - 0.12, 0, 'x'));                // the floor inside
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]){
+      irons.push(placedBox(sx * (W / 2 - 0.08), 0.04, sz * (D / 2 - 0.08), 0.18, 0.08, 0.18));     // feet
+      irons.push(placedBox(sx * (W / 2 - 0.01), 0.06 + (BH - 0.06) / 2, sz * (D / 2 - 0.01), 0.06, BH - 0.06, 0.06));   // corner irons
+    }
+    for (const x of [-W / 2 + 0.25, W / 2 - 0.25]) for (const sz of [-1, 1]) irons.push(placedBox(x, 0.06 + (BH - 0.06) / 2, sz * D / 2, 0.1, BH - 0.06, 0.02));   // bands
+    g.add(new THREE.Mesh(merged(wood), oak), new THREE.Mesh(merged(irons), iron));
+    // the lid: hinged at the back edge of the top
+    const lid = new THREE.Group(); lid.position.set(0, BH, -D / 2);
+    lid.add(new THREE.Mesh(merged([placedBox(0, 0.055, D / 2, W + 0.04, 0.11, D + 0.04, 0, 'x'), placedBox(0, 0.14, D / 2, W - 0.1, 0.06, D - 0.1, 0, 'x')]), oak));
+    lid.add(new THREE.Mesh(merged([...[-W / 2 + 0.25, W / 2 - 0.25].map(x => placedBox(x, 0.145, D / 2, 0.1, 0.07, D + 0.06)), placedBox(0, -0.06, D + 0.035, 0.12, 0.28, 0.03)]), iron));   // bands, and the hasp
+    g.add(lid); scene.add(g);
+    lids.push({ c, lid });
+  }
+  const pose = () => {
+    for (const l of leaves) l.pivot.rotation.y = l.phi + l.dir * Math.PI * 0.5 * ease((l.d.t - 0.2) / 0.8);   // (a moment for the key to turn)
+    for (const l of lids) l.lid.rotation.x = -1.95 * ease(l.c.t);
+  };
+  pose();
+  return {
+    update(dt){
+      for (const d of L.doors || []) if (d.open && d.t < 1) d.t = Math.min(1, d.t + dt / 2.2);
+      for (const c of L.chests || []) if (c.open && c.t < 1) c.t = Math.min(1, c.t + dt / 0.9);
+      pose();
+    },
+  };
 }
 
 // ---- the deep: dripstone and the glow's light ---------------------------------------
@@ -998,6 +1240,45 @@ function dripstone(L, scene, mats){
     }
   }
   const m = G.mesh(mats.drip); if (m) scene.add(m);
+}
+// The elder's hall (gen/under.js grand): the day falling in through his great mouth, far into
+// the hall and over its ledges (no shadows: it leaks a little round corners), and the natural
+// arches. Each arch a rough tube from foot to foot, wider than deep, thickest at its feet, which
+// run on under the floor; lumpy by a few waves round and along it, so it's rock, not a pipe.
+function grandHall(L, scene){
+  const G = L.grand, m = L.mouths[0], fx = -Math.cos(m.face), fz = -Math.sin(m.face), my = L.floorAt(m.inX, m.inZ);
+  const sun = new THREE.SpotLight(0xe4ecff, 45, 170, 0.75, 0.9, 1);
+  sun.position.set(m.x + fx * 2, my + 9, m.z + fz * 2);
+  sun.target.position.set(G.x + fx * G.R * 0.4, G.base - 4, G.z + fz * G.R * 0.4);
+  scene.add(sun, sun.target);
+  const geo = new Geo(), M = verdeCave().wall, SEG = 48, RING = 12;
+  for (const A of L.arches || []){
+    const rnd = mulberry32(A.seed), ph = Array.from({ length: 4 }, () => rnd() * 6.28);
+    const dx = A.bx - A.ax, dz = A.bz - A.az, len = Math.hypot(dx, dz), hx = -dz / len, hz = dx / len;   // across the arch, level
+    const mid = s => [A.ax + dx * s, A.ay + (A.by - A.ay) * s + A.rise * Math.sign(Math.sin(Math.PI * s)) * Math.abs(Math.sin(Math.PI * s)) ** 0.85, A.az + dz * s];
+    const ring = q => {
+      const s = -0.07 + 1.14 * q / SEG, c = mid(s), n = mid(s + 0.01), p = mid(s - 0.01);
+      const t = [n[0] - p[0], n[1] - p[1], n[2] - p[2]], tl = Math.hypot(...t);
+      const u = [t[1] * hz / tl, (t[2] * hx - t[0] * hz) / tl, -t[1] * hx / tl];        // t × h: square to both the arch and across it
+      const th = A.rad * (1 + 0.6 * (1 - Math.min(1, Math.sin(Math.PI * Math.min(1, Math.max(0, s))))));
+      return Array.from({ length: RING + 1 }, (_, k) => {
+        const a = k / RING * Math.PI * 2, lump = 0.82 + 0.12 * Math.sin(s * 19 + ph[0] + a * 2) + 0.08 * Math.sin(s * 43 + ph[1] + a * 5) + 0.05 * Math.sin(a * 3 + ph[2]);
+        const ca = Math.cos(a) * th * 1.3 * lump, sa = Math.sin(a) * th * 0.85 * lump;
+        return { p: [c[0] + hx * ca + u[0] * sa, c[1] + u[1] * sa, c[2] + hz * ca + u[2] * sa], o: [hx * Math.cos(a) + u[0] * Math.sin(a), u[1] * Math.sin(a), hz * Math.cos(a) + u[2] * Math.sin(a)], s, a };
+      });
+    };
+    let prev = ring(0);
+    for (let q = 1; q <= SEG; q++){
+      const cur = ring(q);
+      for (let k = 0; k < RING; k++){
+        const a = prev[k], b = prev[k + 1], c = cur[k + 1], d = cur[k], out = a.o.map((v, i) => v + b.o[i] + c.o[i] + d.o[i]);
+        const uv = v => [v.s * len / TILE, v.a * A.rad / TILE], sh = 0.8 + 0.2 * out[1] / 4;   // a little darker underneath
+        geo.quad(a.p, b.p, c.p, d.p, uv(a), uv(b), uv(c), uv(d), out, [sh, sh, sh]);
+      }
+      prev = cur;
+    }
+  }
+  const mesh = geo.mesh(M); if (mesh) scene.add(mesh);
 }
 // The foxfire' light: what shines of itself (ingredients.js virtue 'shine') really lights
 // the rock round it. A few blue-green lights, a fixed set so the shaders don't change, go
@@ -1155,7 +1436,9 @@ function pavingOf(R, ri, big, salt = 0){
   if (by[R.kind]) return by[R.kind];
   return fl >= 4 ? ['panels', 'quincunx', 'rotae'][ri % 3] : ['encausticA', 'encausticB', 'cistercian'][ri % 3];
 }
-const tierOf = fl => fl >= 5 ? 'glow' : fl >= 4 ? 'gems' : fl >= 2 ? 'marble' : 'lead';     // 'glow': a palace's, the gems lit from behind
+// 'glow' is a palace's only, the gems lit from behind as by daylight; a crypt's deepest floors
+// are gems unlit, however deep (depthOf puts a palace and a crypt's sixth floor both at 5)
+const tierOf = (fl, palace) => palace ? 'glow' : fl >= 4 ? 'gems' : fl >= 2 ? 'marble' : 'lead';
 // `stone`: the crypt's own (gen/under.js STONES), which tints the carving; not the tracery's inlay
 function reliefMat(pattern, panel, mats, variant = 0, tier = 'gems', stone = 'grey'){
   const tr0 = TRACERY[pattern], key = pattern + (panel ? ':p' : ':f') + '#' + variant + ':' + tier + (tr0 ? '' : ':' + stone);
@@ -1215,7 +1498,7 @@ function reliefs(L, scene, mats){
   }
   for (const p of L.panels){
     const tr = TRACERY[p.pattern], fl = tr ? panelFloor(L, p) : 0;
-    const g = G(p.pattern + ':p:' + (tr ? Math.abs(Math.round(p.x * 7 + p.z * 13)) % 3 + ':' + tierOf(fl) : 0)), fx = Math.cos(p.face), fz = Math.sin(p.face), tx = -fz, tz = fx, out = [fx, 0, fz];
+    const g = G(p.pattern + ':p:' + (tr ? Math.abs(Math.round(p.x * 7 + p.z * 13)) % 3 + ':' + tierOf(fl, L.style?.palace) : 0)), fx = Math.cos(p.face), fz = Math.sin(p.face), tx = -fz, tz = fx, out = [fx, 0, fz];
     const hw = (p.w || p.s) / 2, hh = (p.h || p.s) / 2;
     const P = (u, y, o = 0.03) => [p.x + tx * u + fx * o, y, p.z + tz * u + fz * o];
     g.quad(P(-hw, p.y - hh), P(hw, p.y - hh), P(hw, p.y + hh), P(-hw, p.y + hh), [1, 0], [0, 0], [0, 1], [1, 1], out, W1);

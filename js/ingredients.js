@@ -29,7 +29,7 @@
 //   sym     sympathies: who or what it suits as a gift ('sacred tree': shrine offerings)
 //   size    [w, h] cells it takes in the player's pack grid, a box of `stack`
 //   eat     what eating one gives the player: { stamina, health, sp } (vitals.js)
-//   use     what using one does instead (main.js useFromPack): 'sight', the fairy salve
+//   use     what using one does instead (main.js useFromPack): 'sight', the fairy salve; 'play', an instrument
 
 export const INGREDIENTS = {
   // ---- the wild larder (gen/flora.js, docs/forage.md) ----
@@ -42,16 +42,16 @@ export const INGREDIENTS = {
   hazelnuts: { hyph: 'hazel-nuts', group: 'nuts', keep: 10, snack: 'keep', worth: 1.0, from: 'bushes', color: '#8a6438',
                temper: [1, -1], virtues: ['wisdom'], pic: ['sprites/items/hazelnut.png'], size: [1, 1], stack: 12, eat: { stamina: 5, sp: 2 } },
   chamomile: { hyph: 'chamo-mile', keep: 3, from: 'meadows', color: '#e6dea0',
-               temper: [1, -1], virtues: ['soothing'], size: [1, 1], stack: 8, eat: { stamina: 3, health: 3 } },
+               temper: [1, -1], virtues: ['soothing'], pic: ['flowers/flowers41.png', 'flowers/flowers13.png'], size: [1, 1], stack: 8, eat: { stamina: 3, health: 3 } },
   roots:     { group: 'roots', raw: true, worth: 0.8, from: 'ground', dish: 'root stew', color: '#6f8f3a',
                temper: [1, -1], pic: ['sprites/items/roots.png'], size: [1, 2], stack: 3 },
   acorns:    { group: 'nuts', raw: true, worth: 0.4, from: 'oaks', dish: 'acorn porridge', color: '#9c6b35',
-               temper: [-1, -2], size: [1, 1], stack: 12 },
+               temper: [-1, -2], pic: ['sprites/items/acorn.png'], size: [1, 1], stack: 12 },
   mushrooms: { hyph: 'mush-rooms', group: 'fungi', keep: 2, worth: 1.0, from: 'shade', dish: 'mushroom stew', color: '#b0623c',
                look: ['Pale mushrooms', 'Growing in the damp where the daylight still reaches.'],
-               temper: [-2, 2], size: [1, 1], stack: 4, eat: { stamina: 8 } },
+               temper: [-2, 2], pic: ['sprites/items/mushroom1.png'], size: [1, 1], stack: 4, eat: { stamina: 8 } },
   morels:    { group: 'fungi', raw: true, worth: 1.3, from: 'shade', dish: 'morel stew', color: '#7a5a3a',
-               temper: [-1, 2], size: [1, 1], stack: 4 },
+               temper: [-1, 2], pic: ['sprites/items/morel.png'], size: [1, 1], stack: 4 },
   'cattail root': { group: 'roots', raw: true, worth: 0.6, from: 'marsh', dish: 'cattail broth', color: '#6f8f3a',
                temper: [-1, 1], size: [1, 2], stack: 3 },
   meat:      { group: 'meat', raw: true, worth: 1.4, from: 'the hunt', dish: 'rabbit stew', color: '#a33a32',
@@ -86,6 +86,11 @@ export const INGREDIENTS = {
   // ---- for the still-room (stillroom.js): the fairy salve's, and the salve ----
   // a four-leaved clover breaks glamour, as the ointment does (traditions §4); found only by
   // searching a fairy ring's clover at first light (main.js)
+  // the caps of a fairy ring (gen/flora.js makeFairyRing), and what grows on the Gentry's
+  // lawns (gen/faerie.js). Folk leave them be (main.js), and nobody eats them
+  'fairy mushrooms': { hyph: 'fairy mush-rooms', from: 'fairy ring', virtues: ['shine'], color: '#7a2a78',
+               look: ['Fairy mushrooms', 'Violet caps with a faint light of their own.'],
+               pic: ['sprites/items/mushroom_faerie.png'], size: [1, 1], stack: 6 },
   'four-leaf clover': { hyph: 'four-leaf clo-ver', from: 'fairy ring', when: 'dawn', rare: 'ring', virtues: ['breaks glamour'],
                color: '#5fae4a', temper: [-1, -1], size: [1, 1], stack: 3 },
   // what ran down from the altar candles (gen/under.js): old salves were bound with wax
@@ -117,6 +122,52 @@ export const INGREDIENTS = {
             look: ['Quartz', 'Clear crystals grown out of the rock.'] },
   gold:   { group: 'trinket', from: 'tombs', temper: [0, 0], size: [1, 1], stack: 20,
             look: ['Gold', 'Old coins, thin and worn smooth, their stamp long gone.'] },
+
+  // ---- materials for making instruments (making.js; docs/music.md "Making instruments"):
+  // not food, not trinkets. Elder stems off the elder bushes; a hide and gut off a kill (the
+  // folk's hunters keep them). Board and wire have no source yet: their instructions wait ----
+  // elder's soft pith pushes out of a green stem, leaving a tube: the old pipe and whistle wood
+  elder: { label: 'elder stem', group: 'material', worth: 0.5, from: 'elder bushes', color: '#8a7a4e', size: [1, 3], stack: 4,
+           look: ['An elder stem', 'A straight green stem, soft at the heart.'] },
+  hide:  { group: 'material', worth: 1.2, from: 'a kill', color: '#9a7a5a', size: [2, 2], stack: 2,
+           look: ['A hide', 'Scraped clean and dried stiff.'] },
+  gut:   { group: 'material', worth: 0.8, from: 'a kill', color: '#d8c8a0', size: [1, 1], stack: 6,
+           look: ['Gut string', 'Cleaned, twisted and dried into a cord.'] },
+  board: { label: 'seasoned board', group: 'material', worth: 1.5, from: 'nowhere yet', color: '#b08a5a', size: [1, 3], stack: 2,
+           look: ['A seasoned board', 'Old timber, dry right through, that will not warp.'] },
+  wire:  { group: 'material', worth: 2, from: 'nowhere yet', color: '#c0a060', size: [1, 1], stack: 4,
+           look: ['Wire', 'A coil of fine brass wire.'] },
+
+  // ---- instruments (docs/music.md): found where nobody plays them any more, played from
+  // the pack (main.js playFromPack) with the tunes you've read; their sound is sampled,
+  // instruments/instruments.json. Not food, not trinkets. Given to the folk, or traded to
+  // anyone without one (`worth`, trade.js); music-sim.js plays them at the fires ----
+  // `span`: how long its longer side is, in u (1u ≈ 0.67 m), when it lies about underground
+  // (under-view.js stands its picture up at that size)
+  // the oldest instruments anyone has found are bird-bone flutes, in caves
+  'bone flute':   { span: 0.45, group: 'instrument', use: 'play', worth: 2.5, from: 'the deep', color: '#e6dcc2', size: [1, 3], stack: 1,
+                    look: ['A bone flute', "A bird's wing-bone, holed for the fingers, lying in the silt."], pic: ['sprites/items/bone_flute.png'] },
+  'tabor pipe':   { span: 0.6, label: 'pipe', group: 'instrument', use: 'play', worth: 2, from: 'tombs', color: '#a07a4a', size: [1, 3], stack: 1,
+                    look: ['A pipe', 'A wooden pipe with three holes, the kind played with one hand.'], pic: ['sprites/items/tabor_pipe.png'] },
+  vielle:         { span: 0.95, label: 'fiddle', group: 'instrument', use: 'play', worth: 4, from: 'tombs', color: '#8a4e2a', size: [2, 4], stack: 1,
+                    look: ['A fiddle', 'Laid away with its bow, as if for its player.'], pic: ['sprites/items/fiddle_1.png'] },
+  psaltery:       { span: 0.8, group: 'instrument', use: 'play', worth: 3.5, from: 'tombs', color: '#b08850', size: [3, 2], stack: 1,
+                    look: ['A psaltery', 'A board strung with wire, still nearly in tune.'], pic: ['sprites/items/psaltery.png'] },
+  // a small drum with a snare across its head, played with one stick (and a pipe in the other hand)
+  tabor:          { span: 0.55, label: 'tabor', group: 'instrument', use: 'play', worth: 2, from: 'tombs', color: '#9a7046', size: [2, 2], stack: 1,
+                    look: ['A tabor', 'A little drum, its head still tight, its stick tucked in the cord.'], pic: ['sprites/items/tabor.png'] },
+  harp:           { span: 1.2, group: 'instrument', use: 'play', worth: 5, from: 'Faerie', color: '#d8b44a', size: [2, 4], stack: 1,
+                    look: ['A harp', 'Gilt, and strung with something finer than gut.'], pic: ['sprites/items/harp_1.png'] },
+  'silver pipes': { span: 0.6, group: 'instrument', use: 'play', worth: 4.5, from: 'Faerie', color: '#c8ced6', size: [1, 3], stack: 1,
+                    look: ['Silver pipes', 'A flute of silver, cold, without a mark on it.'], pic: ['sprites/items/silver_pipes.png'] },
+
+  // ---- keys (gen/under.js KEY_SETS; docs/under.md "Keys and chests"): the chapel crypt's
+  // locked rooms, the bow of each the emblem on its doors. Kept after use, in the pack like
+  // anything else for now (a key ring is wanted). Not food, not for trade ----
+  'lancet key': { span: 0.42, group: 'key', use: 'unlock', size: [1, 1], stack: 1,
+                  look: ['A lancet key', 'Iron, heavy, its bow worked as a lancet window.'], pic: ['sprites/keys/cathedral5.png'] },
+  'vesica key': { span: 0.42, group: 'key', use: 'unlock', size: [1, 1], stack: 1,
+                  look: ['A vesica key', 'Iron, heavy, its bow worked as a vesica, an eye.'], pic: ['sprites/keys/cathedral4.png'] },
 };
 for (const k in INGREDIENTS) INGREDIENTS[k].label ??= k;
 
@@ -130,7 +181,7 @@ export const RARE      = tableOf('rare');
 export const KEEP      = tableOf('keep');
 export const SNACK_KINDS  = kindsWhere(e => e.snack);
 export const KEEPER_KINDS = kindsWhere(e => e.snack === 'keep');
-export const FOOD_GROUP = tableOf('group', e => e.group && e.group !== 'garden' && e.group !== 'trinket' && e.group !== 'dish');
+export const FOOD_GROUP = tableOf('group', e => e.group && e.group !== 'garden' && e.group !== 'trinket' && e.group !== 'dish' && e.group !== 'instrument' && e.group !== 'material' && e.group !== 'key');
 export const DISH_KINDS = kindsWhere(e => e.group === 'dish');
 export const CROP_KINDS = kindsWhere(e => e.group === 'garden');
 export const TRINKETS   = kindsWhere(e => e.group === 'trinket');

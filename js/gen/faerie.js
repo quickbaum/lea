@@ -2,8 +2,10 @@
 // paths the Gentry walk between them (docs/magic.md "Faerie palaces"). Pure: the land
 // only, and the thin places main.js hands in, so node can plan and check it.
 //
-//   planPortals(thin, opts)   4–6 portals, each beside a thin place (a stone circle, a
+//   planPortals(thin, opts)   4–6 portals, each at a thin place (a stone circle, a
 //                             sacred tree, a fairy ring), spread as far apart as they'll go
+//   extraDoor(t, portals, opts)  a door at any other thin place, into the nearest
+//                             portal's palace (main.js doors)
 //   palaceSpec(p)             the level behind a portal: a crypt in the palace style
 //                             (gen/under.js cryptStyle), entered level, two floors
 //   portalPaths(portals, route)  the walks between them: each portal to its nearest two,
@@ -32,18 +34,9 @@ const NAMES = ['the Hollow Hall', 'the Glass Court', 'the Hall under the Hill', 
 export function planPortals(thin, { seed, size, walkable, height }){
   const r = mulberry32((seed ^ 0xfae7e) >>> 0);
   const want = Math.max(PORTALS[0], Math.min(PORTALS[1], Math.round(size / 600)));
-  // a spot beside each candidate: just outside it, on walkable ground with room either side
+  // a spot at each candidate (doorSpot): a fairy ring's middle, or just outside the rest
   const spots = [];
-  for (const t of thin){
-    const a0 = r() * Math.PI * 2, out = (t.r || 4) + 3.5;
-    for (let q = 0; q < 12; q++){
-      const a = a0 + q * Math.PI / 6, x = t.x + Math.cos(a) * out, z = t.z + Math.sin(a) * out;
-      const sx = x + Math.cos(a) * 3, sz = z + Math.sin(a) * 3, px = -Math.sin(a) * 1.5, pz = Math.cos(a) * 1.5;
-      if (!walkable(x, z) || !walkable(sx, sz) || !walkable(x + px, z + pz) || !walkable(x - px, z - pz)) continue;
-      spots.push({ x, z, face: a, stand: [sx, sz], at: t.kind });
-      break;
-    }
-  }
+  for (const t of thin){ const s = doorSpot(t, r() * Math.PI * 2, walkable); if (s) spots.push(s); }
   if (!spots.length) return [];
   // spread: first the one nearest the middle (so one is within reach of the start), then
   // each the one furthest from all those chosen (farthest-point sampling)
@@ -59,6 +52,29 @@ export function planPortals(thin, { seed, size, walkable, height }){
   }
   return chosen.map((s, id) => ({ id, ...s, y: height(s.x, s.z), name: NAMES[id % NAMES.length], level: `palace:${id}`,
     seed: (seed ^ 0x9a1ace ^ Math.imul(id + 1, 0x9e3779b1)) >>> 0 }));
+}
+
+// a door's spot at thin place t: in a fairy ring's middle, or just outside a stone circle
+// or a sacred tree, facing away; on walkable ground with room either side and in front;
+// tried every 30° round from a0. null if there's none
+function doorSpot(t, a0, walkable){
+  const out = t.kind === 'fairy ring' ? 0 : (t.r || 4) + 3.5;
+  for (let q = 0; q < 12; q++){
+    const a = a0 + q * Math.PI / 6, x = t.x + Math.cos(a) * out, z = t.z + Math.sin(a) * out;
+    const sx = x + Math.cos(a) * 3, sz = z + Math.sin(a) * 3, px = -Math.sin(a) * 1.5, pz = Math.cos(a) * 1.5;
+    if (!walkable(x, z) || !walkable(sx, sz) || !walkable(x + px, z + pz) || !walkable(x - px, z - pz)) continue;
+    return { x, z, face: a, stand: [sx, sz], at: t.kind, thin: [t.x, t.z] };
+  }
+  return null;
+}
+// a door at a thin place that has no portal of its own (main.js doors): at thin place t
+// (doorSpot), into the palace of the nearest portal. Not a
+// palace of its own, so Faerie's levels (the grounds' halls, the stair) stay as planned
+export function extraDoor(t, portals, { walkable, height }){
+  const s = doorSpot(t, Math.atan2(-t.z, -t.x), walkable);    // facing toward the middle first, if it can
+  if (!s || !portals.length) return null;
+  const to = portals.reduce((b, p) => Math.hypot(p.x - t.x, p.z - t.z) < Math.hypot(b.x - t.x, b.z - t.z) ? p : b);
+  return { ...s, id: `door@${Math.round(t.x)},${Math.round(t.z)}`, y: height(s.x, s.z), name: to.name, level: to.level, seed: to.seed, extra: true };
 }
 
 // the level behind a portal: you step in through its front, so the palace runs on behind it
@@ -394,5 +410,15 @@ function buildGrounds(spec){
       label: 'the Turning Stair', ask: 'A round tower, a door at its foot, and inside a ramp going up and round. Go in?', go: 'Go in.', desc: 'A door into the Turning Stair.' }; }),
   ];
   for (const m of L.mouths){ const p = stepIn(L, m); [m.inX, m.inZ] = p || [m.x, m.z]; }
+  // fairy mushrooms in the lawns (ingredients.js): off the paths, clear of the doors.
+  // Their own stream, so nothing above moves
+  const fr = mulberry32((spec.seed ^ 0xf00) >>> 0);
+  for (let tries = 0, got = 0; got < 10 && tries < 400; tries++){
+    const a = fr() * TAU, d = 14 + fr() * (GROUNDS_R - 18), x = Math.cos(a) * d, z = Math.sin(a) * d;
+    const k = Math.floor((z - L.z0) / CELL) * L.W + Math.floor((x - L.x0) / CELL);
+    if (!L.open[k] || L.tag[k] !== 0 || !L.walkable(x, z) || doors.some(([dx, dz]) => Math.hypot(x - dx, z - dz) < 8)
+        || L.finds.some(f => Math.hypot(f.x - x, f.z - z) < 12)) continue;
+    L.finds.push({ x, z, kind: 'fairy mushrooms', n: 2 + ((fr() * 3) | 0) }); got++;
+  }
   return L;
 }

@@ -21,6 +21,7 @@
 
 import { mulberry32 } from '../rng.js';
 import { distanceField } from './settle.js';
+import { TUNES, MUSIC_BOOKS } from '../tunes.js';
 
 export const CELL = 2;              // level grid (u): about 1.3 m
 const PAD = 0.35;                   // a body's radius, as walkable() in terrain.js
@@ -36,6 +37,31 @@ function noise2(seed){
     return lerp(lerp(h(i, j), h(i + 1, j), sx), lerp(h(i, j + 1), h(i + 1, j + 1), sx), sz);
   };
 }
+
+// ---- a cave mouth's shape -----------------------------------------------------------
+// A cave mouth is worn rock, the way Faerie's arcades are (gen/arcade.js): a brow of stone
+// standing out of the hillside with one egg-shaped opening worn through it, leaning back into
+// the hill, and a passage behind it into the dark. Its shape, by a hash of where it is, is
+// shared by the land (land.js cutMouths: the hill cut away behind the opening, the stone
+// solid), the drawing and the aiming (under-view.js caveMouth, entranceHit):
+//   o      the opening, in the stone's plane (s across, y up from the ground; arcade.js openingD)
+//   A      the stone: an arcade spec of the one opening
+//   px, pz where the stone's middle plane crosses the mouth's line; f along the face, t across
+// `e.scale` (the elder's cave: 2) makes the whole of it that many times the size.
+export const MOUTH = { back: 0.6, LEAN: 0.3, DROP: 0.4 };   // DROP: how steeply the passage goes down, past its first 2u
+// the passage's floor u in from the mouth (land.js sets e.floor)
+export const mouthFloor = (e, u) => e.floor - MOUTH.DROP * Math.max(0, u - 2);
+export function mouthShape(e){
+  const r = mulberry32((Math.imul(Math.round(e.x) | 0, 0x85ebca6b) ^ Math.imul(Math.round(e.z) | 0, 0xc2b2ae35) ^ 0xca7e) >>> 0);
+  const S = e.scale || 1;
+  const o = { s: 0, y: 2.6 * S, a: (4.2 + r() * 0.8) * S, bt: (4.6 + r() * 1.2) * S, bb: 5.4 * S, n: 2.1 + r() * 0.5 };
+  const len = (36 + r() * 10) * S, rho = 2.4 * S;
+  const A = { len, half: len / 2, ph: r() * 6.28, top: o.y + o.bt + rho + (3 + r() * 3) * S, openings: [o], rho };
+  const fx = Math.cos(e.face), fz = Math.sin(e.face);
+  return { o, A, fx, fz, tx: -fz, tz: fx, px: e.x - fx * MOUTH.back, pz: e.z - fz * MOUTH.back };
+}
+// across the opening at height y: the superellipse's half-width (0 above or below it)
+export const halfWidth = (o, y) => { const b = y > o.y ? o.bt : o.bb, z = Math.abs((y - o.y) / b); return z >= 1 ? 0 : o.a * Math.pow(1 - Math.pow(z, o.n), 1 / o.n); };
 
 // ---- where the mouths are ----------------------------------------------------------
 // ruins: from ruins.js (a crypt goes under the chapel, or failing that a hall);
@@ -61,7 +87,8 @@ export function planUnder({ size, seed, height, habitat, water, road, settle, ru
   const rd = mulberry32((seed ^ 0x57013) >>> 0), deck = []; const deal = () => { if (!deck.length){ const d = Object.keys(STONES).slice(1); for (let i = d.length - 1; i > 0; i--){ const j = (rd() * (i + 1)) | 0; [d[i], d[j]] = [d[j], d[i]]; } deck.push(...d); } return deck.pop(); };
   const crypt = (site, x, z, face, floors, extra = {}) => {
     const id = levels.length, n = levels.filter(l => l.kind === 'crypt').length;
-    levels.push({ id, kind: 'crypt', site, floors, stone: site === 'chapel' ? 'grey' : deal(), seed: (n ? seed ^ 0xc4997 ^ Math.imul(n, 0x9e3779b1) ^ Math.imul(Math.round(x) | 0, 0x85ebca6b) ^ Math.imul(Math.round(z) | 0, 0xc2b2ae35) : seed ^ 0xc4997) >>> 0, ...extra,
+    const maker = site === 'tomb' ? null : levels.filter(l => l.kind === 'crypt' && l.site !== 'tomb').length;   // a country tomb has no shelves
+    levels.push({ id, kind: 'crypt', site, floors, maker, stone: site === 'chapel' ? 'grey' : deal(), seed: (n ? seed ^ 0xc4997 ^ Math.imul(n, 0x9e3779b1) ^ Math.imul(Math.round(x) | 0, 0x85ebca6b) ^ Math.imul(Math.round(z) | 0, 0xc2b2ae35) : seed ^ 0xc4997) >>> 0, ...extra,
       mouths: [{ x, z, y: height(x, z), face }] });
     entrances.push({ level: id, mouth: 0, kind: 'stair', site, x, z, y: height(x, z), face, stand: [x + Math.cos(face) * 3.5, z + Math.sin(face) * 3.5] });
   };
@@ -128,6 +155,36 @@ export function planUnder({ size, seed, height, habitat, water, road, settle, ru
     if (!clearStair(c.x, c.z, face) || slopeAt(c.x + Math.cos(face) * 3.5, c.z + Math.sin(face) * 3.5) > 0.2) continue;
     crypt('tomb', c.x, c.z, face, 1 + (rc() < 0.5 ? 1 : 0), { tomb: tombs++ });
   }
+
+  // the troll's cave: a second cave from the same hillsides, well away from every other way
+  // down, with one mouth, and the troll sitting in it (js/troll.js). Its passage runs straight
+  // into the hill and ends in a chamber (`end`, where a second mouth would be). Last, so
+  // nothing else moves.
+  const ta = cand.find(m => entrances.every(e => Math.hypot(e.x - m.x, e.z - m.z) > 300));
+  if (ta){
+    const id = levels.length, y = height(ta.x, ta.z), back = ta.face + Math.PI, run = (lo + hi) / 2;
+    levels.push({ id, kind: 'cave', troll: 'troll', seed: (seed ^ 0xca7e ^ 0x7011) >>> 0, mouths: [{ x: ta.x, z: ta.z, y, face: ta.face }],
+      end: { x: ta.x + Math.cos(back) * run, z: ta.z + Math.sin(back) * run, y: y - 8, face: back } });
+    entrances.push({ level: id, mouth: 0, kind: 'cave', x: ta.x, z: ta.z, y, face: ta.face, stand: ta.stand, troll: 'troll' });
+  }
+  // the elder's cave (js/troll.js, the second troll): its mouth twice the size of any other, so
+  // it wants the hillside with the most hill behind it (the opening stands 15u high), away from
+  // every other way down. Behind it a great hall (buildCave `grand`), and on into the hill as
+  // the troll's does. After the troll's, so nothing before it moves.
+  const rise = m => height(m.x - Math.cos(m.face) * 30, m.z - Math.sin(m.face) * 30) - height(m.x, m.z);
+  const tb = cand.filter(m => entrances.every(e => Math.hypot(e.x - m.x, e.z - m.z) > 300)).sort((a, b) => rise(b) - rise(a))[0];
+  if (tb){
+    const S = 2, id = levels.length, y = height(tb.x, tb.z), back = tb.face + Math.PI, run = 170;
+    const stand = [tb.x + Math.cos(tb.face) * 13, tb.z + Math.sin(tb.face) * 13];   // clear of where he sits (troll.js)
+    levels.push({ id, kind: 'cave', troll: 'elder', scale: S, seed: (seed ^ 0xca7e ^ 0xe1de) >>> 0, mouths: [{ x: tb.x, z: tb.z, y, face: tb.face, scale: S }],
+      end: { x: tb.x + Math.cos(back) * run, z: tb.z + Math.sin(back) * run, y: y - 8, face: back } });
+    entrances.push({ level: id, mouth: 0, kind: 'cave', x: tb.x, z: tb.z, y, face: tb.face, stand, troll: 'elder', scale: S });
+  }
+  // the crypt songs (tunes.js, every book but the Gentry's), each in a book of its own, dealt in
+  // turn round the crypts that keep books (not a country tomb), so each is somewhere, once
+  const keepers = levels.filter(l => l.kind === 'crypt' && l.site !== 'tomb');
+  const sung = Object.values(MUSIC_BOOKS).filter(b => !b.faerie).flatMap(b => b.tunes);
+  keepers.forEach((l, k) => { l.songs = sung.filter((_, q) => q % keepers.length === k); });
   return { levels, entrances };
 }
 
@@ -275,7 +332,284 @@ export function buildLevel(spec){
   finish(L);
   for (const m of L.mouths){ const [x, z] = arrival(L, m); m.inX = x; m.inZ = z; }
   if (L.cavern?.lake) launch(L);
+  instruments(L, spec);
+  if (L.kind === 'crypt' && L.site !== 'palace'){
+    // locks, chests, the salve's shelf and the songs: by a hash of the level, not r(), so nothing else dealt moves
+    let h = 2166136261 >>> 0;
+    for (const c of `${spec.id}:${spec.seed}:chests`) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+    const rr = mulberry32(h);
+    doors(L, spec, rr); chests(L, spec, rr); salveShelf(L, rr); songs(L, spec, rr);
+    guards(L, spec);
+  }
+  if (L.kind === 'cave') reachableFinds(L);
   return L;
+}
+// A cave's finds, only where you can get to them: a chamber the passages never quite reach,
+// or a ledge over the deep, can be laid with one (the troll's cave, the first a second seed
+// made, had a quartz in a pocket 13u off the path). Walked over from the first mouth on a 1u
+// grid, as tools/check-under.mjs does.
+function reachableFinds(L){
+  const seen = new Set(), key = (x, z) => x + ',' + z, st = [[Math.round(L.mouths[0].inX), Math.round(L.mouths[0].inZ)]];
+  seen.add(key(...st[0]));
+  while (st.length){
+    const [x, z] = st.pop();
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]){ const nx = x + dx, nz = z + dz, k = key(nx, nz); if (seen.has(k) || !L.walkable(nx, nz)) continue; seen.add(k); st.push([nx, nz]); }
+  }
+  const near = (x, z) => { for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) if (seen.has(key(x + dx, z + dz))) return true; return false; };
+  L.finds = L.finds.filter(f => near(Math.round(f.x), Math.round(f.z)));
+}
+// Instruments (docs/music.md), where nobody plays them any more: a bone flute in the silt of
+// every cave's deep; on a tomb in every crypt that has one, a fiddle, psaltery, pipe or tabor, dealt
+// round by the level's number like the books, so neighbouring crypts hold different ones;
+// a harp or silver pipes on a palace's altar (by its door, so the palaces between them hold
+// both). Which tomb and where by a hash of the level, not r(): everything dealt from r()
+// stays where it was.
+const CRYPT_INSTRUMENTS = ['vielle', 'psaltery', 'tabor pipe', 'tabor'];
+function instruments(L, spec){
+  let h = 2166136261 >>> 0;
+  for (const c of `${spec.id}:${spec.seed}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  const free = p => !L.finds.some(f => Math.hypot(f.x - p.x, f.z - p.z) < 1.2);
+  if (L.site === 'palace'){
+    const alt = L.props.filter(q => q.kind === 'altar' && free(q));
+    if (alt.length){ const a = alt[h % alt.length]; L.finds.push({ x: a.x, z: a.z, y: a.y + a.h, kind: spec.door % 2 ? 'silver pipes' : 'harp', n: 1, onProp: true }); }
+  } else if (L.kind === 'crypt'){
+    const tombs = L.props.filter(q => q.kind === 'coffin' && free(q));
+    if (tombs.length){ const t = tombs[(h >>> 8) % tombs.length]; L.finds.push({ x: t.x, z: t.z, y: t.y + t.h, kind: CRYPT_INSTRUMENTS[(typeof spec.id === 'number' ? spec.id : h) % CRYPT_INSTRUMENTS.length], n: 1, onProp: true }); }
+  } else if (L.cavern){
+    const C = L.cavern, spots = [];
+    for (let k = 0; k < L.W * L.H; k++){
+      if (!L.open[k]) continue;
+      const [x, z] = centre(L, k % L.W, (k / L.W) | 0);
+      if (Math.hypot(x - C.x, z - C.z) < C.R * 0.8 && L.walkable(x, z) && free({ x, z }) && !(C.lake && Math.hypot(x - C.lake.x, z - C.lake.z) < C.lake.r)) spots.push([x, z]);
+    }
+    if (spots.length){ const [x, z] = spots[(h >>> 8) % spots.length]; L.finds.push({ x, z, kind: 'bone flute', n: 1 }); }
+  }
+}
+// Keys, locked doors, chests, and the songs' shelves (docs/under.md, "Keys and chests").
+// A crypt with a set of keys made for it has rooms behind locked doors: one room holding the
+// still-room book of the fairy salve, under its own key (`salve`), and a few more under
+// another (`rooms`), which open with it every one. Keys are kept, not left in the lock. The
+// salve's key lies in a chest behind one of the other doors, and the other doors' key out in
+// the open, so the salve is the last thing found. No key opens a door in another crypt; a
+// crypt without a set (every one but the chapel's, till there are more designs) has no doors.
+export const KEY_SETS = {
+  chapel: {
+    rooms: { key: 'lancet key', sign: 'a lancet window', door: 'sprites/keys/cathedral_door_5.png', n: 2 },
+    salve: { key: 'vesica key', sign: 'a vesica', door: 'sprites/keys/cathedral_door_4.png' },
+  },
+};
+const PORTAL = 0.4;                            // a locked doorway's stone surround, in from the passage's own curve
+// the rooms that can be locked: a plain room whose every way in is a doorway (each gets a
+// door), and whose locking cuts nothing else off
+function lockable(L){
+  const all = cellsFrom(L, new Set()), total = all.reduce((a, b) => a + b, 0), out = [];
+  for (const R of L.rooms){
+    if (R.type !== 'room' || R.kind !== 'room') continue;
+    const ri = L.regions.indexOf(R), ds = L.doorways.filter(d => d.room === ri);
+    if (!ds.length) continue;
+    // every crossing out of the room must be through one of its doorways
+    let ok = true, n = 0;
+    for (let j = R.j; j < R.j + R.h && ok; j++) for (let i = R.i; i < R.i + R.w && ok; i++){
+      if (L.reg[j * L.W + i] !== ri) continue;
+      n++;
+      for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]){
+        const a = i + di, b = j + dj, q = b * L.W + a;
+        if (a < 0 || b < 0 || a >= L.W || b >= L.H || !L.open[q] || L.reg[q] === ri) continue;
+        const axis = di ? 'x' : 'z', line = di ? L.x0 + (di > 0 ? i + 1 : i) * CELL : L.z0 + (dj > 0 ? j + 1 : j) * CELL;
+        const across = di ? L.z0 + (j + 0.5) * CELL : L.x0 + (i + 0.5) * CELL;
+        if (!ds.some(d => d.axis === axis && Math.abs(d.line - line) < 0.01 && Math.abs(across - d.c) < d.rad)){ ok = false; break; }
+      }
+    }
+    if (!ok) continue;
+    const shut = cellsFrom(L, new Set([ri])).reduce((a, b) => a + b, 0);
+    if (shut === total - n) out.push(R);
+  }
+  return out;
+}
+function doors(L, spec, rr){
+  L.doors = []; L.locked = [];
+  const set = KEY_SETS[L.site];
+  if (!set) return;
+  // the salve's room deep down, the others anywhere, no two on one floor's same spot
+  const can = lockable(L).map(R => ({ R, k: rr() })).sort((a, b) => a.k - b.k).map(o => o.R);
+  const deep = can.filter(R => R.fl >= 2), salve = (deep.length ? deep : can)[0];
+  if (!salve) return;
+  const picks = [{ R: salve, set: set.salve }, ...can.filter(R => R !== salve).slice(0, set.rooms.n).map(R => ({ R, set: set.rooms }))];
+  // together, they mustn't cut anything off either (each alone doesn't)
+  const ris = new Set(picks.map(p => L.regions.indexOf(p.R))), cut = cellsFrom(L, ris).reduce((a, b) => a + b, 0);
+  const nIn = picks.reduce((a, p) => a + L.reg.reduce((c, v) => c + (v === L.regions.indexOf(p.R)), 0), 0);
+  if (cut !== cellsFrom(L, new Set()).reduce((a, b) => a + b, 0) - nIn) picks.splice(1);
+  for (const { R, set: e } of picks){
+    const ri = L.regions.indexOf(R);
+    L.locked.push({ room: ri, key: e.key, salve: e === set.salve });
+    for (const dw of L.doorways.filter(d => d.room === ri)){
+      // the door stands in the doorway's line, its leaves swinging into the room; `a` the way in
+      const ax = dw.axis === 'x', x = ax ? dw.line : dw.c, z = ax ? dw.c : dw.line, a = ax ? (dw.into > 0 ? 0 : Math.PI) : (dw.into > 0 ? Math.PI / 2 : -Math.PI / 2);
+      const half = dw.rad - PORTAL, head = dw.spring - dw.y;
+      const prop = { kind: 'door', x, z, a: a + Math.PI / 2, hl: dw.rad, hw: 0.3, y: dw.y, h: head + half, solid: true };
+      L.props.push(prop);
+      L.doors.push({ x, z, y: dw.y, a, half, head, room: ri, key: e.key, sign: e.sign, pic: e.door, open: false, t: 0, prop });
+      // and on the passage's side, a ring of voussoirs set in the tunnel's mouth on half-columns, round the door
+      L.doorways.push({ ...dw, into: -dw.into, rad: half, room: null, portal: true });
+    }
+  }
+}
+// The cells you can walk to from the way in, with the regions in `shut` (rooms behind locked
+// doors) closed
+function cellsFrom(L, shut){
+  const seen = new Uint8Array(L.W * L.H), [i0, j0] = cellOf(L, L.mouths[0].inX, L.mouths[0].inZ), st = [j0 * L.W + i0];
+  seen[st[0]] = 1;
+  while (st.length){
+    const k = st.pop(), i = k % L.W, j = (k / L.W) | 0;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]){
+      const a = i + di, b = j + dj, q = b * L.W + a;
+      if (a < 0 || b < 0 || a >= L.W || b >= L.H || seen[q] || !L.open[q] || shut.has(L.reg[q])) continue;
+      seen[q] = 1; st.push(q);
+    }
+  }
+  return seen;
+}
+// A spot against a wall in one of `regions` for a thing w wide and d deep, with room to stand
+// in front (reachable in `reach`, the cells from cellsFrom), clear of what's there already
+function wallSpot(L, regions, rr, reach, w, d){
+  for (const R of regions) for (const run of wallRuns(L, R).filter(q => q.len >= w + 2)){
+    for (let n = 0; n < 6; n++){
+      const u = run.a0 + 1 + w / 2 + rr() * (run.len - w - 2), off = 0.05 + d / 2;
+      const pt = o => run.horiz ? [u, run.line + run.nz * o] : [run.line + run.nx * o, u];
+      const [x, z] = pt(off), [fx, fz] = pt(off + 1.3), [ci, cj] = cellOf(L, fx, fz);
+      if (!reach[cj * L.W + ci] || !L.walkable(fx, fz) || !L.openAt(x, z)) continue;
+      if (L.props.some(p => p.solid && Math.hypot(p.x - x, p.z - z) < (p.r || Math.max(p.hl, p.hw)) + w / 2 + 0.8)) continue;
+      if (L.sconces.some(s => s.kind && Math.hypot(s.x - x, s.z - z) < 1.6) || (L.shelves || []).some(s => Math.hypot(s.x - x, s.z - z) < w / 2 + 1.6)) continue;
+      if (L.finds.some(f => Math.hypot(f.x - x, f.z - z) < 1.4) || L.doors.some(q => Math.hypot(q.x - x, q.z - z) < 4) || (L.chests || []).some(c => Math.hypot(c.x - x, c.z - z) < 3)) continue;
+      return { x, z, R, run, face: Math.atan2(run.nz, run.nx) };
+    }
+  }
+  return null;
+}
+// Chests: an oak coffer against a wall, shut. The keys lie in them (doors()), and in every
+// crypt one holds an instrument (another than the one on its tomb, if it has one:
+// instruments()): in a crypt with locked rooms, behind a door; else on its deepest floor.
+// Placed by a hash of the level, not r(), so nothing else dealt moves.
+const CHEST = { w: 1.5, d: 0.8, h: 0.78 };
+function chests(L, spec, rr){
+  L.chests = [];
+  const put = (regions, reach, holds) => {
+    const s = wallSpot(L, regions, rr, reach, CHEST.w, CHEST.d); if (!s) return null;
+    const c = { x: s.x, z: s.z, y: s.R.y, face: s.face, ...CHEST, open: false, t: 0 };
+    c.prop = { kind: 'chest', x: s.x, z: s.z, a: s.run.horiz ? 0 : Math.PI / 2, hl: CHEST.w / 2, hw: CHEST.d / 2, y: s.R.y, h: CHEST.h, solid: true };
+    L.props.push(c.prop);
+    const ci = L.chests.push(c) - 1;
+    for (const kind of holds) L.finds.push({ x: s.x, z: s.z, y: s.R.y + CHEST.h - 0.3, kind, n: 1, onProp: true, chest: ci });
+    return c;
+  };
+  const plain = R => (R.type === 'room' || R.type === 'vault') && R.kind !== 'head' && R.kind !== 'landing' && R.w >= 3 && R.h >= 3;
+  const shuffled = a => a.map(v => [rr(), v]).sort((p, q) => p[0] - q[0]).map(p => p[1]);
+  const kind = CRYPT_INSTRUMENTS[((typeof spec.id === 'number' ? spec.id : 0) + 2) % CRYPT_INSTRUMENTS.length];
+  const lk = L.locked || [], salve = lk.find(q => q.salve), rooms = lk.filter(q => !q.salve), byRi = ri => [L.regions[ri]];
+  if (salve && rooms.length){
+    // the other doors' key: out in the open, as far from the way in as can be
+    const shut = new Set(lk.map(q => q.room)), reach = cellsFrom(L, shut), m = L.mouths[0];
+    const open = shuffled(L.regions.filter(R => plain(R) && !shut.has(L.regions.indexOf(R))));
+    const far = open.map(R => [Math.hypot(R.cx - m.x, R.cz - m.z), R]).sort((p, q) => q[0] - p[0]).map(p => p[1]);
+    if (!put(far.slice(0, Math.ceil(far.length / 3)), reach, [rooms[0].key]) && !put(far, reach, [rooms[0].key])) L.unkeyed = [rooms[0].key];
+    // the salve's key behind the first of those doors; the instrument behind the second
+    const behind = cellsFrom(L, new Set([salve.room]));
+    if (!put(byRi(rooms[0].room), behind, [salve.key])) L.unkeyed = [...(L.unkeyed || []), salve.key];
+    if (!(rooms[1] && put(byRi(rooms[1].room), behind, [kind]))) put(shuffled(L.regions.filter(R => plain(R) && R.fl === L.floors - 1)), behind, [kind]);
+  } else put(shuffled(L.regions.filter(R => plain(R) && R.fl === L.floors - 1)), cellsFrom(L, new Set()), [kind]);
+}
+// The fairy salve's book (stillroom.js), on a shelf of its own in the locked room it's kept in
+const SHELF = { w: 2.4, d: 0.5 };
+function salveShelf(L, rr){
+  const s = (L.locked || []).find(q => q.salve); if (!s) return;
+  const R = L.regions[s.room], at = wallSpot(L, [R], rr, cellsFrom(L, new Set()), SHELF.w, SHELF.d);
+  if (!at){ L.unshelved = 'fairy salve'; return; }
+  addShelf(L, at, { state: 'book', prep: 'fairy salve' });
+}
+function addShelf(L, at, what){
+  const s = { x: at.x, z: at.z, face: at.face, back: 0.05 + SHELF.d / 2, w: SHELF.w, d: SHELF.d, h: 2.2, y: at.R.y, seed: Math.round(at.x * 7919 + at.z * 104729) | 0, room: at.R.kind, ...what };
+  L.shelves.push(s);
+  L.props.push({ kind: 'shelf', x: at.x, z: at.z, a: at.run.horiz ? 0 : Math.PI / 2, hl: SHELF.w / 2, hw: SHELF.d / 2, y: at.R.y, h: s.h, solid: true });
+  return s;
+}
+// The songs (tunes.js): each crypt tune has a book to itself somewhere, dealt round the crypts
+// that keep books (planUnder: `spec.songs`). A choir song lies open on a lectern in one of
+// the crypt's chapels, one to a chapel, where there's a chapel left; any other on a shelf,
+// one to a shelf, a cellar song in an undercroft if there is one.
+function songs(L, spec, rr){
+  const free = (x, z, r) => !L.props.some(p => p.solid && Math.hypot(p.x - x, p.z - z) < (p.r || Math.max(p.hl, p.hw)) + r)
+    && !L.sconces.some(s => s.kind && Math.hypot(s.x - x, s.z - z) < r + 0.6);
+  const chapels = L.regions.filter(R => R.kind === 'chapel' && R.type === 'vault'), reach = cellsFrom(L, new Set());
+  for (const tune of spec.songs || []){
+    if (TUNES[tune].book === 'choir'){
+      let placed = false;
+      while (!placed && chapels.length){
+        const C = chapels.shift(), alt = L.props.find(p => p.kind === 'altar' && C.inside?.(p.x, p.z)) || L.props.filter(p => p.kind === 'altar').sort((a, b) => Math.hypot(a.x - C.cx, a.z - C.cz) - Math.hypot(b.x - C.cx, b.z - C.cz))[0];
+        for (const t of [0, 2, -2, 4, -4]){
+          const ax = C.axis === 'x', x = C.cx + (ax ? t : 0), z = C.cz + (ax ? 0 : t);
+          if (!L.walkable(x, z) || !free(x, z, 1.6)) continue;
+          const face = alt && Math.hypot(alt.x - x, alt.z - z) < 40 ? Math.atan2(z - alt.z, x - alt.x) : (ax ? 0 : Math.PI / 2);   // its desk toward the reader, who faces the altar
+          L.shelves.push({ x, z, face, back: 0, w: 0.8, d: 0.6, h: 1.25, y: C.y, seed: Math.round(x * 31 + z * 17), room: 'chapel', state: 'book', lectern: true, tune });
+          L.props.push({ kind: 'lectern', x, z, r: 0.5, y: C.y, solid: true });
+          placed = true; break;
+        }
+      }
+      if (placed) continue;
+    }
+    const und = L.regions.filter(R => R.kind === 'undercroft'), any = L.regions.filter(R => (R.type === 'room' || R.type === 'vault') && R.kind !== 'head' && R.kind !== 'landing' && R.w >= 3 && R.h >= 3);
+    const at = (TUNES[tune].book === 'cellar' && wallSpot(L, und, rr, reach, SHELF.w, SHELF.d)) || wallSpot(L, any.map(R => [rr(), R]).sort((a, b) => a[0] - b[0]).map(p => p[1]), rr, reach, SHELF.w, SHELF.d);
+    if (at) addShelf(L, at, { state: 'book', tune }); else (L.unsung ||= []).push(tune);
+  }
+}
+// Skeletons (docs/skeletons.md): their bones lie strewn on the floor in front of what's worth
+// coming down for, and get up as you come near: the chests (a key, an instrument), the shelves
+// with books on them and the choir's lectern, the locked doors (on the passage side), and the
+// top of every stair on down. Two to four: more deeper down, and one more at a locked door. None
+// near the way in, so you're well inside before the first one stirs; one group guards two
+// things that are close together; the kinds take turns. Dealt by a hash of the level, not r(), so nothing else moves.
+//   L.guards: [{ x, z, y, fl, what, n, r, seed }]: n skeletons, their bones within r of (x, z)
+const GUARD = { r: 2.6, clear: 12, merge: 4, max: 24 };
+function guards(L, spec){
+  let h = 2166136261 >>> 0;
+  for (const c of `${spec.id}:${spec.seed}:bones`) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  const rr = mulberry32(h), reach = cellsFrom(L, new Set()), shut = new Set((L.locked || []).map(q => q.room));
+  const ok = (x, z) => { const [i, j] = cellOf(L, x, z); return i >= 0 && j >= 0 && i < L.W && j < L.H && reach[j * L.W + i] && L.walkable(x, z); };
+  const flAt = (x, z) => { const [i, j] = cellOf(L, x, z); return L.regions[L.reg[j * L.W + i]]?.fl ?? 0; };
+  // the nearest open, reachable floor to (x, z), about d off it, toward `dir` if it has one
+  const stand = (x, z, dir) => {
+    for (const d of [2.4, 3.2, 1.8, 4]) for (let q = 0; q < 12; q++){
+      const a = dir == null ? q * Math.PI / 6 : dir + (q % 2 ? 1 : -1) * Math.ceil(q / 2) * 0.35;
+      const px = x + Math.cos(a) * d, pz = z + Math.sin(a) * d;
+      if (ok(px, pz)) return [px, pz];
+    }
+    return null;
+  };
+  const want = [];                                      // [x, z, what, extra] in order of worth
+  for (const q of L.doors || []) want.push([q.x, q.z, 'door', 1, q.a + Math.PI]);
+  for (const c of L.chests || []) want.push([c.x, c.z, 'chest', 0, c.face]);
+  for (const s of L.shelves || []) if (s.state === 'book') want.push([s.x, s.z, s.lectern ? 'lectern' : 'shelf', 0, s.lectern ? null : s.face]);
+  for (const R of L.regions) if (R.type === 'stair'){
+    const top = R.yA >= R.yB ? R.sA : R.sB, bot = top === R.sA ? R.sB : R.sA, ax = R.axis === 'x';
+    const [tx, tz] = ax ? [top, R.c] : [R.c, top], dir = ax ? (top > bot ? 0 : Math.PI) : (top > bot ? Math.PI / 2 : -Math.PI / 2);
+    want.push([tx, tz, 'stair', 0, dir]);
+  }
+  // in turns by kind, so a crypt with many doors still has its chests and books guarded
+  const kinds = ['chest', 'door', 'shelf', 'stair', 'lectern'], byKind = kinds.map(k => want.filter(w => w[2] === k));
+  want.length = 0;
+  for (let i = 0; byKind.some(l => i < l.length); i++) for (const l of byKind) if (i < l.length) want.push(l[i]);
+  const ins = L.mouths.map(m => [m.inX, m.inZ]);
+  L.guards = [];
+  let count = 0;
+  for (const [x, z, what, extra, dir] of want){
+    if (ins.some(([ix, iz]) => Math.hypot(ix - x, iz - z) < GUARD.clear)) continue;
+    const at = stand(x, z, dir); if (!at) continue;
+    if (L.guards.some(g => Math.hypot(g.x - at[0], g.z - at[1]) < GUARD.merge)) continue;
+    const fl = Math.max(0, flAt(at[0], at[1])), n = Math.min(4, 2 + (fl >= 2) + extra + (rr() < 0.35 ? 1 : 0));
+    if (count + n > GUARD.max) continue;
+    const [i, j] = cellOf(L, at[0], at[1]);
+    L.guards.push({ x: at[0], z: at[1], y: L.floorAt(at[0], at[1]), fl, what, n, r: GUARD.r, seed: (rr() * 1e9) | 0, behind: shut.has(L.reg[j * L.W + i]) });
+    count += n;
+  }
 }
 // The great lake's canoe and its eels: a canoe pulled up where the way down comes to the
 // water, bow out; and the lake's deep water an eel ground, fished from the canoe.
@@ -303,15 +637,23 @@ function launch(L){
 // higher the further you are from a wall.
 function buildCave(spec){
   const r = mulberry32(spec.seed), rough = noise2(spec.seed & 0xffff), wob = noise2((spec.seed >>> 8) & 0xffff);
-  const [A, B] = spec.mouths;
+  const A = spec.mouths[0], B = spec.mouths[1] || spec.end;     // one mouth: the passage ends in the hill
   const M = 300;                                           // room round the mouths for the deep and its caverns
   const L = grid(Math.min(A.x, B.x) - M, Math.min(A.z, B.z) - M, Math.max(A.x, B.x) + M, Math.max(A.z, B.z) + M);
   L.mouths = spec.mouths.map(m => ({ ...m }));
   L.props = []; L.finds = []; L.glow = []; L.waters = [];
+  // the elder's cave (spec.scale, its mouth that many times the size): a great hall straight in
+  // behind the mouth (`grand`), and the passage runs through it on the mouth's axis before it
+  // starts to wander. Its shape is grandHall's, after the floors (after photos of the caves of
+  // Vang Vieng: a mouth you could stand a house in, light falling far in over broken rock)
+  const S = spec.scale || 1, fa = [-Math.cos(A.face), -Math.sin(A.face)];
+  const grand = S > 1 ? { R: 36 + r() * 8, H: 30 + r() * 10, fx: fa[0], fz: fa[1], side: r() < 0.5 ? 1 : -1 } : null;
+  if (grand){ grand.x = A.x + fa[0] * (18 + grand.R * 0.8); grand.z = A.z + fa[1] * (18 + grand.R * 0.8); }
   // the main passage: in from each mouth along its own axis, then a wandering
   // line between, displaced from the straight by halving steps
   const ina = [A.x - Math.cos(A.face) * 14, A.z - Math.sin(A.face) * 14], inb = [B.x - Math.cos(B.face) * 14, B.z - Math.sin(B.face) * 14];
-  let pts = [ina, inb];
+  const out = grand ? [A.x + fa[0] * (18 + grand.R * 1.7), A.z + fa[1] * (18 + grand.R * 1.7)] : ina;   // where it starts to wander
+  let pts = [out, inb];
   for (let amp = Math.hypot(inb[0] - ina[0], inb[1] - ina[1]) * 0.22; amp > 6; amp *= 0.5){
     const o = [pts[0]];
     for (let k = 0; k + 1 < pts.length; k++){
@@ -320,7 +662,7 @@ function buildCave(spec){
     }
     pts = o;
   }
-  pts = [[A.x, A.z], ...pts, [B.x, B.z]];
+  pts = [[A.x, A.z], ...(grand ? [ina] : []), ...pts, [B.x, B.z]];
   const path = [];                                         // every metre or so, with how far along
   let along = 0;
   for (let k = 0; k + 1 < pts.length; k++){
@@ -333,6 +675,17 @@ function buildCave(spec){
     const nearMouth = Math.min(s, total - s) < 10;
     carve(L, x, z, nearMouth ? 2.4 : 2.2 + 2.6 * wob(s * 0.05, 3.1), 1, nearMouth ? null : rough);
   }
+  // the elder's: a throat as wide as the mouth, widening in, then the hall, several rough lobes
+  const big = new Uint8Array(L.W * L.H);                   // 1 the throat, 2 the hall (their ceilings: below)
+  if (grand){
+    const before = L.open.slice(), mark = v => { for (let k = 0; k < L.W * L.H; k++) if (L.open[k] && !before[k] && !big[k]) big[k] = v; };
+    for (let u = 0; u < 24; u += 1.2) carve(L, A.x + fa[0] * u, A.z + fa[1] * u, 2.4 * S + u * 0.12, 1, u > 8 ? rough : null);
+    mark(1);
+    carve(L, grand.x, grand.z, grand.R * 0.65, 2, rough);
+    for (let q = 0; q < 7; q++){ const t = r() * Math.PI * 2, d = r() * grand.R * 0.4; carve(L, grand.x + Math.cos(t) * d, grand.z + Math.sin(t) * d, grand.R * (0.4 + r() * 0.25), 2, rough); }
+    mark(2);
+    for (let k = 0; k < L.W * L.H; k++) if (big[k] === 1 && L.tag[k] === 2) big[k] = 2;
+  }
   // chambers: two along the way, and one at the end of each side passage
   const chambers = [];
   const chamber = (x, z, R) => {
@@ -340,6 +693,7 @@ function buildCave(spec){
     chambers.push({ x, z, R });
   };
   for (const f of [0.3 + r() * 0.1, 0.62 + r() * 0.1]){ const [x, z] = path[Math.floor(f * (path.length - 1))]; chamber(x, z, 11 + r() * 7); }
+  if (spec.end) chamber(B.x, B.z, 12 + r() * 4);
   // the ways you walk (the main passage, the way down): kept clear of dripstone
   const lane = new Uint8Array(L.W * L.H);
   const keepClear = (x, z, R = 2.6) => {
@@ -365,7 +719,7 @@ function buildCave(spec){
   let cav = null; const halls = [];
   {
     let p = null;
-    for (let q = 0; q < 24 && !p; q++){ const c = path[Math.floor((0.35 + 0.3 * r()) * (path.length - 1))]; if (chambers.every(h => Math.hypot(h.x - c[0], h.z - c[1]) > h.R + 22)) p = c; }
+    for (let q = 0; q < 24 && !p; q++){ const c = path[Math.floor((0.35 + 0.3 * r()) * (path.length - 1))]; if ([...chambers, ...(grand ? [grand] : [])].every(h => Math.hypot(h.x - c[0], h.z - c[1]) > h.R + 22)) p = c; }
     p = p || path[path.length >> 1];
     const n = path[Math.min(path.length - 1, path.indexOf(p) + 3)], along = Math.atan2(n[1] - p[1], n[0] - p[0]);
     // off to whichever side has more room before the grid's edge
@@ -407,7 +761,7 @@ function buildCave(spec){
     }
   }
   L.deep = deep; L.cavern = cav; L.halls = halls;
-  const nearDeep = (x, z) => (cav && Math.hypot(x - cav.x, z - cav.z) < cav.R + 12) || halls.some(h => Math.hypot(x - h.x, z - h.z) < h.R + 12) || deepPts.some(([px, pz]) => Math.hypot(px - x, pz - z) < 10);
+  const nearDeep = (x, z) => (cav && Math.hypot(x - cav.x, z - cav.z) < cav.R + 12) || (grand && Math.hypot(x - grand.x, z - grand.z) < grand.R + 12) || halls.some(h => Math.hypot(x - h.x, z - h.z) < h.R + 12) || deepPts.some(([px, pz]) => Math.hypot(px - x, pz - z) < 10);
   const sides = 3 + Math.floor(total / 160);
   for (let b = 0; b < sides; b++){
     const p = path[Math.floor((0.15 + 0.7 * r()) * (path.length - 1))], [nx, nz] = path[Math.min(path.length - 1, path.indexOf(p) + 3)];
@@ -444,6 +798,7 @@ function buildCave(spec){
     L.floor[k] = f;
   }
   smoothOpen(L, L.floor, 3);
+  if (grand) terraces(L, grand, big, path, wob);
   L.waters = [];
   if (pool){
     let rim = Infinity;
@@ -463,8 +818,11 @@ function buildCave(spec){
   }
   // ceilings: higher away from the walls, so chambers vault and passages stoop; the cavern
   // vaults high over its floor (and its lake) from its own floor level, not the lake bed
+  // the elder's throat stands as high as its mouth, and its hall vaults 40–50u over the way through
   ceilings(L, (k, x, z) => {
     const c = L.floor[k] + 3.4 + Math.min(wallDist(L, k) * 0.8, 9) + (rough(x * 0.15, z * 0.15) - 0.5) * 1.6;
+    if (big[k] === 1) return Math.max(c, L.floor[k] + 7 * S + Math.min(wallDist(L, k) * 1.2, 6) + (rough(x * 0.15, z * 0.15) - 0.5) * 2);
+    if (big[k] === 2) return Math.max(c, grand.base + 10 + Math.min(wallDist(L, k) * 1.5, grand.H) + (rough(x * 0.08, z * 0.08) - 0.5) * 5);
     return cav && deep[k] > D * 0.9 ? Math.max(c, cav.base + 4 + Math.min(wallDist(L, k) * 1.2, cav.H) + (rough(x * 0.08, z * 0.08) - 0.5) * 4) : c;
   });
   // finds: quartz in the chambers, mushrooms in the damp near the mouths;
@@ -483,23 +841,100 @@ function buildCave(spec){
     for (let q = 10; q < deepPts.length; q += 18){ const [x, z] = deepPts[q]; glowAround(L, { x, z, R: 3 }, r, 0.4, 1.5); }
     for (const h of halls) glowAround(L, h, r, 0.3, 3);
   }
-  dripstone(L, r, chambers, halls, cav, lane);
+  if (grand){ L.grand = grand; arches(L, r, grand, big, lane); }   // before the dripstone, which keeps clear of them
+  dripstone(L, r, chambers, halls, cav, lane, grand);
+  if (grand) curtains(L, r, grand, big, rough);
   if (cav) deepFinds(L, r, cav, deep, D);
   return L;
+}
+// The elder's hall (buildCave `grand`): to one side of the way through, the floor steps down
+// in ledges ~6u deep, ~2.2u a step, their edges curved by the noise, six of them; on the other
+// side it climbs a couple. The way itself (7u either side of the path) is left as it is, so it
+// meets the throat and the passage on without a ledge. `grand.base`: the way's floor, mid-hall.
+function terraces(L, grand, big, path, wob){
+  const near = path.filter(([x, z]) => Math.hypot(x - grand.x, z - grand.z) < grand.R * 1.6);
+  const px = -grand.fz * grand.side, pz = grand.fx * grand.side;
+  let best = Infinity;
+  for (let k = 0; k < L.W * L.H; k++){
+    if (big[k] !== 2) continue;
+    const [x, z] = centre(L, k % L.W, (k / L.W) | 0);
+    let d = Infinity; for (const [qx, qz] of near) d = Math.min(d, Math.hypot(qx - x, qz - z));
+    const c = Math.hypot(x - grand.x, z - grand.z);
+    if (d < 1.5 && c < best){ best = c; grand.base = L.floor[k]; }
+    const e = d - 7 + (wob(x * 0.09, z * 0.09) - 0.5) * 6;
+    if (e <= 0) continue;
+    const down = (x - grand.x) * px + (z - grand.z) * pz > 0, n = Math.min(down ? 6 : 2, Math.floor(e / 6) + 1);
+    L.floor[k] += (down ? -2.2 : 1.6) * n;
+  }
+  if (!Number.isFinite(best)){ const [i, j] = cellOf(L, grand.x, grand.z); grand.base = L.floor[j * L.W + i]; }
+}
+// Natural arches across the hall: rock left standing where the roof fell round it. Two or three, each from foot to foot on the hall's floor, 16–32u apart and
+// rising 8–18u, under the vault and over open floor all the way; its feet are solid (props
+// 'archfoot'), never on the way through (`lane`), and the way may pass under one. Laid before
+// the dripstone, which grows nowhere under them or on their feet.
+function arches(L, r, grand, big, lane){
+  L.arches = [];
+  const want = 2 + (r() < 0.5 ? 1 : 0), cell = (x, z) => { const [i, j] = cellOf(L, x, z); return i < 0 || j < 0 || i >= L.W || j >= L.H ? -1 : j * L.W + i; };
+  for (let q = 0; q < 300 && L.arches.length < want; q++){
+    const t = r() * Math.PI * 2, d = Math.sqrt(r()) * grand.R * 0.7, cx = grand.x + Math.cos(t) * d, cz = grand.z + Math.sin(t) * d;
+    const a = r() * Math.PI, span = 16 + r() * 16, rad = 1.4 + r() * 1.3, rise = 8 + r() * 10;
+    const ax = cx - Math.cos(a) * span / 2, az = cz - Math.sin(a) * span / 2, bx = cx + Math.cos(a) * span / 2, bz = cz + Math.sin(a) * span / 2;
+    const ka = cell(ax, az), kb = cell(bx, bz);
+    if (ka < 0 || kb < 0 || big[ka] !== 2 || big[kb] !== 2 || lane[ka] || lane[kb]) continue;
+    const foot = rad * 1.5, ay = L.floor[ka], by = L.floor[kb];
+    if (L.props.some(p => p.solid && [[ax, az], [bx, bz]].some(([x, z]) => Math.hypot(p.x - x, p.z - z) < (p.r || 1) + foot + 2))) continue;
+    if (L.arches.some(o => Math.hypot((o.ax + o.bx) / 2 - cx, (o.az + o.bz) / 2 - cz) < 14)) continue;
+    // along it: every point over an open cell, under its ceiling with room, clear of the columns
+    let ok = true;
+    for (let s = 0; s <= 1 && ok; s += 0.05){
+      const x = ax + (bx - ax) * s, z = az + (bz - az) * s, y = ay + (by - ay) * s + rise * Math.sin(Math.PI * s), k = cell(x, z);
+      const th = rad * (1 + 0.6 * (1 - Math.sin(Math.PI * s)));
+      if (k < 0 || !L.open[k] || L.ceil[k] < y + th + 2) ok = false;
+    }
+    if (!ok) continue;
+    L.arches.push({ ax, az, ay, bx, bz, by, rise, rad, seed: (r() * 1e9) | 0 });
+    for (const [x, z, y] of [[ax, az, ay], [bx, bz, by]]) L.props.push({ kind: 'archfoot', x, z, r: foot, y, solid: true });
+  }
+}
+// Flowstone down the hall's walls (the photos: pale curtains, ribbed like organ pipes): where
+// the noise says, along each wall edge, a row of long stalactites side by side, longest in the
+// curtain's middle; here and there one runs right down to the floor. Not solid: against the wall.
+function curtains(L, r, grand, big, rough){
+  for (let j = 1; j < L.H - 1; j++) for (let i = 1; i < L.W - 1; i++){
+    const k = j * L.W + i;
+    if (big[k] !== 2) continue;
+    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]){
+      if (L.open[(j + dj) * L.W + i + di]) continue;
+      const [x0, z0] = centre(L, i, j), ex = x0 + di * CELL * 0.5, ez = z0 + dj * CELL * 0.5;   // the wall edge's middle
+      const env = (rough(ex * 0.11 + 40, ez * 0.11) - 0.42) / 0.58;
+      if (env <= 0) continue;
+      const fy = L.floor[k], cy = L.ceil[k], hgt = cy - fy;
+      for (const o of [-0.65, 0, 0.65]){
+        const x = ex - di * 0.55 + dj * o, z = ez - dj * 0.55 + di * o, rt = 0.22 + r() * 0.22;
+        if (env > 0.75 && r() < 0.3) L.drips.push({ x, z, fy, cy, lt: 0, rt, hm: hgt, rm: rt * 1.4, column: true, flute: true });
+        else L.drips.push({ x, z, fy, cy, lt: hgt * (0.12 + 0.55 * env) * (0.7 + 0.3 * r()), rt, hm: 0, rm: 0, column: false, flute: true });
+      }
+    }
+  }
 }
 // Dripstone (docs/under.md, "The deep"): where water drips, a stalactite hangs and a
 // stalagmite grows under it; where they've met, a column. Thick in the cavern, a few in
 // each chamber, none over the ways you walk (`lane`). Stalagmites and columns are solid,
 // spaced so you can always pass between them; over the lake only stalactites hang.
-function dripstone(L, r, chambers, halls, cav, lane){
+function dripstone(L, r, chambers, halls, cav, lane, grand = null){
   L.drips = [];
-  const solid = [];
+  const solid = L.props.filter(p => p.solid && p.r);           // (the elder's arches' feet)
+  // under an arch (the elder's hall), seen from above: within its thickness of the line foot to foot
+  const underArch = (x, z) => (L.arches || []).some(A => {
+    const dx = A.bx - A.ax, dz = A.bz - A.az, t = clamp(((x - A.ax) * dx + (z - A.az) * dz) / (dx * dx + dz * dz), 0, 1);
+    return Math.hypot(A.ax + dx * t - x, A.az + dz * t - z) < A.rad * 2.2 + 0.8;
+  });
   const place = (c, n, big) => {
     for (let q = 0, got = 0; q < n * 6 && got < n; q++){
       const a = r() * Math.PI * 2, d = Math.sqrt(r()) * c.R, x = c.x + Math.cos(a) * d, z = c.z + Math.sin(a) * d;
       const [i, j] = cellOf(L, x, z), k = j * L.W + i;
       if (i < 1 || j < 1 || i >= L.W - 1 || j >= L.H - 1 || !L.open[k] || lane[k]) continue;
-      if (![[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]].every(([dx, dz]) => openCell(L, x + dx, z + dz))) continue;
+      if (![[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]].every(([dx, dz]) => openCell(L, x + dx, z + dz)) || underArch(x, z)) continue;
       const fy = L.floor[k], cy = L.ceil[k], wet = L.waters.find(w => Math.hypot(x - w.x, z - w.z) < w.r && fy < w.y + 0.2);
       const lt = Math.min((cy - fy) * 0.45, 0.4 + r() * r() * (big ? 5 : 2.4)), rt = 0.12 + lt * 0.11;
       let hm = wet || r() > 0.7 ? 0 : 0.3 + r() * r() * (big ? 4 : 2.2), rm = 0.18 + hm * 0.16;
@@ -514,6 +949,7 @@ function dripstone(L, r, chambers, halls, cav, lane){
   for (const c of chambers) place(c, 4 + ((r() * 6) | 0), false);
   for (const h of halls) place(h, 25 + ((r() * 15) | 0), true);
   if (cav) place(cav, 70 + ((r() * 40) | 0), true);
+  if (grand) place(grand, 45 + ((r() * 20) | 0), true);
 }
 // Books (docs/under.md, "Books"): shelves where the brothers kept them. The cellarer's
 // kitchen books in the undercroft, a book cupboard in the cloister's outer wall, a shelf
@@ -526,18 +962,29 @@ const SHELVES = { undercroft: 2, cloister: 2, chapterhouse: 1 };
 function shelves(L, r, spec, runsOf, at, isOpen){
   L.shelves = [];
   const palace = L.site === 'palace', more = L.site === 'abbey' ? 1 : palace ? 2 : 0, W = 2.4, D = 0.5;
+  let makerAt = null, makerSp = null;
   for (const sp of L.special || []){
-    const want = SHELVES[sp.kind]; if (!want) continue;
+    const want = SHELVES[sp.kind] || 0;
     let walls = sp.regions.flatMap(R => runsOf(R).map(run => ({ run, R })));
     if (sp.kind === 'cloister'){                           // the outer walls, not the garth's arcade
       const [gx, gz] = at((sp.st[0] + sp.st[1]) / 2, (sp.st[2] + sp.st[3]) / 2);
       walls = walls.filter(({ run }) => Math.sign(gx - (run.horiz ? (run.a0 + run.a1) / 2 : run.line)) * run.nx + Math.sign(gz - (run.horiz ? run.line : (run.a0 + run.a1) / 2)) * run.nz >= 0);
     }
     walls = walls.filter(({ run }) => run.len >= W + 2);
+    // (the maker's shelf goes in the first room that keeps books, or failing one, the first with a wall for it: a crypt may have only its chapel)
+    if (!palace && spec.maker != null && walls.length && (!makerAt || (want && !SHELVES[makerSp.kind]))){ makerAt = walls; makerSp = sp; }   // (a room for books if there is one)
+    if (!want) continue;
     for (let i = walls.length - 1; i > 0; i--){ const j = (r() * (i + 1)) | 0; [walls[i], walls[j]] = [walls[j], walls[i]]; }
     let got = 0;
     for (const { run, R } of walls){
       if (got >= want + more) break;
+      if (place(run, R, sp, null)) got++;
+    }
+  }
+  // and one more, kept dry, with a maker's book on it (making.js): dealt round by the crypt's
+  // number, so the crypts in turn hold every craft. Its own shelf: one book to a shelf, always
+  if (makerAt) for (const { run, R } of makerAt) if (place(run, R, makerSp, 'maker')) break;
+  function place(run, R, sp, maker){
       const off = (sp.kind === 'chapterhouse' ? 0.8 + 0.1 : 0.05) + D / 2;   // out from the wall (past the chapter house's bench)
       for (let q = 0; q < 6; q++){
         const a = run.a0 + W / 2 + 1 + r() * (run.len - W - 2);
@@ -547,16 +994,17 @@ function shelves(L, r, spec, runsOf, at, isOpen){
         if (!cell(x, z) || !cell(fx, fz)) continue;
         if (L.props.some(p => p.solid && Math.hypot(p.x - x, p.z - z) < (p.r || Math.max(p.hl, p.hw)) + W / 2 + 0.6)) continue;
         if (L.sconces.some(s => Math.hypot(s.x - x, s.z - z) < W / 2 + 0.6) || L.shelves.some(s => Math.hypot(s.x - x, s.z - z) < W + 1)) continue;
-        const v = r(), state = palace || v < 0.34 ? 'book' : v < 0.7 ? 'ruined' : 'rotted';   // nothing rots in Faerie
+        const v = maker ? 0 : r(), state = palace || v < 0.34 ? 'book' : v < 0.7 ? 'ruined' : 'rotted';   // nothing rots in Faerie
         const s = { x, z, face: Math.atan2(run.nz, run.nx), back: off, w: W, d: D, h: state === 'rotted' ? 1.6 : 2.2, y: R.y, state, seed: (r() * 1e9) | 0, room: sp.kind, ...(palace ? { palace: true } : {}) };
         // (a palace's id is a name: it deals by its door's number, seven books apart, so the
         // palaces between them hold every book in faerie-books.js)
-        if (state === 'book') s.book = (palace ? spec.door * 7 : typeof spec.id === 'number' ? spec.id : spec.seed % 97) + L.shelves.filter(o => o.state === 'book').length;
+        if (maker) s.maker = spec.maker;
+        else if (state === 'book') s.book = (palace ? spec.door * 7 : typeof spec.id === 'number' ? spec.id : spec.seed % 97) + L.shelves.filter(o => o.state === 'book' && o.maker == null).length;
         L.shelves.push(s);
         L.props.push({ kind: 'shelf', x, z, a: run.horiz ? 0 : Math.PI / 2, hl: W / 2, hw: D / 2, y: R.y, h: s.h, solid: true });
-        got++; break;
+        return true;
       }
-    }
+      return false;
   }
 }
 // what only the deep gives (docs/under.md, "The deep"; recipes.js RARE): foxfire from
@@ -1235,27 +1683,7 @@ function buildCrypt(spec){
     }
   }
   const isOpen = (i, j) => i >= 0 && j >= 0 && i < L.W && j < L.H && L.open[j * CW + i] === 1;
-  // a room's walls: runs of edge along each side with rock behind (doorways break them)
-  const runsOf = R => {
-    const runs = [];
-    for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]){
-      const horiz = dz !== 0, n = horiz ? R.w : R.h;
-      let start = -1;
-      for (let q = 0; q <= n; q++){
-        const i = horiz ? R.i + q : (dx < 0 ? R.i : R.i + R.w - 1), j = horiz ? (dz < 0 ? R.j : R.j + R.h - 1) : R.j + q;
-        const solid = q < n && !isOpen(i + dx, j + dz);
-        if (solid && start < 0) start = q;
-        if (!solid && start >= 0){
-          // the wall line, from cell `start` to `q`, and the way into the room
-          const wx = dx > 0 ? x0 + (R.i + R.w) * CELL : dx < 0 ? x0 + R.i * CELL : null, wz = dz > 0 ? z0 + (R.j + R.h) * CELL : dz < 0 ? z0 + R.j * CELL : null;
-          const a0 = (horiz ? x0 + (R.i + start) * CELL : z0 + (R.j + start) * CELL), a1 = (horiz ? x0 + (R.i + q) * CELL : z0 + (R.j + q) * CELL);
-          runs.push({ horiz, line: horiz ? wz : wx, a0, a1, nx: -dx, nz: -dz, len: a1 - a0 });
-          start = -1;
-        }
-      }
-    }
-    return runs;
-  };
+  const runsOf = R => wallRuns(L, R);
   for (const R of L.rooms){
     const along = R.axis === 'x' ? [1, 0] : [0, 1], across = R.axis === 'x' ? [0, 1] : [1, 0];
     const len = (R.axis === 'x' ? R.w : R.h) * CELL, span = R.hs * 2;
@@ -1538,7 +1966,7 @@ function buildCrypt(spec){
         const key = `${ri}:${line}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        L.doorways.push({ axis: R.axis, line, c: R.c, into: sd, y: R.y, spring: R.y + R.head, rad: R.rad });
+        L.doorways.push({ axis: R.axis, line, c: R.c, into: sd, y: R.y, spring: R.y + R.head, rad: R.rad, room: L.reg[nj * CW + ni] });
       }
     }
   }
@@ -1547,6 +1975,28 @@ function buildCrypt(spec){
 
 // ---- shared ------------------------------------------------------------------------
 // distance (u) from each open cell to the nearest solid one, for a W×H grid
+// a room's walls: runs of edge along each side with rock behind (doorways break them)
+function wallRuns(L, R){
+  const x0 = L.x0, z0 = L.z0, isOpen = (i, j) => i >= 0 && j >= 0 && i < L.W && j < L.H && L.open[j * L.W + i] === 1;
+  const runs = [];
+  for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]){
+    const horiz = dz !== 0, n = horiz ? R.w : R.h;
+    let start = -1;
+    for (let q = 0; q <= n; q++){
+      const i = horiz ? R.i + q : (dx < 0 ? R.i : R.i + R.w - 1), j = horiz ? (dz < 0 ? R.j : R.j + R.h - 1) : R.j + q;
+      const solid = q < n && !isOpen(i + dx, j + dz);
+      if (solid && start < 0) start = q;
+      if (!solid && start >= 0){
+        // the wall line, from cell `start` to `q`, and the way into the room
+        const wx = dx > 0 ? x0 + (R.i + R.w) * CELL : dx < 0 ? x0 + R.i * CELL : null, wz = dz > 0 ? z0 + (R.j + R.h) * CELL : dz < 0 ? z0 + R.j * CELL : null;
+        const a0 = (horiz ? x0 + (R.i + start) * CELL : z0 + (R.j + start) * CELL), a1 = (horiz ? x0 + (R.i + q) * CELL : z0 + (R.j + q) * CELL);
+        runs.push({ horiz, line: horiz ? wz : wx, a0, a1, nx: -dx, nz: -dz, len: a1 - a0 });
+        start = -1;
+      }
+    }
+  }
+  return runs;
+}
 function wallDist(L, k){
   if (!L._wd){
     // pad to a square so the chamfer transform (written for G×G) applies

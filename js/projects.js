@@ -53,13 +53,13 @@ export class Project {
   // n takes task t: it goes on their agenda; if the plan lapses, the task is
   // released and they owe the others a "couldn't"
   take(n, t){
-    if (!t || t.state !== 'open') return null;
+    if (!t || t.state !== 'open' || this.status !== 'on') return null;   // (an ended plan's open tasks are nobody's to take)
     this.join(n);
     t.who = n; t.state = 'taken';
     const pl = addPlan(n, { kind: 'task', project: this, task: t, item: t.item || null, cook: !!t.cook, dish: this.dish,
       fire: this.fire, until: this.by,
       // lapsing at the deadline is the project's end (one "never mind"), not a separate "couldn't"
-      onLapse: () => this.w.time >= this.by ? this.finish('dropped') : this.fail(n, t, 'lapsed') });
+      onLapse: () => this.w.time >= this.by && this.status === 'on' ? this.finish('dropped') : this.fail(n, t, 'lapsed') });
     if (t.item) pl.deliver = (a) => this.deliver(a, t);
     if (t.cook) pl.onCooked = () => this.cookedNow(n, t);
     return t;
@@ -102,7 +102,8 @@ export class Project {
     if (this.kind === 'provision' && !this.tasks.some(x => x.state === 'taken')) this.finish('done');
   }
   fail(n, t, why){
-    if (this.status !== 'on' || t.state !== 'taken' || t.who !== n) return;   // (a plan that ended takes its tasks with it)
+    if (t.state !== 'taken' || t.who !== n) return;
+    if (this.status !== 'on'){ t.state = 'off'; return; }   // (a plan that ended takes its tasks with it)
     t.state = 'open'; t.who = null;              // back on the table for someone else
     owe(this, n, { what: 'failed', task: t, why });
     tally(this.w, 'tasksFailed');

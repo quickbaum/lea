@@ -27,7 +27,8 @@ import { mulberry32 } from '../rng.js';
 import { planRoad, gradeWeight, ROAD_W, VERGE, BANK } from './road.js';
 import { planSettlements, inBuilding, LANE_W } from './settle.js';
 import { planRuins, standing } from './ruins.js';
-import { planUnder } from './under.js';
+import { planUnder, mouthShape, halfWidth, mouthFloor } from './under.js';
+import { arcadeField } from './arcade.js';
 
 // ---- seeded 2D simplex noise (after Gustavson) ------------------------------
 function makeSimplex(seed){
@@ -186,12 +187,54 @@ function build(){
   RUINS = planRuins({ size: SIZE, seed: (WORLD_SEED ^ 0x7a1d5) >>> 0, height, habitat, water: WATER, road: ROAD, settle: SETTLE, worldR: WORLD_R });
   placeRuins();
   UNDER = planUnder({ size: SIZE, seed: (WORLD_SEED ^ 0x0ca5e) >>> 0, height, habitat, water: WATER, road: ROAD, settle: SETTLE, ruins: RUINS, worldR: WORLD_R, solidAt: builtAt });
+  cutMouths();
   // no tree grows in a cave's mouth or on the crypt stair, nor where you stand before it
   for (const e of UNDER.entrances) for (const [x, z, R] of [[e.x, e.z, 5.5], [e.stand[0], e.stand[1], 3]]){
     const c0 = Math.max(0, Math.floor((x - R + HALF) / HSTEP)), c1 = Math.min(HN - 1, Math.ceil((x + R + HALF) / HSTEP));
     const r0 = Math.max(0, Math.floor((z - R + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((z + R + HALF) / HSTEP));
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++)
       if (!SB[r * HN + c] && Math.hypot(c * HSTEP - HALF - x, r * HSTEP - HALF - z) < R) SB[r * HN + c] = 1;
+  }
+}
+
+// The cave mouths (under.js mouthShape): the hill cut away behind each opening, down to just
+// under the passage's floor and as far in as the hill is lower than the opening's top, so no
+// grass shows through the dark (the passage is drawn in the cut, under-view.js caveMouth);
+// the stone solid where it stands, the passage's sides and end solid too; no tree in any of it.
+// Each cave entrance learns `floor` (the passage's floor) and `depth` (how far in it runs).
+function cutMouths(){
+  for (const e of UNDER.entrances){
+    if (e.kind !== 'cave') continue;
+    const M = mouthShape(e), { o, A, fx, fz, tx, tz, px, pz } = M, y0 = height(px, pz), top = o.y + o.bt;
+    e.floor = y0 - 0.45;
+    let depth = 8;                                       // till the hill stands over the opening's top (20 at most, 40 for the elder's: past a ridge it never will)
+    while (depth < 20 * (e.scale || 1) && height(px - fx * depth, pz - fz * depth) < mouthFloor(e, depth) + top + 1.5) depth++;
+    e.depth = depth;
+    const W0 = halfWidth(o, 0) + 1.2, R = Math.max(A.half + 4, depth + 6);
+    const c0 = Math.max(0, Math.floor((px - R + HALF) / HSTEP)), c1 = Math.min(HN - 1, Math.ceil((px + R + HALF) / HSTEP));
+    const r0 = Math.max(0, Math.floor((pz - R + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((pz + R + HALF) / HSTEP));
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+      const i = r * HN + c, x = c * HSTEP - HALF, z = r * HSTEP - HALF;
+      const sa = (x - px) * tx + (z - pz) * tz, u = -((x - px) * fx + (z - pz) * fz);   // across; how far into the hill
+      if (Math.abs(sa) < A.half + 3 && u > -6 && u < depth + 3 && !SB[i]) SB[i] = 1;   // no trees in the stone or the passage
+      const ws = Math.abs(sa) < W0 ? 1 : Math.max(0, 1 - (Math.abs(sa) - W0) / 3), wu = u < 0 ? Math.max(0, 1 + u / 4) : u <= depth + 2 ? 1 : 0, w = ws * wu;
+      const cut = mouthFloor(e, Math.max(0, u)) - 0.15;
+      if (w > 0 && H[i] > cut) H[i] += (cut - H[i]) * w;
+    }
+    // solid: the stone at knee height, in 1u lengths along it; the passage's sides and its end
+    const F = arcadeField(A), a = Math.atan2(tz, tx);
+    for (let sa = -A.half - 1; sa <= A.half + 1; sa += 1){
+      if (F.d(sa, 0.8) <= 0.05) continue;
+      const b = { x: px + tx * sa, z: pz + tz * sa, a, hl: 0.55, hw: Math.max(0.6, F.h(sa, 0.8)) };
+      addSolid(b, Math.hypot(b.hl, b.hw));
+    }
+    const W = halfWidth(o, 0) + 0.5;
+    for (const side of [-1, 1]){
+      const b = { x: px - fx * depth / 2 + tx * side * W, z: pz - fz * depth / 2 + tz * side * W, a: e.face, hl: depth / 2, hw: 0.5 };
+      addSolid(b, Math.hypot(b.hl, b.hw));
+    }
+    const b = { x: px - fx * (depth - 0.5), z: pz - fz * (depth - 0.5), a: e.face, hl: 0.5, hw: W };
+    addSolid(b, Math.hypot(b.hl, b.hw));
   }
 }
 

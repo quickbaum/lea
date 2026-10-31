@@ -200,9 +200,12 @@ export class Mycelium {
       }
     }
 
-    // a shrub chopped for firewood: felt once, where it stood
-    if (Array.isArray(world.shrubs)){
-      for (const s of world.shrubs){
+    // a shrub chopped for firewood: felt once, where it stood. Round-robin too: a 3200 Lea
+    // grows ~29,000 shrubs, and looking at all of them every frame was most of this call
+    if (Array.isArray(world.shrubs) && world.shrubs.length){
+      const sh = world.shrubs, BATCH = Math.min(sh.length, 500);
+      for (let k = 0; k < BATCH; k++){
+        const s = sh[(this._shrubCursor = ((this._shrubCursor || 0) + 1) % sh.length)];
         if (s.alive !== false || this._seenDead.has(s)) continue;
         this._seenDead.add(s);
         const n = this.nearest(s.x, s.z, 22);

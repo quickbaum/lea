@@ -5,6 +5,8 @@
 // state. See docs/gossip.md. Used by agents.js (AgentWorld.update + Brain) and
 // read by main.js for the "any news?" dialogue.
 
+import { mayHear } from './fellowships.js';
+
 export const GOSSIP_RANGE = 4.5;   // how close two must be to swap news
 export const GOSSIP_CD    = 8;     // seconds before a person will gossip again
 const NEWS_MAX     = 8;            // facts a person carries
@@ -45,7 +47,7 @@ export function knownCanoes(npc, now){
 export function pruneNews(npc, now){
   const m = npc.news; if (!m) return;
   // reputation & omens linger far longer than a fleeting sighting
-  for (const [k, f] of m) if (now - f.t > (f.kind === 'kind' || f.kind === 'omen' ? NEWS_TTL * 5 : f.kind === 'boat' || f.kind === 'dish' ? NEWS_TTL * 2 : NEWS_TTL)) m.delete(k);
+  for (const [k, f] of m) if (now - f.t > (f.kind === 'kind' || f.kind === 'omen' ? NEWS_TTL * 5 : f.kind === 'boat' || f.kind === 'dish' || f.kind === 'tune' || f.kind === 'sign' || f.kind === 'fellow' ? NEWS_TTL * 2 : NEWS_TTL)) m.delete(k);
   const over = m.size - NEWS_MAX;            // past the cap, shed the least valuable first
   if (over > 0){ const low = [...m.entries()].sort((a, b) => NEWS_RANK(a[1]) - NEWS_RANK(b[1]) || a[1].t - b[1].t);
     for (let i = 0; i < over; i++) m.delete(low[i][0]); }
@@ -54,7 +56,7 @@ export function pruneNews(npc, now){
 // rank facts for sharing/telling: reputation and food tips are worth more than the
 // constant churn of "who I just saw" (sightings refresh to `now` every frame, so by
 // freshness alone they'd drown everything else out).
-const NEWS_RANK = f => (f.kind === 'omen' ? 3 : f.kind === 'kind' ? 2 : f.kind === 'market' ? 1.5 : f.kind === 'dish' ? 1.4 : f.kind === 'boat' ? 1.2 : f.kind === 'food' ? 1 : 0);   // (market: a trade at a village door, docs/trade.md; boat: where a canoe lies; dish: who makes a book dish, convo.js knowDish)
+const NEWS_RANK = f => (f.kind === 'omen' ? 3 : f.kind === 'kind' ? 2 : f.kind === 'market' ? 1.5 : f.kind === 'dish' ? 1.4 : f.kind === 'tune' || f.kind === 'sign' || f.kind === 'fellow' ? 1.3 : f.kind === 'boat' ? 1.2 : f.kind === 'food' ? 1 : 0);   // (market: a trade at a village door, docs/trade.md; boat: where a canoe lies; dish: who makes a book dish, convo.js knowDish; tune: who plays a tune now, music-sim.js learnTune; sign: what was seen of a fellowship from outside; fellow: what a fellowship's own know of its meeting, fellowships.js)
 
 // The best thing `from` could tell `to` right now: the choicest fact `to` doesn't
 // already have. Never news of `to` themselves; and nobody is told they saw
@@ -67,6 +69,7 @@ export function newsFor(from, to, skip = null, ok = null){
   let best = null;
   for (const f of from.news.values()){
     if (f.subj === to || (skip && skip.has(f.key)) || (ok && !ok(f))) continue;
+    if (!mayHear(f, to)) continue;              // what a fellowship keeps goes only to its own (fellowships.js)
     const ex = to.news && to.news.get(f.key);
     if (ex && f.t <= ex.t + (f.kind === 'saw' ? SAW_GAP : 0)) continue;
     if (!best || NEWS_RANK(f) > NEWS_RANK(best) || (NEWS_RANK(f) === NEWS_RANK(best) && f.t > best.t)) best = f;

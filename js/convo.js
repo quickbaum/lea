@@ -21,6 +21,7 @@ import { Project, projectOf } from './projects.js';
 import { foresight } from './larder.js';
 import { lack } from './trade.js';
 import { RECIPES, stepsKnown, learnRecipe, carries, potNeeds, potHelp, potLeft, potStep, potDish } from './recipes.js';
+import { FELLOWSHIPS } from './fellowships.js';
 
 const PART_R     = 9;       // apart further than this, someone has left the talk
 const JOIN_R     = 5;       // close enough to ask to join
@@ -79,7 +80,9 @@ function wordsOf(w, m){
 const M = (who, to, key, icon, extra) => ({ who, to, key, icon, ...extra });
 
 export function factIcon(f){
-  return f.kind === 'dish' ? 'food' : f.kind === 'saw' ? 'person' : f.kind === 'kind' ? 'gift' : f.kind === 'food' ? (FOOD_ICON[f.foodKind] || 'food') : f.kind === 'market' ? 'trade' : f.kind === 'boat' ? 'place' : 'omen';
+  if (f.kind === 'sign') return 'place';
+  if (f.kind === 'fellow') return FELLOWSHIPS[f.fid]?.icon || 'omen';
+  return f.kind === 'tune' ? 'music' : f.kind === 'dish' ? 'food' : f.kind === 'saw' ? 'person' : f.kind === 'kind' ? 'gift' : f.kind === 'food' ? (FOOD_ICON[f.foodKind] || 'food') : f.kind === 'market' ? 'trade' : f.kind === 'boat' ? 'place' : 'omen';
 }
 
 // ---- sayings: what folk know by heart ----------------------------------------

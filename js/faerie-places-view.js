@@ -14,7 +14,7 @@
 
 import * as THREE from 'three';
 import { Geo } from './settle-view.js';
-import { faerieKit, lightFaerie, faerieGiltGlass, windowSurround, TRACERY } from './under-view.js';
+import { faerieKit, lightFaerie, faerieGiltGlass, windowSurround, TRACERY, meshOf } from './under-view.js';
 import { Sky } from './sky.js';
 import { cobble, rock, ashlar } from './stone-tex.js';
 import { juliaMaterial } from './julia-tex.js';
@@ -25,6 +25,7 @@ import { wisps, haloTex } from './wisps.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GROUNDS_R } from './gen/faerie.js';
 import { arcadeMesh } from './gen/arcade.js';
+import { petalRing } from './ornament.js';
 
 const WHITE = [1, 1, 1];
 const pt = (r, a, y, cx = 0, cz = 0) => [cx + r * Math.cos(a), y, cz + r * Math.sin(a)];
@@ -238,19 +239,7 @@ export function buildStairView(L){
   // two rings of gilt petals from the rail's bead, cupping a glowing orb
   const tops = nodes.filter(n => !starts.some(m => Math.hypot(m[0] - n[0], m[2] - n[2]) < 0.01 && Math.abs(m[1] - n[1]) < 0.01));
   if (tops.length){
-    const petal = (len, open, wid, cup) => {                      // one petal: up and out from the stem, curling open, cupped across
-      const pos = [], uv = [], idx = [], NS = 10, NW = 6;
-      for (let i = 0; i <= NS; i++) for (let j = 0; j <= NW; j++){
-        const t = i / NS, w = (j / NW - 0.5) * 2, half = wid * Math.sin(Math.PI * Math.pow(t, 0.75)) * (1 - 0.35 * t);
-        const rr = 0.1 + len * open * t * t + len * 0.25 * t, yy = len * (t - 0.45 * open * t * t) + cup * w * w * half;
-        pos.push(rr, yy, w * half); uv.push(t, j / NW);
-      }
-      for (let i = 0; i < NS; i++) for (let j = 0; j < NW; j++){ const a = i * (NW + 1) + j, b = a + NW + 1; idx.push(a, b, a + 1, a + 1, b, b + 1); }
-      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); g.computeVertexNormals();
-      return g;
-    };
-    const ring = (n, len, open, wid, cup, turn, lift) => Array.from({ length: n }, (_, q) => { const g = petal(len, open, wid, cup); g.rotateY(turn + q / n * Math.PI * 2); g.translate(0, lift, 0); return g; });
-    const flowerGeo = mergeGeometries([...ring(6, 0.95, 0.85, 0.26, 0.5, 0, 0), ...ring(6, 0.6, 0.45, 0.18, 0.6, Math.PI / 6, 0.08)]);
+    const flowerGeo = mergeGeometries([...petalRing(6, 0.95, 0.85, 0.26, 0.5, 0, 0), ...petalRing(6, 0.6, 0.45, 0.18, 0.6, Math.PI / 6, 0.08)]);
     const petalMat = own(K.gold.clone()); petalMat.side = THREE.DoubleSide;
     const orbGeo = new THREE.SphereGeometry(0.17, 16, 12), orbMat = own(new THREE.MeshBasicMaterial({ color: 0xfff2d8 }));
     const flowers = new THREE.InstancedMesh(flowerGeo, petalMat, tops.length), orbs = new THREE.InstancedMesh(orbGeo, orbMat, tops.length);
@@ -292,22 +281,6 @@ function arcMats(){
   const cob = cobbleMat().clone(); cob.vertexColors = false;
   return ARCMATS = { stone: new THREE.MeshStandardMaterial({ map: t.map, normalMap: t.normalMap, roughness: 0.88, metalness: 0 }), cob,
     dressed: new THREE.MeshStandardMaterial({ map: a.map, normalMap: a.normalMap, roughness: 0.8, metalness: 0 }) };
-}
-// a mesh from flat arrays, each triangle wound to face the way its normals say
-function meshOf(P, N, U, mat){
-  for (let k = 0; k < P.length; k += 9){
-    const e1 = [P[k + 3] - P[k], P[k + 4] - P[k + 1], P[k + 5] - P[k + 2]], e2 = [P[k + 6] - P[k], P[k + 7] - P[k + 1], P[k + 8] - P[k + 2]];
-    const c = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-    if (c[0] * (N[k] + N[k + 3] + N[k + 6]) + c[1] * (N[k + 1] + N[k + 4] + N[k + 7]) + c[2] * (N[k + 2] + N[k + 5] + N[k + 8]) >= 0) continue;
-    for (let q = 0; q < 3; q++){ const i = k + 3 + q, j = k + 6 + q; [P[i], P[j]] = [P[j], P[i]]; [N[i], N[j]] = [N[j], N[i]]; }
-    const u = k / 3 * 2; for (let q = 0; q < 2; q++){ const i = u + 2 + q, j = u + 4 + q; [U[i], U[j]] = [U[j], U[i]]; }
-  }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
-  g.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
-  g.computeBoundingSphere();
-  return new THREE.Mesh(g, mat);
 }
 // opts: cell (the mesh's), off (where the wall's middle plane stands from place's line, in v),
 // back (a material for the faces' backs: a tier wall's are the insides of its galleries)
