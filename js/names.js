@@ -21,8 +21,8 @@ const NAMES = {
     surnames: ['Ironfist', 'Stonebeard', 'Deepdelve', 'Oakshield', 'Coalhewer', 'Forgeheart', 'Hammerfall', 'Grimaxe', 'Orefinder', 'Stoutarm'],
   },
   goblin: {
-    male:   ['Snik', 'Grizzle', 'Murt', 'Krall', 'Zeg', 'Bork', 'Fizzle', 'Naxx', 'Wug', 'Skarn'],
-    female: ['Nix', 'Gretcha', 'Pesk', 'Mizzle', 'Yark', 'Snagga', 'Vrix', 'Hagga', 'Zilla', 'Brak'],
+    male:   ['Snik', 'Grizzle', 'Murt', 'Krall', 'Zeg', 'Bork', 'Fizzle', 'Naxx', 'Wurg', 'Skarn'],
+    female: ['Nix', 'Gretcha', 'Pesk', 'Mizzle', 'Yark', 'Snerra', 'Vrix', 'Hagga', 'Zilla', 'Brak'],
     surnames: ['Mudfoot', 'Snagtooth', 'Quickfinger', 'Bogwart', 'Grubsnout', 'Rattlebone', 'Cinderpaw', 'Nettlewick', 'Sourgrub', 'Toadwhistle'],
   },
 };

@@ -1020,7 +1020,7 @@ function tickJournal(dt){
 
 invBtn.addEventListener('click', e => {
   e.stopPropagation();
-  invOpen ? closeInventory() : openInventory();
+  invOpen ? closeInventory(true) : openInventory();
 });
 invPanel.addEventListener('click', e => e.stopPropagation());
 
@@ -1507,7 +1507,10 @@ function receiveFirework(d){
   return origin;
 }
 
-addEventListener('keydown', e => keys[e.code] = true);
+addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' && document.pointerLockElement === canvas) e.preventDefault();   // a jump, not a click on whatever button last had focus
+});
 addEventListener('keyup',   e => keys[e.code] = false);
 canvas.addEventListener('click', e => {
   if (!playing) {
@@ -1530,7 +1533,8 @@ document.addEventListener('pointerlockchange', () => {
       footsteps.init(); ambience.init(); instruments.init();
     }
   } else {
-    if (inDialog || settingsOpen || maps.bigOpen) return;    // dialog/settings/map released lock temporarily
+    // a panel released the lock for itself, and takes the look back when it shuts; only a bare Esc leaves you in cursor mode
+    if (inDialog || settingsOpen || maps.bigOpen || invOpen || spellOpen || restOpen || journalUI.isOpen || !cheatEl.classList.contains('hide')) return;
     if (!playing) return;
     // Player pressed Escape — enter cursor mode (world keeps running)
     document.body.classList.add('cursor-mode');
@@ -3685,7 +3689,7 @@ addEventListener('keydown', e => {
     else if (/^Digit[1-9]$/.test(e.code)) castSpell(+e.code.slice(5) - 1);
     return;
   }
-  if (rest && (e.code === 'KeyR' || e.code === 'Escape' || /^Key[WASD]$/.test(e.code))){ stopRest(false); return; }   // passing time: R or a step stops it
+  if (rest && (e.code === 'KeyR' || e.code === 'Escape' || /^(Key[WASD]|Arrow(Up|Down))$/.test(e.code))){ stopRest(false); return; }   // passing time: R or a step stops it
   if (restOpen){
     if (e.code === 'KeyR' || e.code === 'Escape') closeRest(true);
     else if (/^Digit[1-9]$/.test(e.code)) startRest(+e.code.slice(5) - 1);
@@ -3937,17 +3941,26 @@ function restFrame(){
 }
 restBtn.addEventListener('click', e => {
   e.stopPropagation();
-  if (rest) stopRest(false); else if (restOpen) closeRest(); else if (playing && !inDialog) openRest();
+  if (rest) stopRest(false); else if (restOpen) closeRest(true); else if (playing && !inDialog) openRest();
 });
 restPanel.addEventListener('click', e => e.stopPropagation());
 // console: the clock and the moon, and the rest under way (if any)
 window.leaRest = () => ({ hour: +hourOf(sky.time).toFixed(2), day: +sky.time.toFixed(3), moon: moonNow(), illum: +(sky.moonIllum ?? 0).toFixed(3),
   resting: rest && { to: rest.o.label, untilDay: +rest.until.toFixed(3) }, open: restOpen, sp: +me.sp.toFixed(1) });
+let turnHeld = 0;                                  // how long the arrows have been turning you
+// Space jumps: about a metre, a little over half a second. Only the view rises (like the troll's
+// shove): the walkability rules don't know about height, so it clears nothing. Hold to keep hopping.
+const JUMP_V = 6.8, JUMP_G = 22, HEAD_GAP = 0.3;   // take-off speed, gravity, eye-to-ceiling at the top
+let jumpH = 0, jumpV = 0;                          // height above your feet's walking height, and its speed
 function loop(now){
   meter.frameMs = now - last;
   if (perf.iv.length < 20000) perf.iv.push(meter.frameMs);   // frame intervals, for leaPerf's pacing
   const dt = Math.min(0.05, (now - last)/1000); last = now;
-  const _shift = keys.ShiftLeft || keys.ShiftRight, _walking = keys.KeyW || keys.KeyA || keys.KeyS || keys.KeyD;
+  // The arrow keys drive you as in Doom, alongside WASD and the mouse: up/down walk,
+  // left/right turn. While a panel is up the arrows are the panel's (a book's pages, a scrolling list).
+  const _arrows = playing && !inDialog && !settingsOpen && !invOpen && !restOpen && !spellOpen && !maps.bigOpen && !journalUI.isOpen && !skyPicker._open;
+  const _ahead = keys.KeyW || (_arrows && keys.ArrowUp), _back = keys.KeyS || (_arrows && keys.ArrowDown);
+  const _shift = keys.ShiftLeft || keys.ShiftRight, _walking = _ahead || _back || keys.KeyA || keys.KeyD;
   const running = _shift && canRun(me) && !fly && !boating;
   if (playing){
     tickVitals(me, dt, { running: running && _walking, flying: fly && flyPaid && !down });
@@ -3955,15 +3968,27 @@ function loop(now){
     drawVitals();
   }
   const speed = (running || (_shift && fly) ? 16 : 8) * dt;
+  const _turn = _arrows ? (keys.ArrowLeft ? 1 : 0) - (keys.ArrowRight ? 1 : 0) : 0;
+  turnHeld = _turn ? turnHeld + dt : 0;
+  // Doom's rates: 123 deg/s, double when running, half for the first moment so a tap can aim
+  if (_turn) yaw += _turn * 2.15 * (running || (_shift && fly) ? 2 : 1) * (turnHeld < 0.17 ? 0.5 : 1) * dt;
   const fx = Math.sin(yaw), fz = Math.cos(yaw);
   let dx = 0, dz = 0;
-  if (keys.KeyW){ dx -= fx; dz -= fz; }
-  if (keys.KeyS){ dx += fx; dz += fz; }
+  if (_ahead){ dx -= fx; dz -= fz; }
+  if (_back){ dx += fx; dz += fz; }
   if (keys.KeyA){ dx -= fz; dz += fx; }
   if (keys.KeyD){ dx += fz; dz -= fx; }
   const len = Math.hypot(dx, dz) || 1;
   dx = dx/len*speed; dz = dz/len*speed;
   if (rest || shove) dx = dz = 0;                 // passing time: you stay put; jumping back from a troll, you're not steering
+  if (fly || boating) jumpH = jumpV = 0;          // (taking to the air or a canoe mid-jump)
+  else {
+    if (keys.Space && _arrows && !rest && !shove && !jumpH && !jumpV) jumpV = JUMP_V;
+    if (jumpV || jumpH){
+      jumpH += jumpV * dt; jumpV -= JUMP_G * dt;
+      if (jumpH <= 0) jumpH = jumpV = 0;
+    }
+  }
   if (down){
     // underground: the level's own floor and walls; rough going in a cave
     const L = down.L;
@@ -3982,7 +4007,9 @@ function loop(now){
       L.moved?.(upos.x, upos.z);                      // the stair keeps track of which turn of which ramp you're on
       const groundY = L.floorAt(upos.x, upos.z) + EYE;
       upos.y = gfx.smooth && Number.isFinite(upos.y) ? upos.y + (groundY - upos.y) * Math.min(1, dt * 8) : groundY;
-      camera.position.copy(upos);
+      const room = Math.max(0, L.headAt(upos.x, upos.z) - HEAD_GAP - upos.y);
+      if (jumpH > room){ jumpH = room; jumpV = Math.min(jumpV, 0); }   // you bump your head (no room at all: no jump)
+      camera.position.copy(upos); camera.position.y += jumpH;
     }
   } else if (fly){
     pos.x += dx; pos.z += dz;                       // no terrain clamp in fly cam
@@ -4030,7 +4057,7 @@ function loop(now){
     // High up (a flight just ended), drift down rather than drop.
     if (Number.isFinite(pos.y) && pos.y > groundY + 1.5) pos.y = Math.max(groundY, pos.y - 7 * dt);
     else pos.y = gfx.smooth && Number.isFinite(pos.y) ? pos.y + (groundY - pos.y) * Math.min(1, dt * 8) : groundY;
-    camera.position.set(pos.x, pos.y + hop, pos.z);
+    camera.position.set(pos.x, pos.y + hop + jumpH, pos.z);
   }
   camera.rotation.set(0, 0, 0, 'YXZ');
   camera.rotateY(yaw); camera.rotateX(pitch);
@@ -4063,7 +4090,7 @@ function loop(now){
   perf.sim += performance.now() - _tAgents;
   listenTick();
   footsteps.update(simDt, {
-    moving: !!(dx || dz) && !fly && !boating,
+    moving: !!(dx || dz) && !fly && !boating && !jumpH,   // no footfalls in the air
     running,
     terrain: down ? 'rock' : terrainType(pos.x, pos.z),
   }, down ? [] : npcApi.npcs, { x: pos.x, z: pos.z, yaw, terrainAt: terrainType });   // underground, nobody's footsteps but yours

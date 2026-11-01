@@ -264,6 +264,13 @@ export function finish(L){
     const i = gx | 0, j = gz | 0, fx = gx - i, fz = gz - j, k = j * CW + i;
     return lerp(lerp(L.floorC[k], L.floorC[k + 1], fx), lerp(L.floorC[k + CW], L.floorC[k + CW + 1], fx), fz);
   };
+  // the ceiling over (x, z): a built level's own curved ceilAt, else the grid's corners, as drawn
+  L.headAt = (x, z) => {
+    if (L.ceilAt) return L.ceilAt(x, z);
+    const gx = clamp((x - L.x0) / CELL, 0, W - 0.001), gz = clamp((z - L.z0) / CELL, 0, H - 0.001);
+    const i = gx | 0, j = gz | 0, fx = gx - i, fz = gz - j, k = j * CW + i;
+    return lerp(lerp(L.ceilC[k], L.ceilC[k + 1], fx), lerp(L.ceilC[k + CW], L.ceilC[k + CW + 1], fx), fz);
+  };
   L.openAt = openAtOf(L);
   L.walkable = (x, z) => {
     for (const [dx, dz] of [[PAD, 0], [-PAD, 0], [0, PAD], [0, -PAD]]) if (!L.openAt(x + dx, z + dz)) return false;

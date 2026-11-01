@@ -60,7 +60,7 @@ const CODA_END = ['ck', 'ld', 'll', 'nd', 'rn', 'rk', 'rth', 'sk', 'st', 'th', '
 // syllables recombine freely, so they can spell what no one wants on a map
 // ("Fuck Scar" came up on the first big-map render). Anything containing one of
 // these is re-rolled; it errs broad, since a lost name costs nothing.
-const RUDE = /fuc|fuk|shit|cunt|cock|dick|piss|slut|twat|wank|arse|tit|fag|nig|rape|cum|porn|poo|butt|boob|sex|bitch|bum|crap|turd|knob|prick|puss|homo|jizz|spunk|tard|anus|anal|semen|nazi|kkk|hitl|dam|hell|ass|tard|wop|spic|kike|coon|gook|dyke|whor|hoe|nob|scat|crack|dong|wee|pee/i;
+const RUDE = /fuc|fuk|shit|cunt|cock|dick|piss|slut|twat|wank|arse|tit|fag|nig|rape|cum|porn|poo|butt|boob|sex|bitch|bum|crap|turd|knob|prick|puss|homo|jizz|spunk|tard|anus|anal|semen|nazi|kkk|hitl|dam|hell|ass|tard|wop|spic|kike|coon|gook|dyke|whor|hoe|nob|scat|crack|dong|wee|pee|feck|fick|fack|fock|cuck|cack|suck|shat|boner|pecker|beaner|condom|brothel|breast|cretin|nutter|bollock|ballock|sodom|satan|murder|hater|hating|stalin|lenin|putin|biden|cosby|^(?:fanney|lust|lusting|luster|bosom|bust|buster|seaman|seamen|nuder|mick|hick|lick|licking|licker|fist|fister|fisting|pisten|pister|pistin|baller|balling|wanton|reamer|reaming|necking|petting|rutting|shaft|teating)$/i;
 function makeWord(r){
   const pick = a => a[(r() * a.length) | 0];
   for (let tries = 0; tries < 40; tries++){
