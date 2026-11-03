@@ -26,14 +26,94 @@
 
 import { placeAt, placePhrase, places } from './gen/places.js';
 import { roadFrom } from './ways.js';
-import { destinations, routeOptions, describeRoute, routeLegs, farWord, bearing } from './guide.js';
+import { destinations, routeOptions, describeRoute, routeLegs, sayableLegs, THROUGH, farWord, bearing } from './guide.js';
+import { compose, composeShaped, makeMemory } from './verse.js';
+import { COUPLET, ONE_LINE, PUCK, SAYINGS, eitherEnd } from './verse-puck.js';
+import { score } from './speech-score.js';
 
 const pick = a => a[(Math.random() * a.length) | 0];
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const GAP = 5;          // seconds between remarks
 const SOON = 1.5;       // and between one and a remark that can't wait (a new region, a turn)
 
-// Entering a region, by its kind: {N} is its name
+// ---- saying it in verse --------------------------------------------------------
+// Everything he works out from the land (where you are, what's near, the way, his remarks on the
+// road) comes out in couplets, composed as he says it (js/verse.js, his grammar js/verse-puck.js).
+// His written lore stays prose. Should nothing scan (a very long name), he just says it plainly:
+// each call site below carries the plain sentence.
+const memory = makeMemory();                  // lines and rhyme sounds lately said, so he doesn't repeat himself
+// a name's ways of being said, in full and then shorter, for when the full one won't scan: "the
+// Sepulchre of Wirdell", "Wirdell"; "Menford Farm", "Menford"; "the Dainmore Vault", "Dainmore".
+// (He gives the full name on the choice you click, so the short one's never a puzzle.)
+export function nameForms(name){
+  const forms = [name], noThe = name.replace(/^the /i, '');
+  if (noThe !== name) forms.push(noThe);
+  const of = noThe.match(/^[\w'-]+ of (.+)$/i);
+  if (of) forms.push(of[1]);
+  // the word that only says what it is, which the line can say for itself ("an old tomb, Dainmore")
+  const plainWord = noThe.replace(/^Old /, '').match(/^([\w'-]+) (Farm|Lane|Vault|Caves|Cavern|Stones|Ring|Hall|Garth|Chapel|Minster|Abbey|Tower|Cairn)$/);
+  if (plainWord) forms.push(plainWord[1]);
+  // a region's own name without its kind, as a last resort ("Tedel Meadows", "Tedel"), so a line has
+  // room to end on something besides the direction
+  const regionWord = noThe.match(/^([\w'-]+) (Wood|Woods|Weald|Forest|Grove|Pines|Marsh|Marshes|Reeds|Fen|Fens|Moss|Carr|Alders|Wetwood|Ings|Mead|Meadows|Water-meadows|Field|Green|Heath|Moor|Downs|Crags|Tor|Scar|Mere|Water|Isle|Holm)$/);
+  if (regionWord) forms.push(regionWord[1]);
+  return forms;
+}
+// a name and the words that have to agree with it: "the Citock Caves lie", "there are the Drothin
+// Stones". `subj` is the forms that can take a verb, since "Citock" alone would sound singular.
+const PLURAL = /\s\S+(?<!s)s$/;
+export function namedCtx(name){
+  const forms = nameForms(name);
+  if (!PLURAL.test(name)) return { name: forms };
+  return { name: forms, subj: forms.filter(f => PLURAL.test(f)), rests: 'rests:many', is: 'is:many', has: 'has:many', there: 'there:many' };
+}
+// and where someone stands, the same way ("up among the Crags of Lenner", "among Lenner")
+const AT_SHORT = { 'up on': 'on', 'up among': 'among', 'out on': 'on', 'down in': 'in' };
+export const atForms = g => [g.at, ...(AT_SHORT[g.at] ? [AT_SHORT[g.at]] : [])].flatMap(at => nameForms(g.name).map(n => `${at} ${n}`));
+// how he crosses a kind of place (guide.js THROUGH), as a rule, so it can be put another way
+export const thruRule = kind => ({ through: 'thru:through', across: 'thru:across', over: 'thru:over', along: 'thru:along', 'along the shore of': 'thru:shore' })[THROUGH[kind]] || 'thru:across';
+const FAR = { 'a short hop': 'far:short', 'a fair walk': 'far:fair', 'a good long walk': 'far:good', 'a long way': 'far:long' };
+// try each [rule, rule] in turn; the first to scan and rhyme, else `plain`
+function couplet(tries, ctx, plain){
+  for (const rules of tries){
+    const v = composeShaped(COUPLET, eitherEnd(rules), ctx, PUCK, { memory, family: 'fill' });
+    if (v) return v.text;
+  }
+  return plain;
+}
+const oneLine = (rule, plain) => compose(ONE_LINE, [rule], {}, PUCK, { memory })?.text ?? plain;
+// a run of lines, each its own rule and ctx: rhymed in twos, a line left over (or a pair that won't
+// rhyme) taking a fill for its partner. Null if any line can't be said at all.
+function verses(seq){
+  const out = [];
+  for (let q = 0; q < seq.length; q += 2){
+    const a = seq[q], b = seq[q + 1];
+    const both = b && compose(COUPLET, [a.rule, b.rule], [a.ctx, b.ctx], PUCK, { memory });
+    if (both){ out.push(both.text); continue; }
+    for (const x of b ? [a, b] : [a]){
+      const v = composeShaped(COUPLET, eitherEnd([x.rule, 'fill']), x.ctx, PUCK, { memory, family: 'fill' });
+      if (!v) return null;
+      out.push(v.text);
+    }
+  }
+  return out.join('\n');
+}
+// a place and how to get there, in a couplet
+export const placeRule = d => ({ village: 'be:village', hamlet: 'be:hamlet', farmstead: 'be:farmstead', aqueduct: 'be:aqueduct', circle: 'be:circle', cave: 'be:cave', tomb: 'be:tomb' })[d.kind]
+  || (d.kind ? 'be:ruin' : 'be:spot');
+function placeVerse(d, x, z, plain){
+  const ctx = { ...namedCtx(d.name), what: d.what, far: FAR[farWord(Math.hypot(d.x - x, d.z - z))], ctxdir: 'dir:' + bearing(x, z, d.x, d.z) };
+  return composeShaped(COUPLET, SAYINGS.place.tries({ rule: placeRule(d) }), ctx, PUCK, { memory, family: 'place' })?.text ?? plain;
+}
+// the legs of a route as lines of verse
+const legLines = route => sayableLegs(route).map(l => l.road ? { rule: 'leg:road', ctx: { ctxdir: 'dir:' + l.dir } }
+  : l.place?.name ? { rule: 'leg:place', ctx: { ctxdir: 'dir:' + l.dir, thru: thruRule(l.place.kind), name: nameForms(l.place.name) } }
+  : { rule: 'leg:open', ctx: { ctxdir: 'dir:' + l.dir } });
+// coming into a region: what's true of that kind of place if it'll rhyme, else something that is anyway
+const enterVerse = (first, place, plain) => couplet(SAYINGS[first].tries({ kind: place.kind }), { name: nameForms(place.name) }, plain);
+// how long a line he's said takes him to sing
+const songLength = text => score(text, 'puck').length;
+// what he said before he said it in verse, for when it won't scan
 const ENTER = {
   wood:      ['Ah, {N}! Haven\'t been here in ages.', '{N}. Mind the roots.', 'Into {N} we go. Keep close.'],
   grove:     ['{N}. The old trees. Speak softly here.', 'Ah, {N}. Smell the pine?'],
@@ -111,17 +191,19 @@ function plan(route, from = 0){
 // guide: { puck, flock, player, say(text), onArrive(dest) } — say puts a bubble over Puck;
 // onArrive, when he's brought you where you asked (for the journal)
 export function makePuckGuide({ flock, player, say, finder = null, onArrive = null, friends = null }){
-  let trip = null;            // { dest, route, plan, leg, turnK, said, t, waitT, offT, half, near }
+  let trip = null;            // { dest, route, plan, leg, turnK, said, t, song, waitT, offT, half, near }
   let chosen = null, page = 0, opts = new Map(), asked = null, fpage = 0;
   const puck = () => flock.leader;
 
   function start(dest, planned){
     const p = puck(), { route, len: lead } = leadIn(planned, p.x, p.z, player.x, player.z), pl = plan(route, lead);
     p.guide = { pts: route.pts, cum: pl.cum, len: pl.len, s: 0, ip: 0, k: 0 };
-    trip = { dest, route, plan: pl, leg: 0, turnK: 0, seen: new Set([dest.name]), t: GAP, waitT: 0, offT: 0, stage: 0 };
+    trip = { dest, route, plan: pl, leg: 0, turnK: 0, seen: new Set([dest.name]), t: GAP, song: 0, waitT: 0, offT: 0, stage: 0 };
     const first = pl.legs[0];
-    say(pick(['Follow me!', 'This way!', 'Come on, then!']) + (first?.road ? ' The old road first.' : ''));
+    speak(couplet(SAYINGS[first?.road ? 'set-off:road' : 'set-off'].tries, {}, pick(['Follow me!', 'This way!', 'Come on, then!']) + (first?.road ? ' The old road first.' : '')));
   }
+  // say a line and note how long it'll sing, so nothing but a turn talks over it
+  function speak(text){ say(text); if (trip){ trip.t = 0; trip.song = songLength(text); } }
   function stop(){
     const p = puck();
     if (p){ p.guide = null; flock.leaderCx = p.x; flock.leaderCz = p.z; }   // he stays where he got to
@@ -130,8 +212,8 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
 
   // a remark, if he hasn't just made one (`now` for the ones that can't wait long)
   function remark(text, now = false){
-    if (trip.t < (now ? SOON : GAP)) return false;
-    say(text); trip.t = 0; return true;
+    if (trip.t < (now ? SOON : Math.max(GAP, trip.song + 1))) return false;
+    speak(text); return true;
   }
 
   function tick(dt){
@@ -146,7 +228,7 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
     // there
     const dEnd = Math.hypot(player.x - trip.dest.x, player.z - trip.dest.z);
     if (g.s >= g.len - 1 && dEnd < trip.dest.arrive + 8){
-      say(pick([`Here we are: ${trip.dest.name}!`, `${cap(trip.dest.name)}! Told you I knew the way.`, `And here's ${trip.dest.name}.`]));
+      say(couplet(SAYINGS.arrive.tries, { name: nameForms(trip.dest.name) }, pick([`Here we are: ${trip.dest.name}!`, `${cap(trip.dest.name)}! Told you I knew the way.`, `And here's ${trip.dest.name}.`])));
       const dest = trip.dest;
       stop(); onArrive?.(dest); return;
     }
@@ -157,27 +239,28 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
         const pl = plan(o[0], 0);
         p.guide = { pts: o[0].pts, cum: pl.cum, len: pl.len, s: 0, ip: 0, k: 0 };
         Object.assign(trip, { route: o[0], plan: pl, leg: 0, turnK: 0, stage: 0 });
-        trip.t = GAP; remark(pick([`${cap(trip.dest.name)}'s moved on. This way!`, `Not here any more! After ${trip.dest.name}, then.`]), true);
+        trip.t = GAP; trip.song = 0; remark(couplet(SAYINGS.moved.tries, { name: nameForms(trip.dest.name) }, pick([`${cap(trip.dest.name)}'s moved on. This way!`, `Not here any more! After ${trip.dest.name}, then.`])), true);
         return;
       }
     }
     // waiting for you
     trip.waitT = g.waiting ? trip.waitT + dt : 0;
-    if (trip.waitT > 3 && remark(pick(['Over here!', 'Keep up, slowcoach!', 'This way!', 'Yoo-hoo! Here!']))){ trip.waitT = -5; return; }
-    if (g.off > 60 && dPlayer > 40 && remark(pick(["We're going this way!", 'Not that way! Here!']))) return;
+    if (trip.waitT > 3 && remark(oneLine('call:wait', pick(['Over here!', 'Keep up, slowcoach!', 'This way!', 'Yoo-hoo! Here!'])))){ trip.waitT = -5; return; }
+    if (g.off > 60 && dPlayer > 40 && remark(oneLine('call:wrong', pick(["We're going this way!", 'Not that way! Here!'])))) return;
     if (dPlayer > 30) return;                         // the rest he says only with you near enough to hear
     const pl = trip.plan;
     // a new leg: onto the road, off it, into a region
     const legNow = pl.legs.findIndex(l => g.s >= l.s0 && g.s <= l.s1 + 0.5);
-    if (legNow > trip.leg){
-      if (trip.t < SOON) return;                      // in a moment: let the last remark be read
+    if (legNow > trip.leg && trip.t >= Math.max(SOON, trip.song)){     // once the last has been sung (it keeps)
       const l = pl.legs[legNow], was = pl.legs[trip.leg];
       trip.leg = legNow;
-      if (l.road) remark(pick(['Onto the old road now.', "Here's the old road. Easy going.", 'The old road! Follow it a while.']), true);
+      if (l.road) remark(couplet(SAYINGS['on-road'].tries, {}, pick(['Onto the old road now.', "Here's the old road. Easy going.", 'The old road! Follow it a while.'])), true);
       else {
         const name = l.place?.name, lines = ENTER[l.place?.kind] || ['Here\'s {N}.'];
         const line = name ? pick(lines).replace('{N}', name) : 'On we go.';
-        remark(cap(was && was.road ? `We leave the road here. ${line}` : line), true);
+        const plain = cap(was && was.road ? `We leave the road here. ${line}` : line);
+        remark(!name ? couplet(SAYINGS[was?.road ? 'off-road' : 'set-off'].tries, {}, plain)
+          : enterVerse(was?.road ? 'off-enter' : 'enter', l.place, plain), true);
       }
       return;
     }
@@ -187,7 +270,7 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
       trip.turnK++;
       if (g.s < tn.s + 6){
         const left = tn.ang < 0;
-        remark(pick(left ? ['We take a left here.', 'Left, here!', 'Bear left.'] : ['We take a right here.', 'Right, here!', 'Bear right.']), true);
+        remark(couplet(SAYINGS.turn.tries, { side: left ? 'side:left' : 'side:right' }, pick(left ? ['We take a left here.', 'Left, here!', 'Bear left.'] : ['We take a right here.', 'Right, here!', 'Bear right.'])), true);
         return;
       }
     }
@@ -195,13 +278,13 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
     for (const d of destinations(p.x, p.z, { n: 3 })){
       if (d.d > 45 || trip.seen.has(d.name)) continue;
       trip.seen.add(d.name);
-      if (remark(`That's ${d.name}, over to the ${bearing(p.x, p.z, d.x, d.z)}.`)) return;
+      if (remark(couplet(SAYINGS['pass-by'].tries, { ...namedCtx(d.name), ctxdir: 'dir:' + bearing(p.x, p.z, d.x, d.z) }, `That's ${d.name}, over to the ${bearing(p.x, p.z, d.x, d.z)}.`))) return;
     }
     // how far yet
     const left = g.len - g.s;
-    if (trip.stage === 0 && g.len > 250 && g.s > g.len * 0.5){ if (remark(pick(['Halfway there, near enough.', 'Halfway! Keep going.']))) trip.stage = 1; return; }
-    if (trip.stage <= 1 && left < Math.max(80, g.len * 0.2) && g.len > 150){ if (remark(pick(['Not much longer now.', 'Not far now.']))) trip.stage = 2; return; }
-    if (trip.stage <= 2 && left < 30){ if (remark(pick(['Nearly there!', 'Almost there!']))) trip.stage = 3; }
+    if (trip.stage === 0 && g.len > 250 && g.s > g.len * 0.5){ if (remark(couplet(SAYINGS.halfway.tries, {}, pick(['Halfway there, near enough.', 'Halfway! Keep going.'])))) trip.stage = 1; return; }
+    if (trip.stage <= 1 && left < Math.max(80, g.len * 0.2) && g.len > 150){ if (remark(couplet(SAYINGS['not-long'].tries, {}, pick(['Not much longer now.', 'Not far now.'])))) trip.stage = 2; return; }
+    if (trip.stage <= 2 && left < 30){ if (remark(couplet(SAYINGS.nearly.tries, {}, pick(['Nearly there!', 'Almost there!'])))) trip.stage = 3; }
   }
 
   // ---- the dialog branch -------------------------------------------------------
@@ -210,9 +293,10 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
   const nodes = {
     get 'g-where'(){
       const here = placeAt(player.x, player.z);
-      let text = pick([`You're ${placePhrase(here)}, traveller.`, `Why, ${placePhrase(here)}! Where else?`, `${cap(placePhrase(here))}. Puck always knows.`]);
-      const r = roadFrom(player.x, player.z);
-      if (r) text += r.on ? ' And this is the old road under your feet.' : ` The old road runs off to the ${['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'][Math.round(r.toward / 45) % 8]}.`;
+      const at = placePhrase(here), r = roadFrom(player.x, player.z);
+      const roadDir = r && !r.on ? ['north', 'northeast', 'east', 'southeast', 'south', 'southwest', 'west', 'northwest'][Math.round(r.toward / 45) % 8] : null;
+      let text = couplet(SAYINGS['you-are'].tries, { at: atForms(here) }, pick([`You're ${at}, traveller.`, `Why, ${at}! Where else?`, `${cap(at)}. Puck always knows.`]));
+      if (r) text += '\n' + couplet(SAYINGS[r.on ? 'road-here' : 'road-off'].tries, { ctxdir: 'dir:' + roadDir }, r.on ? 'And this is the old road under your feet.' : `The old road runs off to the ${roadDir}.`);
       page = 0;
       const choices = [{ label: 'Anything interesting nearby?', next: 'g-near' }, { label: "I'd like to meet some people.", next: 'g-people' }];
       for (const f of friends ? friends() : [])
@@ -233,19 +317,26 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
     get 'g-near'(){
       const ds = destinations(player.x, player.z, { skip: page * 4, n: 4 });
       if (!ds.length) return { text: "That's all I know of, I'm afraid. Even Puck can't know everything.", choices: [BYE] };
-      const lines = ds.map((d, q) => `${q ? pick(["There's", 'And', 'Then there\'s']) : "There's"} ${d.what}, ${farWord(d.d)} ${bearing(player.x, player.z, d.x, d.z)}.`);
+      const lines = ds.map((d, q) => placeVerse(d, player.x, player.z, `${q ? pick(["There's", 'And', 'Then there\'s']) : "There's"} ${d.what}, ${farWord(d.d)} ${bearing(player.x, player.z, d.x, d.z)}.`));
       const choices = ds.map(d => ({ label: `Let's go to ${d.name}.`, next: 'g-way', run: () => { chosen = d; } }));
       choices.push({ label: 'Anything else?', next: 'g-near', run: () => { page++; } }, { label: 'Never mind.', next: null });
-      return { text: (page ? 'Further off, then. ' : 'Let me see... ') + lines.join(' '), choices };
+      return { text: (page ? 'Further off, then.\n' : 'Let me see...\n') + lines.join('\n'), choices };
     },
     get 'g-way'(){
       const d = chosen, o = d ? options(d) : [];
       const back = { label: 'Somewhere else, then.', next: 'g-near' };
       if (!o.length) return { text: `${cap(d.name)}? That's out over the water. You'd want a canoe for that, and Puck doesn't do canoes.`, choices: [back] };
       const go = (route, label) => ({ label, next: null, run: () => start(d, route) });
-      if (o.length === 1) return { text: `${cap(d.name)}? ${describeRoute(o[0])} ${cap(farWord(o[0].len))}.`, choices: [go(o[0], 'Lead the way.'), back] };
+      const named = namedCtx(d.name);
+      if (o.length === 1){
+        const v = verses([{ rule: 'on-way', ctx: named }, ...legLines(o[0]), { rule: 'how-far', ctx: { far: FAR[farWord(o[0].len)] } }]);
+        return { text: v ?? `${cap(d.name)}? ${describeRoute(o[0])} ${cap(farWord(o[0].len))}.`, choices: [go(o[0], 'Lead the way.'), back] };
+      }
       const [byRoad, scenic] = o, longer = byRoad.len > scenic.len * 1.1;
-      return { text: `${cap(d.name)}? Two ways. By the road: ${describeRoute(byRoad)}${longer ? " Longer, but it's easy going." : ''} Or the pretty way: ${describeRoute(scenic)}`,
+      const v = verses([{ rule: 'two-ways', ctx: named }, { rule: 'by-road-pretty', ctx: {} },
+        { rule: 'how:by-road', ctx: {} }, ...legLines(byRoad), ...(longer ? [{ rule: 'longer-easy', ctx: {} }] : []),
+        { rule: 'how:pretty', ctx: {} }, ...legLines(scenic)]);
+      return { text: v ?? `${cap(d.name)}? Two ways. By the road: ${describeRoute(byRoad)}${longer ? " Longer, but it's easy going." : ''} Or the pretty way: ${describeRoute(scenic)}`,
         choices: [go(byRoad, 'The road, then.'), go(scenic, 'The pretty way.'), back] };
     },
   };
@@ -264,27 +355,27 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
     get 'g-thin'(){
       const t = finder.thin && finder.thin();
       if (!t || !t.places.length) return { text: "A thin place? Not one I can get you to from here.", choices: [BYE] };
-      const lines = t.places.map((q, i) => `${i ? pick(['Or', 'Then there\'s']) : "There's"} ${q.dest.what}, ${farWord(Math.hypot(q.dest.x - player.x, q.dest.z - player.z))} ${bearing(player.x, player.z, q.dest.x, q.dest.z)}.`);
+      const lines = t.places.map((q, i) => placeVerse(q.dest, player.x, player.z, `${i ? pick(['Or', 'Then there\'s']) : "There's"} ${q.dest.what}, ${farWord(Math.hypot(q.dest.x - player.x, q.dest.z - player.z))} ${bearing(player.x, player.z, q.dest.x, q.dest.z)}.`));
       const choices = t.places.map(q => ({ label: `The ${q.kind}.`, next: 'g-way', run: () => { chosen = q.dest; } }));
       choices.push({ label: 'Never mind.', next: null });
       const lead = t.salve ? pick(['The green salve, is it? Somewhere the Gentry gather, then.', "Want to see them, do you? I know where they'll be."])
                            : pick(["A thin place? Been talking to the stargazers, have you?", 'Somewhere the Gentry gather, then. Not that you\'ll see them.']);
-      return { text: `${lead} ${lines.join(' ')}${t.salve && !t.night ? ' Mind, nothing shows till after dark.' : ''}`, choices };
+      return { text: `${lead}\n${lines.join('\n')}${t.salve && !t.night ? '\nMind, nothing shows till after dark.' : ''}`, choices };
     },
     get 'g-found-ask'(){
       const w = finder.where(asked), d = w.dest, back = { label: 'Something else.', next: 'g-find' };
       if (!d) return { text: "Not that I know of. Even Puck can't know everything.", choices: [back, BYE] };
-      return { text: w.ask.text || `There's ${d.what}, ${farWord(Math.hypot(d.x - player.x, d.z - player.z))} ${bearing(player.x, player.z, d.x, d.z)}.`,
+      return { text: w.ask.text || placeVerse(d, player.x, player.z, `There's ${d.what}, ${farWord(Math.hypot(d.x - player.x, d.z - player.z))} ${bearing(player.x, player.z, d.x, d.z)}.`),
         choices: [{ label: w.ask.go || 'Take me there.', next: 'g-way', run: () => { chosen = d; } }, back, BYE] };
     },
     get 'g-friend'(){
       const d = chosen;
       if (!d) return { text: 'Who? Never heard of them.', choices: [BYE] };
       const far = Math.hypot(d.x - player.x, d.z - player.z);
-      if (!d.met) return { text: `${pick(["In charge? Nobody's in charge of the Lea. But if anybody is, it's Claude.", 'In charge! Ha. The nearest thing is Claude.'])} ${far < d.arrive ? 'Right there, as it happens.' : `${pick(['Last I saw,', 'Wandering about'])} ${d.where()}, ${farWord(far)} ${bearing(player.x, player.z, d.x, d.z)}.`}`,
+      if (!d.met) return { text: `${pick(["In charge? Nobody's in charge of the Lea. But if anybody is, it's Claude.", 'In charge! Ha. The nearest thing is Claude.'])} ${far < d.arrive ? 'Right there, as it happens.' : '\n' + lastSeen(d, far)}`,
         choices: far < d.arrive ? [BYE] : [{ label: 'Take me there.', next: 'g-way' }, { label: 'Never mind.', next: null }] };
       if (far < d.arrive) return { text: pick([`${cap(d.name)}? Right there! Puck can't help you if you won't look.`, `${cap(d.name)} is just there. Turn round!`]), choices: [BYE] };
-      return { text: `${cap(d.name)}? ${pick(['Last I saw,', 'Wandering about'])} ${d.where()}, ${farWord(far)} ${bearing(player.x, player.z, d.x, d.z)}. ${pick(['Never stays put, that one.', 'Talks like a book, you know.'])}`,
+      return { text: `${cap(d.name)}?\n${lastSeen(d, far)}\n${pick(['Never stays put, that one.', 'Talks like a book, you know.'])}`,
         choices: [{ label: 'Take me there.', next: 'g-way' }, { label: 'Never mind.', next: null }] };
     },
     get 'g-salve'(){
@@ -297,10 +388,15 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
       if (w.ask) return { text: w.lore, choices: [{ label: w.ask.label, next: 'g-found-ask' }, back, BYE] };
       if (!w.dest) return { text: w.lore, choices: [back, BYE] };
       const d = w.dest;
-      return { text: `${w.lore} The nearest is ${d.what}, ${farWord(Math.hypot(d.x - player.x, d.z - player.z))} ${bearing(player.x, player.z, d.x, d.z)}.`,
+      return { text: `${w.lore}\n${placeVerse(d, player.x, player.z, `The nearest is ${d.what}, ${farWord(Math.hypot(d.x - player.x, d.z - player.z))} ${bearing(player.x, player.z, d.x, d.z)}.`)}`,
         choices: [{ label: 'Take me there.', next: 'g-way', run: () => { chosen = d; } }, back, BYE] };
     },
   }));
+  // where a friend was last seen, and how far
+  function lastSeen(d, far){
+    const dir = bearing(player.x, player.z, d.x, d.z);
+    return couplet(SAYINGS['last-seen'].tries, { at: [d.where()], far: FAR[farWord(far)], ctxdir: 'dir:' + dir }, `${pick(['Last I saw,', 'Wandering about'])} ${d.where()}, ${farWord(far)} ${dir}.`);
+  }
   // the badger's wood (dialogs/puck.json "badger"): the biggest wood in the Lea
   const badger = () => [...places()].filter(g => g.kind === 'wood').sort((a, b) => b.area - a.area)[0]?.name || 'the old wood';
   // Puck's tree with the branch grafted on: "Where am I?" in his greeting (and, on a

@@ -1,0 +1,2605 @@
+{
+ "folk": [
+  {
+   "id": "f-0",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 197,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6924311841210886,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 324,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-1",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 188,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7094517042544553,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 323,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-10",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 187,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6176329693865448,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 315,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-11",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 220,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7680567617786132,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 331,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-12",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 176,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6834060005747509,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 312,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-13",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 214,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6033793799407008,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 322,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-14",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 196,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.584559022848895,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 324,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-15",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 216,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6558382985719244,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 331,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-16",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 192,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.733908268818374,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 331,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-17",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 207,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7069343056324748,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 327,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-18",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 185,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.735995717970089,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 323,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-19",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 221,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6727472200822564,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 333,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-2",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 201,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7022482991791257,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 324,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-20",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 207,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.643872882017135,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 325,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-21",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 182,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.591134488920704,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 319,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-22",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 205,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5945137451260853,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 325,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-23",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 184,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.554018816642744,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 319,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-24",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 188,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6161573888719702,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 306,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-25",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 183,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6600807865712024,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 321,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-26",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 205,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6335686038492039,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 325,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-27",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 179,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.650864980330143,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 315,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-28",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 194,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5829008064076278,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 316,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-29",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 185,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8004617941479228,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 321,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-3",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 180,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5970115872264732,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 318,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-30",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 194,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7540042284328152,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 327,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-31",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 203,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5926759944547433,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 320,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-4",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 226,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6276146611605988,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 331,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-5",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 179,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.683286282473823,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 318,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-6",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 206,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6695456201879535,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 325,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-7",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 180,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.594033050367489,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 316,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-8",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 202,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7058082795311018,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 321,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-9",
+   "gender": "f",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 185,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6208280863153817,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 322,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-0",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 175,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.4843810589219606,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 311,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-1",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 199,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5548610324938823,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 321,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-10",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 195,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.489174502762399,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-11",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 182,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6082327240258831,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 316,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-12",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 196,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.4882348337778746,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 312,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-13",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 184,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5111228231728742,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 312,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-2",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 179,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.507972458898108,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-3",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 198,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.492274186023757,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 315,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-4",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 180,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6464616464992738,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 319,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-5",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 199,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5657152053358137,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 319,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-6",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 183,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6067713892263338,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 320,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-7",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 201,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5464287870173274,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 322,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-8",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 179,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.5729887983344937,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-child-9",
+   "gender": "f",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 199,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.4730335389710019,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 316,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-elder-0",
+   "gender": "f",
+   "age": "elder",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 179,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6078015281144649,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 313,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-elder-1",
+   "gender": "f",
+   "age": "elder",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 229,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7112796300134674,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 333,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-elder-2",
+   "gender": "f",
+   "age": "elder",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 175,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6983093352234488,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "f-elder-3",
+   "gender": "f",
+   "age": "elder",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 215,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.736527571114919,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 331,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-0",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 181,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.9049145832094105,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 311,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-1",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 210,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8228496604963909,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 312,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-10",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 208,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7449097993248623,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 317,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-11",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 188,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8089687796937641,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 321,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-12",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 226,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8879069928058652,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 321,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-13",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 191,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.842471040930385,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 330,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-14",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 204,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8291494095020413,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-15",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 181,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8127503332311974,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 317,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-16",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 205,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7970170235383527,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 317,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-17",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 182,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7510671389261598,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-18",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 228,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.887687792412406,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 325,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-19",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 188,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.9464241193368423,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 322,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-2",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 175,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.9037615591311319,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-20",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 170,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8891857587575538,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 305,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-21",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 192,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8471626661172487,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 307,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-22",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 187,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.9455758677141066,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 322,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-23",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 222,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.897143888728673,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 320,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-24",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 176,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8010262995826591,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 307,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-25",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 231,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.80937144470371,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 328,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-26",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 177,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8245994587681944,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-27",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 200,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7357723768357323,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 308,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-28",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 187,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8483041689051765,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 318,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-29",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 212,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.784302199292208,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 322,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-3",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 219,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7867401164216656,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 320,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-30",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 234,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8138359796068624,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 329,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-31",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 185,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7120672715741723,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 323,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-4",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 181,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8211162440546065,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 316,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-5",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 206,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7850324876236936,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 306,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-6",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 187,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8174024035536425,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-7",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 213,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.788606548735455,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 312,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-8",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 174,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8908832146620742,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 304,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-9",
+   "gender": "m",
+   "age": "adult",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 215,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8283140321111326,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 321,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-0",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 217,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.619401960223589,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 321,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-1",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 178,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6289489404762498,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 317,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-10",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 179,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.629042733213095,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 317,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-11",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 214,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6549679359004086,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 316,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-12",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 177,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7772719209731955,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 315,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-13",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 203,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.717246078627357,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 301,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-2",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 215,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.633677059390068,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 318,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-3",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 175,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7850797752556893,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 309,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-4",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 208,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6663409699473999,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 308,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-5",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 177,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7381448772136623,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 310,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-6",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 213,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.705802974425739,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 319,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-7",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 172,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.7002304525089016,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 301,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-8",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 213,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.697240387796538,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 319,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-child-9",
+   "gender": "m",
+   "age": "child",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 177,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.6740260385798236,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 314,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-elder-0",
+   "gender": "m",
+   "age": "elder",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 208,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.858488470328514,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 310,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-elder-1",
+   "gender": "m",
+   "age": "elder",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 183,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.823712298650963,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 310,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-elder-2",
+   "gender": "m",
+   "age": "elder",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 204,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.744705613808014,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 320,
+    "frameH": 256,
+    "topPad": 0
+   }
+  },
+  {
+   "id": "m-elder-3",
+   "gender": "m",
+   "age": "elder",
+   "m": {
+    "cols": 10,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 1,
+    "walkLen": 9,
+    "frameW": 180,
+    "frameH": 256,
+    "topPad": 0
+   },
+   "frameM": 1.8512356440381135,
+   "sitM": {
+    "cols": 1,
+    "rows": 5,
+    "standCol": 0,
+    "walkStart": 0,
+    "walkLen": 1,
+    "frameW": 309,
+    "frameH": 256,
+    "topPad": 0
+   }
+  }
+ ],
+ "small": true
+}

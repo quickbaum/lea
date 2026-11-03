@@ -87,29 +87,6 @@
   .page-margin { position: relative; right: auto; top: auto; width: auto; margin: 14px 0 0 40px; }
 }
 
-/* the journal (js/journal-view.js): your own book, on the same paper. No margin notes,
-   so the page takes its text the full width; what's in hand is set off in a ruled box,
-   in your own hand */
-.old-page.journal-page { padding: 30px 46px 26px; transform: rotate(.3deg); }
-.journal-hand {
-  margin: 0 0 18px; padding: 8px 14px 6px;
-  border: 1px solid #6e4a2a66; border-radius: 2px; background: #fff4d81f;
-}
-.journal-head, .journal-day {
-  font: 15px 'IM Fell English SC', 'IM Fell English', Georgia, serif; letter-spacing: .08em; color: var(--ink-faded);
-}
-.journal-hand ul { margin: 4px 0 2px; padding: 0 0 0 18px; }
-.journal-hand li { font: 13px/1.9 'Homemade Apple', cursive; color: var(--hand); margin-bottom: 4px; }
-.journal-day { text-align: center; margin: 16px 0 6px; }
-.journal-day::before, .journal-day::after { content: '—'; margin: 0 .6em; opacity: .6; }
-.journal-page p { text-indent: 0; text-align: left; hyphens: manual; }
-.journal-when { font-style: italic; color: var(--ink-faded); }
-.journal-none { font-style: italic; color: var(--ink-faded); text-align: center !important; }
-
-@media (max-width: 560px) {
-  .old-page.journal-page { padding: 24px 20px 20px; }
-}
-
 /* a Faerie book (faerie-books.js): vellum, not paper. Pale calfskin with a cool, faintly
    violet bloom and no foxing (nothing ages there), ruled round in gilt, printed in
    Cormorant Garamond with Uncial Antiqua for the heading and an illuminated initial. A later

@@ -67,7 +67,7 @@ export function makeGuards(L, kit){
     for (let k = 0; k < g.n; k++){
       const [x, z] = near(g.x, g.z, 1.4, g.seed + k * 977);
       const s = makeSkeleton(kit, { x, z, floorAt: L.floorAt, lit: true, seed: (g.seed + k) | 0, scatter: scatter(g.r) });
-      const m = { s, g, group, mode: 'lying', unseen: 0, rest: 0 };
+      const m = { s, g, group, mode: g.still ? 'still' : 'lying', unseen: 0, rest: 0 };   // still: old bones, upper floors; they never wake
       group.push(m); all.push(m);
     }
   }
@@ -194,7 +194,7 @@ export function makeGuards(L, kit){
       for (const m of all){
         const s = m.s, d = Math.hypot(px - s.x, pz - s.z);
         s.object.visible = d < DRAW;
-        if (d > DRAW && (m.mode === 'lying' || m.mode === 'restless')) continue;
+        if (d > DRAW && (m.mode === 'still' || m.mode === 'lying' || m.mode === 'restless')) continue;
         if (m.rest > 0) m.rest -= dt;
         const see = m.mode === 'hunt' && d < FAR && sees(s.x, s.z, px, pz);
         if (m.mode === 'struck'){
@@ -229,7 +229,7 @@ export function makeGuards(L, kit){
     },
     // you've gone: whoever was up is lying where it stood when you come back
     leave(){
-      for (const m of all) if (m.mode !== 'lying' && m.mode !== 'restless'){ fall(m, true); m.s.stir = 0; m.s.at = null; }
+      for (const m of all) if (m.mode !== 'still' && m.mode !== 'lying' && m.mode !== 'restless'){ fall(m, true); m.s.stir = 0; m.s.at = null; }
       ring.on = false;
       for (const m of all) m.s.object.removeFromParent();
       scene = null; was = null;

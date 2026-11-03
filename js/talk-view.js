@@ -17,6 +17,8 @@ import * as THREE from 'three';
 import { ICONS } from './talk-icons.js';
 import { height } from './terrain.js';
 import { ringLine } from './dialog.js';
+import { prepare } from './speech-score.js';
+import { handOf, inkOn } from './lilt.js';
 const escH = s => s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
 
 const REACT_AT  = 0.45;   // when, as a share of the move, the reaction mark appears
@@ -31,7 +33,7 @@ const CSS = `
 #talk{position:fixed;inset:0;pointer-events:none;z-index:20;overflow:hidden;}
 #talk .tb{position:absolute;left:0;top:0;display:flex;align-items:center;gap:6px;
   padding:5px 8px;background:#fbf8ef;color:#2e2a24;border:2px solid #2e2a24;border-radius:12px;
-  font:15px/1.3 Georgia,serif;max-width:250px;box-shadow:0 2px 6px rgba(0,0,0,.25);
+  font:15px/1.3 Georgia,serif;max-width:310px;box-shadow:0 2px 6px rgba(0,0,0,.25);
   transform-origin:50% 100%;will-change:transform;transition:opacity .15s;}
 #talk .tb::after{content:"";position:absolute;left:50%;bottom:-9px;margin-left:-6px;
   border:6px solid transparent;border-top:7px solid #2e2a24;border-bottom:0;}
@@ -151,6 +153,9 @@ export function makeTalkView({ camera, canvas, lineFor }){
       } else {
         const l = s.line, m = l.move;
         fill(el, m);
+        // their ink and lettering (the element is reused, so set them every time)
+        const hand = handOf(m.hand || s.who), lineEl = el.children[1];
+        lineEl.style.color = inkOn(hand, 'paper'); lineEl.style.fontStyle = hand?.font || '';
         const near = !!l.convo.heard;
         el.classList.toggle('near', near);
         el.classList.toggle('lore', m.key === 'saying');      // a saying or song: verse, in italics
@@ -158,9 +163,9 @@ export function makeTalkView({ camera, canvas, lineFor }){
         if (near && m.line == null && lineFor){
           try { m.line = lineFor(m) || ''; } catch (e){ m.line = ''; console.warn('talk: no words for', m.key, e); }   // never stop the frame over words
         }
-        // a voiced line (move.voice: Puck's guide lines) sings, its words coming up on their notes
-        if (near && m.voice && m.line && m.ring === undefined){
-          m.ring = ringLine(m.line, m.voice);
+        // a line with a lilt (move.lilt: Puck's guide lines) sings, its words coming up on their notes
+        if (near && m.lilt && m.line && m.ring === undefined){
+          m.ring = ringLine(m.line, m.lilt, m.hand);
           if (m.ring) l.dur = Math.max(l.dur, m.ring.length + 2.5);
         }
         if (m.ring){
@@ -168,9 +173,9 @@ export function makeTalkView({ camera, canvas, lineFor }){
           const n = m.ring.words.filter(w => w.t <= now + 0.01).length;
           if (el._ringM !== m || el._ringN !== n){
             el._ringM = m; el._ringN = n;
-            el.children[1].innerHTML = m.ring.words.map((w, i) => i < n ? escH(w.text) : `<span style="opacity:0">${escH(w.text)}</span>`).join(' ');
+            el.children[1].innerHTML = m.ring.words.map((w, i) => (i ? (w.br ? '\n' : ' ') : '') + (i < n ? escH(w.text) : `<span style="opacity:0">${escH(w.text)}</span>`)).join('');
           }
-        } else if (near && !el.children[1].textContent) el.children[1].textContent = m.line || '';
+        } else if (near && !el.children[1].textContent) el.children[1].textContent = (m.lilt ? prepare(m.line || '').clean : m.line) || '';
         const re = el.children[2];
         if (l.t >= l.dur * REACT_AT && m.react){
           re.className = 're ' + (m.react > 0 ? 'up' : 'down');

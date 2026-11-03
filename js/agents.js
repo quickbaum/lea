@@ -12,7 +12,7 @@ import { WORLD_R, WATER } from './config.js';
 import { at as frameAt } from './gen/settle.js';
 import { makeName, composeName } from './names.js';
 import { NavGrid } from './nav.js';
-import { readOmen } from './astrology.js';
+import { readOmen, telescopeOf, glassReading } from './astrology.js';
 import { RECIPES, RAW_KINDS, BOOK_RECIPES, recipeFor, startPot, stepPot, carries, stepsKnown, potDish } from './recipes.js';
 import { DISHES } from './ingredients.js';
 import { addPlan, dropPlan, plansOf, firstPlan, hadDish, strongestCraving, mayCrave, craved } from './plans.js';
@@ -21,7 +21,7 @@ import { addNews, pruneNews, knowCanoe, knownCanoes, GOSSIP_RANGE, GOSSIP_CD } f
 import { nudge, regard } from './ties.js';
 import { ate as hadFood, lack, worth, strike, ends, wishOf, cropAt, isCrop, CROPS } from './trade.js';
 import { Conversation, DEFAULT_TALK, parted } from './convo.js';
-import { stepMusic, instrumentOf, tunesOf, dancePose, craftsKnown, giveInstrument } from './music-sim.js';
+import { stepMusic, instrumentOf, tunesOf, dancePose, craftsKnown, giveInstrument, practiceWant, stepPractice } from './music-sim.js';
 import { CRAFTS, addGoods, takeGoods, goodsOf, missingFor } from './making.js';
 import { DRUMS } from './arrange.js';
 import { FELLOWSHIPS, FELLOWSHIP_IDS, REACH as FELLOW_REACH, meetingOpen, occasion, memberHash, isMember } from './fellowships.js';
@@ -399,6 +399,8 @@ export const dishName = (kind) => RECIPES[kind] ? kind : recipeFor(kind) || DISH
 // gossip lives in js/gossip.js (addNews / pruneNews / newsFor), told a turn at a time by js/convo.js — see docs/gossip.md
 const STARGAZER_CHANCE = 0.25;   // a quarter of folk read the stars (form & spread omens)
 const OMEN_CD = [40, 100];       // seconds between an astrologer forming a fresh omen
+const OBSERVE_PULL = 2.6;        // how much a clear night at the telescope wants them, warm and fed: enough to leave a seat at the fire (STAY_BIAS + EVENING_PULL), not to go cold or hungry
+const OBSERVE_CLOUD = 0.7;       // past this cover there's nothing to see
 
 // barter: trade food <-> firewood with a neighbour, so a forager and a wood-cutter
 // each end up with both without doing both jobs. A need is met by exchange, not
@@ -500,6 +502,8 @@ const CANOE_CD     = 3;         // days between one person's canoes
 const CANOE_SITE_R = 150;       // how far from where they are they'll make one
 const MAKE_BIAS    = 0.9;       // the pull of making an instrument (making.js), × how much it's wanted
 const MAKE_REST    = 1;         // days between one made and starting the next
+const PRACTICE_BIAS = 2.2, PRACTICE_EASE = 1.2, PRACTICE_KEEP = 1.6;   // the pull of going off to practise a tune (music-sim.js practiceWant), × how much it's wanted; × how far survival is below PRACTICE_EASE (needs run high by day: at the top of them it's small, not none); × this once set on it, so a walk out isn't wasted on the first small want
+const SPOT_OUT = [32, 62], SECLUDED = 26, SPOT_TRIES = 24;   // how far from camp a practice spot is (u); how clear of fires, huts and others' spots
 const ELDER_REACH  = 140;       // how far they'll go for an elder bush
 const ELDER_T      = 5;         // seconds to cut and strip a stem
 const SWAP_R       = 4;         // how near someone must be to be offered a spare instrument
@@ -1094,6 +1098,9 @@ class House {
       if (walkable(x, z)){ this.mouth = { x, z }; break find; }
     }
     if (!this.mouth){ const [x, z] = frameAt(b, b.du, b.hw + 1.4); this.mouth = { x, z }; }
+    // the door itself, and the way it faces (what you knock at: js/knock.js)
+    const [dx, dz] = frameAt(b, b.du, b.hw), [ox, oz] = frameAt(b, b.du, b.hw + 1);
+    this.door = { x: dx, z: dz, nx: ox - dx, nz: oz - dz };
   }
   get done(){ return true; }
   get roof(){ return 1; }
@@ -1346,7 +1353,9 @@ class Brain {
       if (w.night > 0.5 && npc._omenCd <= 0){
         npc._omenCd = OMEN_CD[0] + Math.random() * (OMEN_CD[1] - OMEN_CD[0]);
         const o = readOmen({ moonLon: w.moonLon || 0, sunLon: w.sunLon || 0, illum: w.moonIllum || 0 });
-        addNews(npc, { kind: 'omen', key: 'omen', text: o.text, house: o.house, tenor: o.tenor, x: npc.x, z: npc.z, t: w.time });
+        // (through a telescope, on a clear night, what they saw goes out with it: glassReading)
+        const seen = telescopeOf(npc) && w.cloud < OBSERVE_CLOUD ? ` ${glassReading({ illum: w.moonIllum || 0 })}` : '';
+        addNews(npc, { kind: 'omen', key: 'omen', text: o.text + seen, house: o.house, tenor: o.tenor, x: npc.x, z: npc.z, t: w.time });
       }
     }
 
@@ -1940,6 +1949,13 @@ class Brain {
         }
       }
     }
+    // --- practice (music-sim.js; docs/music.md "Practice"): by day, someone with a weak tune
+    //     goes off to a place of their own to work at it, unless something presses ---
+    if (w.night < 0.35 && !npc._hutIn && !npc._indoors && w.rain < 0.3 && w.time >= (npc._practiceRest || 0)){
+      const want = practiceWant(npc, w.time), spot = want && this.practiceSpot(npc, camp);
+      if (spot) consider('practice', spot.x, spot.z, {}, spot, { tol: 1.5, sit: true, reach: 140, leash: false, distCost: CHORE_DIST, bias: PRACTICE_BIAS * want.pull * clamp01(PRACTICE_EASE - surv) * (cur?.kind === 'practice' ? PRACTICE_KEEP : 1),
+        satisfy: (a, dt2) => { a.actionLabel = 'practice'; if (stepPractice(a, w, dt2, want.id)) this.target = null; } });
+    }
     // hungry, nothing edible to hand (no rations, no reachable cache) but carrying
     // raw food and no fire to cook on → lay a hearth. But only if there's no hearth
     // near at all: a cold one nearby will be relit by the firewood economy, so we
@@ -2147,6 +2163,12 @@ class Brain {
           { sit: true, tol: SHRINE_TOL, bias: pull,
             satisfy: (a, dt2) => { a.reverence = clamp01(a.reverence - REV_SATISFY * dt2); } });
       }
+    }
+
+    // ── the telescope (docs/telescope.md): whoever has one spends a clear night at it, where
+    // they stand, unless something presses
+    if (w.night > 0.5 && w.cloud < OBSERVE_CLOUD && !npc._hutIn && !npc._indoors && telescopeOf(npc)){
+      consider('observe', npc.x, npc.z, {}, npc, { bias: OBSERVE_PULL * clamp01(1 - surv), leash: false, tol: 3 });
     }
 
     // ── rain shelter (docs/shelters.md) ─────────────────────────────────────────
@@ -2943,6 +2965,37 @@ class Brain {
     if (!site) return;
     const b = w.addCanoeBuild(site, npc);
     addPlan(npc, { kind: 'canoe', build: b, until: w.time + CANOE_IDLE * 2 });
+  }
+  // a place of their own to practise in: out from camp, clear of its fires and huts and of
+  // anyone else's spot, among trees if there are any. Kept till a fire comes too near it.
+  practiceSpot(npc, camp){
+    const w = this.world, o = camp || npc;
+    const clearOf = (x, z) => {
+      let d = Infinity;
+      for (const f of this.fires) d = Math.min(d, Math.hypot(f.x - x, f.z - z));
+      for (const h of w.huts) d = Math.min(d, Math.hypot(h.x - x, h.z - z));
+      for (const q of w.npcs) if (q !== npc && q.practiceSpot) d = Math.min(d, Math.hypot(q.practiceSpot.x - x, q.practiceSpot.z - z));
+      return d;
+    };
+    if (w.time < (npc._spotRetry || 0)) return null;
+    const had = npc.practiceSpot;
+    if (had && clearOf(had.x, had.z) >= SECLUDED && Math.hypot(had.x - o.x, had.z - o.z) < SPOT_OUT[1] * 2) return had;
+    const who = 'n' + npc.id + '|' + (npc.name || '');
+    const hash = k => { let h = 2166136261 >>> 0; for (const c of who + k) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return (h % 10007) / 10007; };
+    let best = null, bs = -Infinity;
+    for (let i = 0; i < SPOT_TRIES; i++){
+      const a = hash('a' + i) * 2 * Math.PI, r = SPOT_OUT[0] + hash('r' + i) * (SPOT_OUT[1] - SPOT_OUT[0]);
+      const x = o.x + Math.cos(a) * r, z = o.z + Math.sin(a) * r;
+      if (!walkable(x, z)) continue;
+      const clear = clearOf(x, z);
+      if (clear < SECLUDED) continue;
+      let trees = 0;
+      for (const [tx, tz] of w.trees || []) if (Math.abs(tx - x) < 7 && Math.abs(tz - z) < 7 && ++trees >= 5) break;
+      const s = Math.min(clear, 70) + trees * 6;
+      if (s > bs){ bs = s; best = { x, z }; }
+    }
+    if (!best) npc._spotRetry = w.time + 0.5;   // nowhere near camp is out of the way: try again later
+    return npc.practiceSpot = best;
   }
   // an elder stem or two: cut, the leaves stripped (making.js)
   cutElder(bush, a, dt){

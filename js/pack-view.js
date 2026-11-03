@@ -9,7 +9,8 @@
 
 import { ingredient, edible } from './ingredients.js';
 
-const CELL = 52;
+let CELL = 52;     // shrinks to fit a small screen (render)
+const TOUCH = document.documentElement.classList.contains('touch');
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -17,10 +18,12 @@ const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 // says(box) → what eating one gives now, and where the box's things came from
 export function packView(el, pack, { onEat, says }){
   let drag = null, hoverId = null, note = '';
+  let lastTap = { id: null, t: 0 }, touched = false;   // a finger has no hover and no right button: a tap says what it is, two eat it
 
   function render(){
+    CELL = Math.max(30, Math.min(52, Math.floor((innerHeight - 170) / pack.h), Math.floor((innerWidth - 60) / pack.w)));
     el.innerHTML = `<h3>YOUR PACK</h3><div class="pack-grid" style="width:${pack.w * CELL}px;height:${pack.h * CELL}px;background-size:${CELL}px ${CELL}px"></div>` +
-      `<div class="pack-foot" style="width:${pack.w * CELL}px"><div class="pack-desc"></div><div class="pack-hint">drag to move<br>right-click to eat or use</div></div>`;
+      `<div class="pack-foot" style="width:${pack.w * CELL}px"><div class="pack-desc"></div><div class="pack-hint">drag to move<br>${TOUCH ? 'double-tap' : 'right-click'} to eat or use</div></div>`;
     const grid = el.querySelector('.pack-grid');
     for (const it of pack.items){
       const [w, h] = pack.size(it.kind), e = ingredient(it.kind) || {};
@@ -35,8 +38,8 @@ export function packView(el, pack, { onEat, says }){
       grid.appendChild(b);
     }
     grid.addEventListener('pointerdown', down);
-    grid.addEventListener('dblclick', ev => { const b = boxOf(ev.target); if (b) eatBox(b); });
-    grid.addEventListener('contextmenu', ev => { ev.preventDefault(); const b = boxOf(ev.target); if (b) eatBox(b); });
+    grid.addEventListener('dblclick', ev => { if (touched) return; const b = boxOf(ev.target); if (b) eatBox(b); });
+    grid.addEventListener('contextmenu', ev => { ev.preventDefault(); if (touched) return; const b = boxOf(ev.target); if (b) eatBox(b); });
     grid.addEventListener('pointermove', ev => { if (drag) return; const b = boxOf(ev.target); const id = b ? b.id : null; if (id !== hoverId){ hoverId = id; note = ''; foot(); } });
     grid.addEventListener('pointerleave', () => { if (!drag){ hoverId = null; foot(); } });
     foot();
@@ -58,6 +61,7 @@ export function packView(el, pack, { onEat, says }){
   function down(ev){
     if (ev.button !== 0) return;
     const b = boxOf(ev.target); if (!b) return;
+    if (ev.pointerType === 'touch'){ touched = true; hoverId = b.id; note = ''; foot(); }
     const grid = el.querySelector('.pack-grid'), r = grid.getBoundingClientRect();
     const node = grid.querySelector(`.pack-box[data-id="${b.id}"]`);
     drag = { it: b, node, grid, ox: ev.clientX - r.left - b.x * CELL, oy: ev.clientY - r.top - b.y * CELL, sx: ev.clientX, sy: ev.clientY, moved: false, tx: b.x, ty: b.y };
@@ -80,10 +84,15 @@ export function packView(el, pack, { onEat, says }){
     ghost.style.cssText = `left:${drag.tx * CELL}px;top:${drag.ty * CELL}px;width:${w * CELL - 3}px;height:${h * CELL - 3}px`;
     ghost.classList.toggle('bad', !ok);
   }
-  function up(){
+  function up(ev){
     const d = drag; drag = null;
     d.grid.removeEventListener('pointermove', move);
     if (d.moved) pack.move(d.it.id, d.tx, d.ty);   // where it can't go, it goes back
+    else if (ev.pointerType === 'touch' && ev.type === 'pointerup'){
+      const again = lastTap.id === d.it.id && ev.timeStamp - lastTap.t < 400;
+      lastTap = again ? { id: null, t: 0 } : { id: d.it.id, t: ev.timeStamp };
+      if (again){ eatBox(d.it); return; }
+    }
     render();
   }
 

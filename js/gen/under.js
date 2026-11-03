@@ -372,6 +372,7 @@ function reachableFinds(L){
 // both). Which tomb and where by a hash of the level, not r(): everything dealt from r()
 // stays where it was.
 const CRYPT_INSTRUMENTS = ['vielle', 'psaltery', 'tabor pipe', 'tabor'];
+const TELESCOPE_EVERY = 4;   // (by the level's number, like the instruments: a hash could leave a whole Lea with none)
 function instruments(L, spec){
   let h = 2166136261 >>> 0;
   for (const c of `${spec.id}:${spec.seed}`) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
@@ -382,6 +383,9 @@ function instruments(L, spec){
   } else if (L.kind === 'crypt'){
     const tombs = L.props.filter(q => q.kind === 'coffin' && free(q));
     if (tombs.length){ const t = tombs[(h >>> 8) % tombs.length]; L.finds.push({ x: t.x, z: t.z, y: t.y + t.h, kind: CRYPT_INSTRUMENTS[(typeof spec.id === 'number' ? spec.id : h) % CRYPT_INSTRUMENTS.length], n: 1, onProp: true }); }
+    // and, every TELESCOPE_EVERY'th crypt, a telescope on another tomb: the star-reader's own
+    const rest = L.props.filter(q => q.kind === 'coffin' && free(q));
+    if (rest.length && typeof spec.id === 'number' && spec.id % TELESCOPE_EVERY === TELESCOPE_EVERY - 1){ const t = rest[(h >>> 4) % rest.length]; L.finds.push({ x: t.x, z: t.z, y: t.y + t.h, kind: 'telescope', n: 1, onProp: true }); }
   } else if (L.cavern){
     const C = L.cavern, spots = [];
     for (let k = 0; k < L.W * L.H; k++){
@@ -574,8 +578,10 @@ function songs(L, spec, rr){
 // top of every stair on down. Two to four: more deeper down, and one more at a locked door. None
 // near the way in, so you're well inside before the first one stirs; one group guards two
 // things that are close together; the kinds take turns. Dealt by a hash of the level, not r(), so nothing else moves.
-//   L.guards: [{ x, z, y, fl, what, n, r, seed }]: n skeletons, their bones within r of (x, z)
-const GUARD = { r: 2.6, clear: 12, merge: 4, max: 24 };
+// Above GUARD.wake (the first two floors) they are only old bones: one or two, `still`, that never
+// rise, and they don't use up the crypt's count, so the waking dead are all there for the deep floors.
+//   L.guards: [{ x, z, y, fl, what, n, r, seed, still }]: n skeletons, their bones within r of (x, z)
+const GUARD = { r: 2.6, clear: 12, merge: 4, max: 24, wake: 2, maxStill: 10 };
 function guards(L, spec){
   let h = 2166136261 >>> 0;
   for (const c of `${spec.id}:${spec.seed}:bones`) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
@@ -606,16 +612,17 @@ function guards(L, spec){
   for (let i = 0; byKind.some(l => i < l.length); i++) for (const l of byKind) if (i < l.length) want.push(l[i]);
   const ins = L.mouths.map(m => [m.inX, m.inZ]);
   L.guards = [];
-  let count = 0;
+  let count = 0, stillN = 0;
   for (const [x, z, what, extra, dir] of want){
     if (ins.some(([ix, iz]) => Math.hypot(ix - x, iz - z) < GUARD.clear)) continue;
     const at = stand(x, z, dir); if (!at) continue;
     if (L.guards.some(g => Math.hypot(g.x - at[0], g.z - at[1]) < GUARD.merge)) continue;
-    const fl = Math.max(0, flAt(at[0], at[1])), n = Math.min(4, 2 + (fl >= 2) + extra + (rr() < 0.35 ? 1 : 0));
-    if (count + n > GUARD.max) continue;
+    const fl = Math.max(0, flAt(at[0], at[1])), still = fl < GUARD.wake, more = rr() < 0.35 ? 1 : 0;
+    const n = still ? 1 + more : Math.min(4, 2 + 1 + extra + more);
+    if (still ? stillN + n > GUARD.maxStill : count + n > GUARD.max) continue;
     const [i, j] = cellOf(L, at[0], at[1]);
-    L.guards.push({ x: at[0], z: at[1], y: L.floorAt(at[0], at[1]), fl, what, n, r: GUARD.r, seed: (rr() * 1e9) | 0, behind: shut.has(L.reg[j * L.W + i]) });
-    count += n;
+    L.guards.push({ x: at[0], z: at[1], y: L.floorAt(at[0], at[1]), fl, what, n, r: GUARD.r, seed: (rr() * 1e9) | 0, behind: shut.has(L.reg[j * L.W + i]), still });
+    if (still) stillN += n; else count += n;
   }
 }
 // The great lake's canoe and its eels: a canoe pulled up where the way down comes to the

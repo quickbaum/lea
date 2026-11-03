@@ -52,3 +52,20 @@ export function readOmen({ moonLon, sunLon, illum }, rnd = Math.random){
   ]);
   return { text, house, phase, tenor, dom };
 }
+
+// ---- the telescope (docs/telescope.md): what a stargazer would give anything for ----
+const TELESCOPE_SHARE = 0.08;     // of the stargazers, how many have one already
+const hash01 = s => { let h = 2166136261 >>> 0; for (const c of s) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return (h % 10007) / 10007; };
+// (from a hash of who they are, not the world's stream: every other draw stays where it was)
+export function telescopeOf(n){
+  if (n.telescope === undefined) n.telescope = !!n.stargazer && hash01(`glass|${n.id}|${n.name || ''}`) < TELESCOPE_SHARE;
+  return n.telescope;
+}
+export const giveTelescope = n => { n.telescope = true; };
+// what they'd give for yours beyond what they carry: gold, put by for it over the years
+export const glassHoard = n => 2 + Math.floor(hash01(`hoard|${n.id}|${n.name || ''}`) * 4);
+// what they saw through it. A bright moon drowns the faint things and shows itself instead.
+const SEEN_FAINT = ['I counted a hundred stars in the Pleiades, where you would see seven.', 'The Beehive is no smudge. It is a swarm of stars.',
+  "There's a pale road of stars across the top of the sky, and it's stars all the way down.", 'I saw red stars and blue, where you see only white.'];
+const SEEN_MOON = ["The moon's no lamp. It's a country, with mountains throwing shadows along the edge of the dark.", 'I saw the rings on the face of the moon, one inside another, with little peaks in the middle of them.'];
+export const glassReading = ({ illum }, rnd = Math.random) => { const l = illum > 0.6 ? SEEN_MOON : SEEN_FAINT; return l[Math.floor(rnd() * l.length)]; };

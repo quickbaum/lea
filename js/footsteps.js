@@ -29,6 +29,24 @@ export class Footsteps {
     if (this.master) this.master.gain.value = 0.32 * this._vol;
   }
 
+  // a knock at a wooden door: three dull raps, a low thud under a short woody tick
+  knock(){
+    this.init();
+    if (!this.ctx) return;
+    const c = this.ctx, t0 = c.currentTime + 0.02;
+    [0, 0.2, 0.4].forEach((at, i) => {
+      const t = t0 + at, level = i === 2 ? 2.6 : 2.2;
+      const o = c.createOscillator(), og = c.createGain();
+      o.frequency.setValueAtTime(190, t); o.frequency.exponentialRampToValueAtTime(95, t + 0.09);
+      og.gain.setValueAtTime(level, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      o.connect(og); og.connect(this.master); o.start(t); o.stop(t + 0.13);
+      const n = c.createBufferSource(), f = c.createBiquadFilter(), ng = c.createGain();
+      n.buffer = this.noise; f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 1.2;
+      ng.gain.setValueAtTime(level * 0.8, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+      n.connect(f); f.connect(ng); ng.connect(this.master); n.start(t, Math.random() * 0.4); n.stop(t + 0.05);
+    });
+  }
+
   // build the audio graph on first user gesture (an AudioContext can't start before
   // one). Safe to call repeatedly — it resumes a suspended context and no-ops after.
   init(){

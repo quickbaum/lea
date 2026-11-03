@@ -7,6 +7,7 @@
 import { SIZE, WATER } from './config.js';
 import { height, habitat, HABITATS, settlements, ruins, under } from './gen/land.js';
 import { places, placeAt, settlementNames, ruinNames, underNames } from './gen/places.js';
+const TOUCH = document.documentElement.classList.contains('touch');
 
 const WATER_RGB = [47, 109, 176];
 const MINI_R = 150;                 // world units from you to the minimap's rim
@@ -289,7 +290,7 @@ export function createMaps({ mini, nameEl, drawMarks }){
   wrap.id = 'bigmap'; wrap.className = 'hide';
   const big = document.createElement('canvas');
   const hint = document.createElement('div');
-  hint.className = 'hint'; hint.textContent = 'M or Esc to close · scroll to zoom · drag to move';   // HINT, below
+  hint.className = 'hint'; hint.textContent = TOUCH ? 'pinch to zoom · drag to move' : 'M or Esc to close · scroll to zoom · drag to move';   // HINT, below
   wrap.append(big, hint); document.body.appendChild(wrap);
   const bctx = big.getContext('2d');
   let world = null;                                   // the whole-world bake
@@ -297,7 +298,7 @@ export function createMaps({ mini, nameEl, drawMarks }){
   // choosing a place (the Teleport spell): the world is shown even from underground,
   // and a click — not a drag — picks the spot
   let picking = null;
-  const HINT = 'M or Esc to close · scroll to zoom · drag to move';
+  const HINT = TOUCH ? 'pinch to zoom · drag to move' : 'M or Esc to close · scroll to zoom · drag to move';
   const showLevel = () => level && !picking;
   const DPR = () => Math.min(2, window.devicePixelRatio || 1);
   function size(){
@@ -391,7 +392,7 @@ export function createMaps({ mini, nameEl, drawMarks }){
   function pick(cb, px, pz, yaw){
     picking = cb;
     openBig(px, pz, yaw);
-    hint.textContent = 'Click where you would go · scroll to zoom · drag to move · Esc to cancel';
+    hint.textContent = TOUCH ? 'Tap where you would go · pinch to zoom · drag to move' : 'Click where you would go · scroll to zoom · drag to move · Esc to cancel';
     big.style.cursor = 'crosshair';
   }
   big.addEventListener('wheel', e => {
@@ -402,7 +403,25 @@ export function createMaps({ mini, nameEl, drawMarks }){
     view.cx = wx - (mx - big.width / 2) / view.z; view.cz = wz - (my - big.height / 2) / view.z;   // zoom about the cursor
     clampView(); drawBig();
   }, { passive: false });
-  big.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY, cx: view.cx, cz: view.cz, moved: 0 }; big.setPointerCapture(e.pointerId); });
+  // two fingers pinch, about the point between them: what the wheel does for a mouse
+  const fingers = new Map(); let pinch = null;
+  const spread = () => { const [a, b] = fingers.values(); return { d: Math.hypot(a.x - b.x, a.y - b.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; };
+  big.style.touchAction = 'none';
+  for (const t of ['pointerup', 'pointercancel']) big.addEventListener(t, e => { fingers.delete(e.pointerId); if (fingers.size < 2) pinch = null; });
+  big.addEventListener('pointerdown', e => {
+    if (e.pointerType === 'touch'){ fingers.set(e.pointerId, { x: e.clientX, y: e.clientY }); if (fingers.size === 2){ pinch = spread(); drag = null; } }
+  });
+  big.addEventListener('pointermove', e => {
+    if (!fingers.has(e.pointerId)) return;
+    fingers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (!pinch || fingers.size !== 2) return;
+    const now = spread(), d = DPR(), mx = now.x * d, my = now.y * d;
+    const wx = view.cx + (mx - big.width / 2) / view.z, wz = view.cz + (my - big.height / 2) / view.z;
+    view.z *= now.d / (pinch.d || 1); clampView();
+    view.cx = wx - (mx - big.width / 2) / view.z; view.cz = wz - (my - big.height / 2) / view.z;
+    clampView(); pinch = now; drawBig();
+  });
+  big.addEventListener('pointerdown', e => { if (pinch) return; drag = { x: e.clientX, y: e.clientY, cx: view.cx, cz: view.cz, moved: 0 }; big.setPointerCapture(e.pointerId); });
   big.addEventListener('pointermove', e => {
     if (!drag) return;
     const d = DPR();

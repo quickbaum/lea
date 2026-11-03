@@ -7,6 +7,8 @@
 // Five presets are fixed places (each has its own seed, so "The Fens" is always
 // the same fens); Custom opens the full options.
 
+import './touch.js';   // before anything asks whether this is a phone (imports nothing heavy)
+
 const PRESETS = [
   { id: 'lea',    name: 'The Lea',      blurb: 'Lakes, fens and woods among rolling hills, with a great lake and its island.',
     world: { size: 3200, hills: 1,   water: 1, folk: 64, seed: 20260618 } },
@@ -23,15 +25,15 @@ const DEFAULT_CUSTOM = PRESETS[0].world;
 const SIZE_WORD = { 800: 'small', 1600: 'medium', 3200: 'large' };
 
 const $ = id => document.getElementById(id);
+const TOUCH = document.documentElement.classList.contains('touch');
 // the gear and pack are main.js's; until it loads they'd be dead buttons
-const ingame = ['gear', 'inv-btn', 'rest-btn'];
+const ingame = ['gear', 'inv-btn', 'journal-btn', 'rest-btn'];
 let saved = {};
 try { saved = JSON.parse(localStorage.getItem('lea.world') || '{}') || {}; } catch (_){ saved = {}; }
 
 function enter(world, preset){
   try { localStorage.setItem('lea.world', JSON.stringify({ ...world, preset })); } catch (_){}
   globalThis.__leaWorld = world;
-  globalThis.__leaRebake = !!$('intro-rebake')?.checked;   // folk-avatars.js drops its saved bakes first
   $('intro-choices')?.classList.add('hide');
   $('world-opts')?.classList.add('hide');
   $('loading-status')?.classList.remove('hide');
@@ -52,13 +54,14 @@ if (params.has('debug') || params.has('x')){
   for (const id of ingame) $(id)?.classList.add('hide');
   // ---- the six buttons ----
   const grid = $('intro-presets');
-  for (const p of PRESETS){
+  // A phone starts at the small Lea: the large ones grow more than a phone's page may be allowed to hold
+  for (const p of TOUCH ? [...PRESETS].sort((a, b) => a.world.size - b.world.size) : PRESETS){
     const b = document.createElement('button');
     b.className = 'preset' + (saved.preset === p.id ? ' last' : '');
     b.innerHTML = `<span class="name"></span><span class="blurb"></span><span class="meta"></span>`;
     b.querySelector('.name').textContent = p.name;
     b.querySelector('.blurb').textContent = p.blurb;
-    b.querySelector('.meta').textContent = `${SIZE_WORD[p.world.size]} · ${p.world.folk} folk` + (p.world.size >= 3200 ? ' · slower to load' : '');
+    b.querySelector('.meta').textContent = `${SIZE_WORD[p.world.size]} · ${p.world.folk} folk` + (p.world.size >= 3200 ? (TOUCH ? ' · may be too big for a phone' : ' · slower to load') : p.world.size === 800 && TOUCH ? ' · best on a phone' : '');
     b.addEventListener('click', () => enter(p.world, p.id));
     grid.appendChild(b);
   }

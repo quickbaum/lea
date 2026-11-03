@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { deepField, moonSurface } from './telescope.js';
 
 // sky.js — a simple geocentric sky.
 //
@@ -56,9 +57,10 @@ function sunTexture(){
     g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
   });
 }
-function drawMoon(g, illum, waxing){
-  const S = 128, cx = S/2, r = S * 0.34;   // 128px texture, disc radius ~43px
-  g.canvas.width = g.canvas.height = S;
+// surface: the moon's face through a telescope (telescope.js), in place of the flat one
+function drawMoon(g, illum, waxing, S = 128, surface = null){
+  const cx = S/2, r = S * 0.34;   // 128px texture, disc radius ~43px
+  if (g.canvas.width !== S) g.canvas.width = g.canvas.height = S;
   g.clearRect(0, 0, S, S);
   // halo — radial glow starting at disc edge, fading to transparent
   const halo = g.createRadialGradient(cx, cx, r, cx, cx, cx);
@@ -69,6 +71,7 @@ function drawMoon(g, illum, waxing){
   g.fillStyle = halo; g.fillRect(0, 0, S, S);
   g.fillStyle = '#0c0e16'; g.beginPath(); g.arc(cx, cx, r, 0, 7); g.fill();   // dark disc
   g.save(); g.beginPath(); g.arc(cx, cx, r, 0, 7); g.clip();
+  if (surface){ g.globalAlpha = 0.05; g.drawImage(surface, 0, 0); g.globalAlpha = 1; }   // the dark of it, faintly
   g.fillStyle = '#e8ecf4';
   // lit region: half disc + terminator ellipse
   const k = clamp(illum, 0, 1);
@@ -76,7 +79,10 @@ function drawMoon(g, illum, waxing){
   g.beginPath();
   if (waxing) g.arc(cx, cx, r, -Math.PI/2, Math.PI/2, false);   // right half lit
   else        g.arc(cx, cx, r, Math.PI/2, -Math.PI/2, false);   // left half lit
-  g.ellipse(cx, cx, Math.abs(term), r, 0, Math.PI/2, -Math.PI/2, (term > 0) === waxing);
+  // back along the terminator, from where the limb's arc ended (a waning moon's ends at the top)
+  if (waxing) g.ellipse(cx, cx, Math.abs(term), r, 0, Math.PI/2, -Math.PI/2, term > 0);
+  else        g.ellipse(cx, cx, Math.abs(term), r, 0, -Math.PI/2, Math.PI/2, term > 0);
+  if (surface){ g.clip(); g.drawImage(surface, 0, 0); g.restore(); return; }
   g.fill();
   // subtle maria (scaled to new disc size)
   g.fillStyle = 'rgba(150,160,180,0.35)';
@@ -371,6 +377,7 @@ export class Sky {
         fetch('sky/stars.json').then(r => r.json()),
         fetch('sky/constellations.json').then(r => r.json()),
       ]);
+      this._catalogue = sd.stars;   // (all of it: the telescope sees the rest, _buildScope)
       this._buildStars(sd.stars);
       this._buildConstellations(cd.lines);
     } catch (e){ console.warn('sky: no star data', e); }
@@ -381,6 +388,13 @@ export class Sky {
   // Fainter stars are represented by the random twinkling background field instead.
   _buildStars(stars){
     const bright = stars.filter(s => s[2] <= 4.5);
+    this.starU = { uNight: { value: 0 }, uScale: { value: 1.3 } };
+    this.stars = this._starPoints(bright);
+    this.celestial.add(this.stars);
+  }
+  // a list of [ra°, dec°, mag, B-V] as points. Past the eye's limit (mag 6) a star only gets
+  // dimmer, not smaller: the telescope's faint field (telescope.js deepField).
+  _starPoints(bright){
     const n = bright.length, R = this.R - 6;
     const pos = new Float32Array(n * 3), col = new Float32Array(n * 3), siz = new Float32Array(n);
     const v = new THREE.Vector3();
@@ -389,7 +403,7 @@ export class Sky {
       eqUnit(raDeg * DEG, decDeg * DEG, v).multiplyScalar(R);
       pos[i*3] = v.x; pos[i*3+1] = v.y; pos[i*3+2] = v.z;
       const [r, g, b] = bv2rgb(bv);
-      const brightness = clamp((5.1 - mag) / 5.1, 0.25, 1.0);
+      const brightness = mag > 6 ? Math.max(0.06, 0.25 * Math.pow(10, -0.2 * (mag - 6))) : clamp((5.1 - mag) / 5.1, 0.25, 1.0);
       col[i*3] = r*brightness; col[i*3+1] = g*brightness; col[i*3+2] = b*brightness;
       siz[i] = clamp((5.1 - mag) * 1.4, 0.8, 10.0);
     }
@@ -397,8 +411,7 @@ export class Sky {
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('aColor', new THREE.BufferAttribute(col, 3));
     geo.setAttribute('aSize', new THREE.BufferAttribute(siz, 1));
-    this.starU = { uNight: { value: 0 }, uScale: { value: 1.3 } };
-    const mat = new THREE.ShaderMaterial({
+    const mat = this._starMat ||= new THREE.ShaderMaterial({
       uniforms: this.starU, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
       vertexShader: `
         attribute vec3 aColor; attribute float aSize; uniform float uScale;
@@ -416,9 +429,42 @@ export class Sky {
           if (s < 0.01) discard;
           gl_FragColor = vec4(vCol, s * uNight); }`,
     });
-    this.stars = new THREE.Points(geo, mat);
-    this.stars.frustumCulled = false;
-    this.celestial.add(this.stars);
+    const pts = new THREE.Points(geo, mat);
+    pts.frustumCulled = false;
+    return pts;
+  }
+
+  // the telescope (main.js raiseGlass; docs/telescope.md). k: how many times finer the picture
+  // is than usual, so the stars can keep their size on screen; 0 takes it down. The faint stars
+  // and the moon's face are made the first time, and only ever drawn through the glass.
+  setScope(k){
+    this.scope = k > 0;
+    if (this.scope) this._buildScope();
+    const s = 1.3 * (k || 1);
+    if (this.starU) this.starU.uScale.value = s;
+    if (this.starBgU) this.starBgU.uScale.value = s;
+    if (this.moonFine) this.moonSprite.material.map = this.scope ? this.moonFine : this.moonTex;
+    this.moonSprite.material.needsUpdate = true;
+    this._moonIllum = -1;                                // redraw it, whichever is up now
+  }
+  _buildScope(){
+    if (!this.fineStars && this._catalogue){
+      this.fineStars = this._starPoints([...this._catalogue.filter(s => s[2] > 4.5), ...deepField()]);
+      this.fineStars.visible = false;
+      this.celestial.add(this.fineStars);
+    }
+    if (!this.moonFine){
+      const c = document.createElement('canvas'); c.width = c.height = 1024;
+      this._moonFace = moonSurface(1024, 1024 * 0.34);
+      this.moonFine = new THREE.CanvasTexture(c); this.moonFine.colorSpace = THREE.SRGBColorSpace;
+    }
+  }
+  // where a star (ra°, dec°) is now, as a world direction
+  dirOf(ra, dec, out){ return eqUnit(ra * DEG, dec * DEG, out).applyQuaternion(this.celestial.quaternion); }
+  // which way on the celestial sphere a world direction points, in degrees
+  aimOf(dir){
+    const v = this._tmp.copy(dir).applyQuaternion(this._qs.copy(this.celestial.quaternion).invert());
+    return { ra: ((Math.atan2(v.z, v.x) / DEG) + 360) % 360, dec: Math.asin(clamp(v.y, -1, 1)) / DEG };
   }
 
   // 2,000 randomly-placed tiny specks on the celestial sphere — they rotate with the
@@ -584,7 +630,9 @@ export class Sky {
     const starVis = night * Math.max(0, 1 - this.cloudCover);
     const starsOn = starVis > 0.01;
     this._starTime += dt;
-    if (this.stars)   { this.stars.visible   = starsOn; if (starsOn) this.starU.uNight.value   = starVis; }
+    // a telescope gathers more light than the eye
+    if (this.stars)   { this.stars.visible   = starsOn; if (starsOn) this.starU.uNight.value   = this.scope ? Math.min(1, starVis * 1.6) : starVis; }
+    if (this.fineStars) this.fineStars.visible = starsOn && this.scope;
     if (this.conLines){ this.conLines.visible = starsOn; if (starsOn) this.lineU.uNight.value   = starVis; }
     if (this.starBg)  { this.starBg.visible   = starsOn; if (starsOn){ this.starBgU.uNight.value = starVis; this.starBgU.uTime.value = this._starTime; } }
 
@@ -653,8 +701,9 @@ export class Sky {
     // moon phase texture (redraw only when it shifts noticeably)
     if (Math.abs(moonIllum - this._moonIllum) > 0.02){
       this._moonIllum = moonIllum;
-      drawMoon(this.moonTex.image.getContext('2d'), moonIllum, Math.sin(this.moonLon - this.sunLon) > 0);
-      this.moonTex.needsUpdate = true;
+      const fine = this.scope && this.moonFine, tex = fine ? this.moonFine : this.moonTex;
+      drawMoon(tex.image.getContext('2d'), moonIllum, Math.sin(this.moonLon - this.sunLon) > 0, fine ? 1024 : 128, fine ? this._moonFace : null);
+      tex.needsUpdate = true;
     }
   }
 }

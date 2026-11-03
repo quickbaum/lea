@@ -1,7 +1,7 @@
-// speech-score.js — a character's speech as music (docs/music.md, "Speech that rings"). Not a
-// voice: each screen of what they say gets a score, worked out from its words and punctuation,
-// and the words come up one at a time on its beat, each sounding a note on the speaker's
-// instrument. Puck's is a bell. Pure; dialog.js shows the words and plays the notes.
+// speech-score.js — a character's speech as music (docs/lilts.md). Each screen of what they say
+// gets a score, worked out from its words and punctuation and shaped by their lilt (js/lilt.js),
+// and the words come up one at a time on its beat, each sounding a note on the instrument in their
+// hand. Puck's is a bell. Pure; dialog.js shows the words and plays the notes.
 //
 // The score:
 //   a word is a note: a quaver, a crotchet if it has two syllables, two notes slurred if more
@@ -20,11 +20,11 @@
 //   {/}          a breath after the word before
 //   {slow} {quick} {even}   the tempo from here: ×0.7, ×1.3, back to the voice's own
 //   {key:G}      the home note from here (a letter, b or #)
+//   {m:Sw}       this word is in metre, a letter per syllable: S stressed, w not (js/verse.js
+//                writes these). Its notes take the lilt's swing and its line fills the last
+//                foot, so stressed syllables fall evenly: verse sets the beat, not word length.
 
-export const VOICES = {
-  // Puck: a magical creature, so a bell; quick and bright, in a major pentatonic round C5
-  puck: { kind: 'celesta', gain: 0.45, bpm: 180, home: 'C', octave: 5, scale: [0, 2, 4, 7, 9], span: [-3, 7] },
-};
+import { LILTS, HANDS } from './lilt.js';
 
 const LINK = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
 const S0 = '', S1 = '';                  // hidden marks ride on a word between these
@@ -37,7 +37,7 @@ const SMALL = new Set(('a an the and or but of to in on at by for with from as i
 export function prepare(raw){
   const glued = raw
     .replace(/\s*\{\/\}/g, `${S0}/${S1}`)                              // a breath: onto the word before
-    .replace(/\{([a-z]+(?::[A-Ga-g][b#]?)?)\}\s*/g, `${S0}$1${S1}`)      // a tempo or key: onto the word after
+    .replace(/\{([a-z]+(?::[A-Ga-g][b#]?|:[Sw]+)?)\}\s*/g, `${S0}$1${S1}`)   // a tempo, key or metre: onto the word after
     .replace(/\*([^*\s][^*]*?)\*/g, (_, w) => `${S0}*${S1}${w}`);       // stress
   const strip = s => s.replace(new RegExp(`${S0}[^${S1}]*${S1}`, 'g'), '');
   const words = [];
@@ -53,16 +53,19 @@ export function prepare(raw){
       const marks = [...m[2].matchAll(new RegExp(`${S0}([^${S1}]*)${S1}`, 'g'))].map(x => x[1]);
       const text = strip(m[2]);
       if (!text){ pending.push(...marks); continue; }    // a mark with no word of its own: onto the next
-      words.push({ text, para: words.length > 0 && /\n\s*\n/.test(gap), marks: [...pending, ...marks] });
+      const para = words.length > 0 && /\n\s*\n/.test(gap);
+      words.push({ text, para, br: words.length > 0 && !para && /\n/.test(gap), marks: [...pending, ...marks] });
       pending = []; gap = '';
     }
   }
   return { clean: strip(glued), words };
 }
 
-// the words and their notes: { words: [{ text, t }], notes: [{ t, dur, midi, vel }], length }
-export function score(raw, voice){
-  const V = VOICES[voice], shown = prepare(raw).words;
+// the words and their notes: { words: [{ text, t, br }], notes: [{ t, dur, midi, vel }], length }
+// (`br`: this word starts a new line). `lilt` is a name in LILTS; `hand` gives the home note, and
+// by default is the hand of that name.
+export function score(raw, lilt, hand = HANDS[lilt]){
+  const V = LILTS[lilt], shown = prepare(raw).words;
   const out = { words: [], notes: [], length: 0 };
   if (!V || !shown.length) return out;
   // a word that's only punctuation (a full stop after a link) belongs to the word before: it
@@ -74,8 +77,9 @@ export function score(raw, voice){
   }
   const at = [];                                           // when each unit starts
   const LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
-  const homeOf = k => 12 * (V.octave + 1) + LETTER[k[0].toUpperCase()] + (k[1] === '#' ? 1 : k[1] === 'b' ? -1 : 0);
-  let home = homeOf(V.home), eighth = 60 / V.bpm / 2;
+  const homeOf = (k, octave = hand?.octave ?? 5) => 12 * (octave + 1) + LETTER[k[0].toUpperCase()] + (k[1] === '#' ? 1 : k[1] === 'b' ? -1 : 0);
+  const FOOT = V.swing[0] + V.swing[1];
+  let home = homeOf(hand?.home || 'C', hand?.octave ?? 5), eighth = 60 / V.bpm / 2;
   const N = V.scale.length;
   const pitch = d => { d = Math.max(V.span[0], Math.min(V.span[1], d)); return home + 12 * Math.floor(d / N) + V.scale[((d % N) + N) % N]; };
   let t = 0, e = 0, prevDeg = 1;                         // seconds; eighths since the start (for the bar)
@@ -101,19 +105,22 @@ export function score(raw, voice){
     const exclaim = endP.includes('!'), core = w.text.replace(/[^A-Za-z']/g, ''), lower = core.toLowerCase();
     const syl = syllables(lower), small = SMALL.has(lower) && !w.marks.includes('*');
     const stress = w.marks.includes('*') || (k > k0 && /^[A-Z]/.test(core) && lower !== 'i') || syl >= 3;
-    const lens = small ? [1] : syl >= 3 ? [1, 2] : syl === 2 ? [2] : [1];
-    const arch = p < 0.4 ? p / 0.4 : 1 - (p - 0.4) / 0.6;
-    let deg = Math.round(1 + arch * ((n <= 3 ? 2 : 4) + (exclaim ? 2 : 0))) + (hash(w.text + k) % 3) - 1 + (stress ? 1 : 0);
+    const metre = w.marks.find(m => m.startsWith('m:'))?.slice(2);
+    const lens = metre ? [...metre].map(c => c === 'S' ? V.swing[0] : V.swing[1]) : small ? [1] : syl >= 3 ? [1, 2] : syl === 2 ? [2] : [1];
+    const { peak, rise, shortRise, exclaim: peakUp } = V.arch, C = V.cadence;
+    const arch = p < peak ? p / peak : 1 - (p - peak) / (1 - peak);
+    let deg = Math.round(1 + arch * ((n <= 3 ? shortRise : rise) + (exclaim ? peakUp : 0))) + (hash(w.text + k) % 3) - 1 + (stress ? 1 : 0);
     const punct = ends(w), last = k === kEnd;
-    const degs = lens.map((_, i) => deg - i);              // a slurred pair steps down
+    const degs = metre ? [...metre].map(c => deg - (c === 'S' ? 0 : 1))   // an unstressed syllable sits a step under
+                       : lens.map((_, i) => deg - i);      // a slurred pair steps down
     if (last){                                             // the cadence
-      if (endP.includes('?')) degs[degs.length - 1] = Math.max(prevDeg + 2, 4);
-      else degs[degs.length - 1] = 0;
-      if (degs.length > 1 && !endP.includes('?')) degs[0] = Math.max(degs[0], 2);
-    } else if (/[,;:]/.test(punct)) degs[degs.length - 1] = 2;   // a clause left hanging
-    for (let i = 0; i < degs.length; i++){                 // no leap of more than four steps
+      if (endP.includes('?')) degs[degs.length - 1] = Math.max(prevDeg + C.questionUp, C.questionMin);
+      else degs[degs.length - 1] = C.fall;
+      if (degs.length > 1 && !endP.includes('?')) degs[0] = Math.max(degs[0], C.hang);
+    } else if (/[,;:]/.test(punct)) degs[degs.length - 1] = C.hang;   // a clause left hanging
+    for (let i = 0; i < degs.length; i++){                 // no leap wider than the lilt allows
       const from = i ? degs[i - 1] : prevDeg;
-      if (degs[i] - from > 4) degs[i] = from + 4; else if (from - degs[i] > 4) degs[i] = from - 4;
+      if (degs[i] - from > V.leap) degs[i] = from + V.leap; else if (from - degs[i] > V.leap) degs[i] = from - V.leap;
     }
     const vel = (small ? 0.38 : stress ? 0.62 : 0.5) + (exclaim ? 0.08 : 0);
     at[k] = t;
@@ -126,11 +133,13 @@ export function score(raw, voice){
     });
     prevDeg = degs.at(-1);
     if (w.marks.includes('/')) rest(2);
-    if (last && k < words.length - 1) toBoundary(2, 1);
+    if (metre){                                            // verse keeps the beat: no breath at a comma, and a line fills its foot
+      if (k < words.length - 1 && (last || words[k + 1].br)) toBoundary(FOOT, 1);
+    } else if (last && k < words.length - 1) toBoundary(2, 1);
     else if (/[;:]/.test(punct)) rest(2);
     else if (punct === ',') rest(1);
   }
-  out.words = shown.map((w, i) => ({ text: w.text, t: at[of[i]] }));
+  out.words = shown.map((w, i) => ({ text: w.text, t: at[of[i]], br: w.br }));
   out.length = t;
   return out;
 }

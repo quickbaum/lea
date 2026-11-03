@@ -161,6 +161,11 @@ export const INGREDIENTS = {
   'silver pipes': { span: 0.6, group: 'instrument', use: 'play', worth: 4.5, from: 'Faerie', color: '#c8ced6', size: [1, 3], stack: 1,
                     look: ['Silver pipes', 'A flute of silver, cold, without a mark on it.'], pic: ['sprites/items/silver_pipes.png'] },
 
+  // ---- the telescope (docs/telescope.md): laid in a few tombs (gen/under.js instruments), and
+  // given or sold to the stargazers, who want nothing more. Not food, and no use to anyone else ----
+  telescope: { span: 0.9, use: 'look', from: 'tombs', color: '#b08a3e', size: [1, 4], stack: 1,
+               look: ['A telescope', 'A long brass tube, with a lens at each end. Laid here with whoever made it.'], pic: ['sprites/items/telescope.png'] },
+
   // ---- keys (gen/under.js KEY_SETS; docs/under.md "Keys and chests"): the chapel crypt's
   // locked rooms, the bow of each the emblem on its doors. Kept after use, in the pack like
   // anything else for now (a key ring is wanted). Not food, not for trade ----

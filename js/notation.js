@@ -39,6 +39,9 @@ export function staffSvg(id, { square = false } = {}){
       while (bi < ph.bars.length && ph.bars[bi] === i){ if (i > 0) out.push(`<line x1="${nx - 6}" x2="${nx - 6}" y1="${base - 4 * GAP}" y2="${base}" stroke="currentColor" stroke-width="1"/>`); nx += room * 0.6 / total; bi++; }
       const adv = room * weight(n) / total, svg = noteSvg(oct && n.midi != null ? { ...n, step: n.step + oct } : n, nx, y, P.unit, square);
       out.push(n.midi == null ? svg : `<g class="note" data-midi="${n.midi}" data-dur="${(n.len * P.unitSec).toFixed(3)}"><rect x="${nx - 7}" y="${base - 4 * GAP - 14}" width="${adv}" height="${4 * GAP + 28}" fill="transparent"/>${svg}</g>`);
+      // a triplet's 3, over the middle of its three notes
+      const third = m => m && Math.abs(m.len * P.unit * 4 - 2 / 3) < 1e-6;
+      if (third(n) && third(notes[i - 1]) && third(notes[i + 1])) out.push(`<text x="${nx - 3}" y="${base - 4 * GAP - 8}" font-size="11" font-style="italic">3</text>`);
       nx += adv;
     });
     if (ph.bars.at(-1) === notes.length) out.push(`<line x1="${nx - 6}" x2="${nx - 6}" y1="${base - 4 * GAP}" y2="${base}" stroke="currentColor" stroke-width="1"/>`);

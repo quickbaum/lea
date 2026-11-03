@@ -1,4 +1,5 @@
 {
+  "hand": "claude",
   "root": "greeting",
   "speaker": "Claude",
   "portrait": "claude_avatar.png",

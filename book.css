@@ -1,0 +1,176 @@
+/* book.css — your own book (js/book-view.js, drawn by js/book-art.js), after the board in
+   (mocks/book notes.psd). The binding, the sheets and the paper are drawn on canvases; here is
+   how they stack, the viewing angle, the folded corners, the tabs, and what's on the pages.
+   Sizes: --pw/--ph, one page, set from the window; --lipx/--lipy, the board's lip. */
+
+#book-overlay {
+  position: fixed; inset: 0; z-index: 99990;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 62px;
+  background: radial-gradient(ellipse at 50% 50%, rgba(10,6,2,.38), rgba(0,0,0,.72));
+  --ink: #2a1c0e; --ink-faded: #5b4630; --hand: #7a2b17; --rubric: #7a2416;
+  user-select: none;
+  opacity: 0; transition: opacity .14s ease;
+}
+#book-overlay.ready { opacity: 1; }
+#book-overlay.small { gap: 0; }
+#book-overlay.small .book-aside { display: none; }
+body.book-open #vitals { z-index: 99991; }        /* spell points and stamina stay in sight, beside the book */
+
+/* a little way down from straight on: the top recedes, so you see the depth of the block.
+   The leaves' own perspective is flattened onto this plane */
+.book {
+  position: relative; width: calc(var(--pw) * 2); height: var(--ph);
+  transform: perspective(2500px) rotateX(7deg); transform-origin: 50% 62%;
+}
+.book-cover { position: absolute; inset: calc(var(--lipy) * -1) calc(var(--lipx) * -1) calc(var(--lipfoot) * -1); }
+.book-art { position: absolute; pointer-events: none; }
+
+/* where the hand-drawn corners will go; worn brass stands in */
+.corner {
+  position: absolute; width: 30px; height: 30px; pointer-events: none;
+  background: radial-gradient(circle at 34% 30%, #fff1b8 0, #d9b25a 14%, #9c7228 42%, #5e4013 80%), #9c7228;
+  filter: drop-shadow(0 1px 1px #000a);
+}
+.corner::after {
+  content: ''; position: absolute; width: 5px; height: 5px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #fff4c8, #8c6420 70%); box-shadow: 0 1px 1px #0008;
+}
+.corner.tl { top: calc(var(--lipy) * -1 + var(--sagtop)); left: calc(var(--lipx) * -1); clip-path: polygon(0 0, 100% 0, 0 100%); border-top-left-radius: 14px; }
+.corner.tr { top: calc(var(--lipy) * -1 + var(--sagtop)); right: calc(var(--lipx) * -1); clip-path: polygon(0 0, 100% 0, 100% 100%); border-top-right-radius: 14px; }
+.corner.bl { bottom: calc(var(--lipfoot) * -1); left: calc(var(--lipx) * -1); clip-path: polygon(0 0, 0 100%, 100% 100%); border-bottom-left-radius: 14px; }
+.corner.br { bottom: calc(var(--lipfoot) * -1); right: calc(var(--lipx) * -1); clip-path: polygon(100% 0, 100% 100%, 0 100%); border-bottom-right-radius: 14px; }
+.corner.tl::after { top: 6px; left: 6px; } .corner.tr::after { top: 6px; right: 6px; }
+.corner.bl::after { bottom: 6px; left: 6px; } .corner.br::after { bottom: 6px; right: 6px; }
+
+/* ---- the pages lying open, and the leaves turning over them */
+.book-pages { position: absolute; inset: 0; perspective: 2600px; perspective-origin: 50% 40%; }
+.slot { position: absolute; top: 0; width: var(--pw); height: var(--ph); }
+.slot.left { left: 0; } .slot.right { left: var(--pw); }
+.slot::after {                                                  /* the shadow a lifted leaf casts */
+  content: ''; position: absolute; inset: 6px 0; pointer-events: none; z-index: 4; opacity: var(--cast, 0);
+}
+.slot.right::after { background: linear-gradient(90deg, #1a0e04 0%, #1a0e04aa 35%, #0000 85%); }
+.slot.left::after { background: linear-gradient(270deg, #1a0e04 0%, #1a0e04aa 35%, #0000 85%); }
+
+/* the paper is a baked picture (book-art.js), page-shaped, with its rolling and its edge in it */
+.bpage {
+  position: absolute; top: 0; left: 0; box-sizing: border-box;
+  width: var(--pw); height: var(--ph);
+  display: flex; flex-direction: column;
+  padding: calc(var(--ph) * .05) calc(var(--pw) * .085) calc(var(--ph) * .08) calc(var(--pw) * .12);
+  color: var(--ink);
+  font: calc(var(--pw) * .041)/1.42 'IM Fell English', Georgia, serif;
+  background-size: 100% 100%; background-repeat: no-repeat;
+  overflow: hidden;
+}
+.bpage.left { padding-left: calc(var(--pw) * .085); padding-right: calc(var(--pw) * .12); background-image: var(--paperL0); }
+.bpage.left.v1 { background-image: var(--paperL1); }
+.bpage.right { background-image: var(--paperR0); }
+.bpage.right.v1 { background-image: var(--paperR1); }
+
+/* a turning leaf: hinged slices, each a window on its share of the leaf's two pages */
+.bleaf { position: absolute; top: 0; left: var(--pw); width: var(--pw); height: var(--ph); transform-origin: 0 50%; transform-style: preserve-3d; pointer-events: none; }
+.slice {
+  position: absolute; top: 0; left: calc(var(--pw) / 6); width: calc(var(--pw) / 6); height: 100%;
+  transform-origin: 0 50%; transform-style: preserve-3d;
+}
+.bleaf > .slice { left: 0; }
+.face { position: absolute; top: 0; left: 0; width: calc(100% + 1px); height: 100%; overflow: hidden; backface-visibility: hidden; }
+.face.back { transform: rotateY(180deg); }
+.bpage .shade {
+  position: absolute; top: 0; bottom: 0; pointer-events: none;
+  left: calc(var(--pw) * var(--x)); width: calc(var(--pw) / 6 + 1px);
+  background: linear-gradient(90deg, rgb(42 24 6 / var(--s0, 0)), rgb(42 24 6 / var(--s1, 0)));
+  -webkit-mask-size: var(--pw) var(--ph); mask-size: var(--pw) var(--ph);
+  -webkit-mask-position: calc(var(--pw) * var(--x) * -1) 0; mask-position: calc(var(--pw) * var(--x) * -1) 0;
+}
+.bpage .shade.rev { background: linear-gradient(270deg, rgb(42 24 6 / var(--s0, 0)), rgb(42 24 6 / var(--s1, 0))); }
+.bpage.left .shade { -webkit-mask-image: var(--paperL0); mask-image: var(--paperL0); }
+.bpage.left.v1 .shade { -webkit-mask-image: var(--paperL1); mask-image: var(--paperL1); }
+.bpage.right .shade { -webkit-mask-image: var(--paperR0); mask-image: var(--paperR0); }
+.bpage.right.v1 .shade { -webkit-mask-image: var(--paperR1); mask-image: var(--paperR1); }
+
+/* the corner folded over (book-art.js drawCrease), always showing while there's a page to turn
+   that way, its box's outer corner on the page's. Point at it and it lifts */
+.turn {
+  position: absolute; top: var(--creasetop); width: var(--crease); height: var(--crease); z-index: 5; cursor: pointer; display: none;
+  transition: transform .16s ease;
+}
+.turn canvas { display: block; width: 100%; height: 100%; }
+.turn::after { content: ''; position: absolute; inset: -10px; }      /* a kinder target than the fold itself */
+.slot.can .turn { display: block; }
+.turn.right { right: 8px; transform-origin: 100% 0; }
+.turn.left { left: 8px; transform-origin: 0 0; }
+.turn.left canvas { transform: scaleX(-1); }
+.turn:hover { transform: scale(1.12); }
+
+/* ---- the tabs: hand-drawn banners, each growing from under the top page, lying over the sheets
+   beneath it, in section order; the one you're in indented, further under the page */
+.book-ribbons { position: absolute; inset: 0; }
+.ribbon {
+  position: absolute; left: calc(var(--pw) * 2 + var(--tabroot));
+  top: calc(var(--tabtop) + var(--k) * var(--tabstep));
+  height: calc(var(--ph) * .14); width: calc(var(--ph) * .205); cursor: pointer;
+  filter: drop-shadow(1px 2px 2px #0009);
+  transition: transform .16s ease;
+}
+.ribbon img { position: absolute; left: 0; top: 0; height: 100%; width: auto; display: block; }
+.ribbon:hover { transform: translateX(4px); }
+.ribbon.on { transform: translateX(-7px); }
+
+/* ---- what's on the pages */
+.book-measure { position: absolute; left: -99999px; top: 0; visibility: hidden; }
+.bpage.opening .bp-head { visibility: hidden; }
+.bp-head { font: italic calc(var(--pw) * .03) 'IM Fell English', Georgia, serif; color: var(--ink-faded); text-align: center; letter-spacing: .06em; min-height: 1.4em; }
+.bp-body { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-wrap: wrap; align-content: flex-start; position: relative; z-index: 1; }
+.bp-body > * { width: 100%; box-sizing: border-box; }
+.bp-foot { font: italic calc(var(--pw) * .03)/1.3 'IM Fell English', Georgia, serif; color: var(--ink-faded); text-align: center; min-height: 2.6em; display: flex; align-items: flex-end; justify-content: center; }
+.bp-foot.desc { color: var(--ink); font-size: calc(var(--pw) * .034); }
+.bpage.blank .bp-body { align-content: center; justify-content: center; }
+.bp-fleuron { text-align: center; font-size: calc(var(--pw) * .09); color: #5b463055; }
+
+.bp-title { font: calc(var(--pw) * .062)/1.15 'IM Fell English SC', 'IM Fell English', Georgia, serif; text-align: center; margin: 2px 0 calc(var(--ph) * .02); letter-spacing: .03em; }
+.bp-title::after { content: '❧'; display: block; font-size: .62em; color: var(--ink-faded); margin-top: 3px; }
+.bp-sub { font-style: italic; color: var(--ink-faded); text-align: center; font-size: .86em; margin-bottom: calc(var(--ph) * .02); }
+.bp-empty { font-style: italic; color: var(--ink-faded); text-align: center; margin-top: 20%; }
+.bp-body p { margin: 0 0 .5em; }
+.bp-h { font: calc(var(--pw) * .036) 'IM Fell English SC', 'IM Fell English', Georgia, serif; letter-spacing: .06em; color: var(--ink-faded); text-align: center; margin: .7em 0 .25em; }
+.bp-h::before, .bp-h::after { content: '—'; margin: 0 .6em; opacity: .6; }
+
+/* a spell's plate: its picture, inked on the page, the name, the cost */
+.plate { width: 50% !important; height: 50%; text-align: center; padding: 4px 4px 0; cursor: pointer; position: relative; }   /* fixed rows: they line up across both pages */
+.plate .pic { width: calc(var(--pw) * .3); height: calc(var(--pw) * .3); margin: 0 auto 2px; display: grid; place-items: center; transition: transform .15s ease; }
+.plate .pic img, .plate .pic canvas { max-width: 100%; max-height: 100%; mix-blend-mode: multiply; }
+.plate .pic canvas { width: 55%; image-rendering: pixelated; }
+.plate:hover .pic { transform: scale(1.05); }
+.plate .name { font: calc(var(--pw) * .042) 'IM Fell English SC', 'IM Fell English', Georgia, serif; letter-spacing: .03em; }
+.plate .cost { font-style: italic; font-size: .8em; color: var(--ink-faded); }
+.plate .key { position: absolute; top: 4px; left: 8px; font: italic .8em 'IM Fell English', serif; color: var(--rubric); }
+.plate.off { cursor: default; }
+.plate.off .pic, .plate.off .name { opacity: .4; }
+
+/* an entry: a recipe, a tune, a craft. What you carry is marked */
+.entry { margin-bottom: calc(var(--ph) * .022); }
+.entry .name { font: calc(var(--pw) * .044) 'IM Fell English SC', 'IM Fell English', Georgia, serif; letter-spacing: .03em; }
+.entry .pic { float: right; width: calc(var(--pw) * .2); height: calc(var(--pw) * .2); margin: 0 0 4px 8px; display: grid; place-items: center; }
+.entry .pic img { max-width: 100%; max-height: 100%; mix-blend-mode: multiply; }
+.entry .wants { font-size: .9em; }
+.entry .wants .have { color: var(--rubric); }
+.entry .wants .have::before { content: '✓ '; }
+.entry .wants .rare::after { content: '*'; color: var(--rubric); }
+.entry .about { font-style: italic; color: var(--ink-faded); font-size: .9em; }
+.entry .act { color: var(--rubric); font-style: italic; cursor: pointer; font-size: .9em; }
+.entry .act:hover { text-decoration: underline; }
+
+/* the journal: days in small capitals between rules; in hand, a ruled box in your own hand */
+.jentry { text-indent: 0; }
+.jentry .when { font-style: italic; color: var(--ink-faded); }
+.jhand { margin: .8em 0 0; padding: .4em .8em; border: 1px solid #6e4a2a66; border-radius: 2px; background: #fff4d81f; }
+.jhand li { font: calc(var(--pw) * .028)/1.85 'Homemade Apple', cursive; color: var(--hand); margin-bottom: 2px; }
+.jhand ul { margin: 2px 0; padding-left: 1.1em; }
+
+/* instructions: a key in the margin of each line */
+.instr { display: flex; gap: .7em; margin-bottom: .45em; }
+.instr .k { flex: 0 0 4.2em; text-align: right; font: calc(var(--pw) * .036) 'IM Fell English SC', serif; color: var(--rubric); padding-top: .1em; }
+
+.book-aside { margin-top: 20px; font: italic 15px Georgia, serif; color: #dccfa0; text-shadow: 0 1px 3px #000; }

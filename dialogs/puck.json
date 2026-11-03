@@ -1,7 +1,8 @@
 {
   "root": "greeting",
   "speaker": "Puck",
-  "voice": "puck",
+  "lilt": "puck",
+  "hand": "puck",
   "portrait": "sprites/puck.png",
   "nodes": {
     "greeting": {

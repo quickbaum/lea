@@ -10,6 +10,7 @@
 //   hut    — get on with building a hut
 //   dish   — make a dish you're craving (dish)
 //   task   — your part in a shared plan (project, task)
+//   practice — go and work at a tune, told to or wanting it (tune; music-sim.js practiceWant)
 // Survival still comes first: Brain.choose gates these behind need like any want.
 
 import { RECIPES, recipeFor } from './recipes.js';

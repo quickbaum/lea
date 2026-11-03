@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Quickbaum's Lea</title>
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:monospace;color:#cdb;}
@@ -87,9 +87,6 @@
   #intro-presets .preset .meta{font-size:11px;letter-spacing:1px;color:#9ab87f;}
   #intro-presets .preset.last{border-color:#c9a23a;box-shadow:0 0 0 1px #c9a23a inset;}
   #intro-presets .preset.custom{border-style:dashed;}
-  #intro-choices .intro-rebake{display:block;margin-top:12px;font-family:monospace;font-size:12px;color:#cdb;cursor:pointer;}
-  #intro-choices .intro-rebake span{opacity:.6;}
-  #intro-choices .intro-rebake input{accent-color:#c9a23a;vertical-align:middle;}
   /* settings: gear button + sound panel */
   #gear{position:fixed;right:10px;top:10px;z-index:30;width:34px;height:34px;
         background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
@@ -114,6 +111,72 @@
   #meter{position:fixed;left:10px;bottom:46px;z-index:30;font:12px monospace;color:#dccfa0;
          background:rgba(0,19,11,.7);border:1px solid #5a6b50;border-radius:4px;padding:3px 7px;pointer-events:none;}
   .hide{display:none!important;}
+
+  /* ---- small screens: true of any small window, so no finger needed ---- */
+  @media (max-height:520px),(max-width:640px){
+    #start{align-items:flex-start;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+    #start .splash-content{width:100%;padding:10px 0 16px;}
+    #start .logo{max-height:22vh;margin-bottom:6px;}
+    #start .tagline{font-size:15px;margin:0 0 8px;}
+    #start .enter{font-size:18px;}
+    #intro-choices .intro-ask{font-size:16px;margin-bottom:8px;}
+    #intro-presets .preset{min-height:0;padding:9px 11px;}
+    #intro-presets .preset .name{font-size:17px;}
+    #intro-presets .preset .blurb{font-size:11px;}
+    #settings{align-items:flex-start;overflow-y:auto;}
+    #settings .panel{min-width:0;width:calc(100% - 24px);max-width:520px;box-sizing:border-box;margin:8px auto;padding:14px 18px;}
+    #world-opts{max-width:calc(100vw - 24px);box-sizing:border-box;}
+    #rest-panel,#inv-panel{max-height:calc(100dvh - 16px);overflow-y:auto;box-sizing:border-box;}
+    #inv-panel{left:8px;bottom:8px;padding:8px 12px;}
+    #inv-panel h3{margin:0 0 4px;}
+    #rest-panel{bottom:8px;left:8px;padding:10px 14px;}
+    #bigmap canvas{height:100dvh;}
+  }
+  /* ---- a finger: the HUD moves out from under the thumbs (js/touch.js) ---- */
+  html.touch,html.touch body{overscroll-behavior:none;touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;position:fixed;inset:0;}
+  html.touch input{-webkit-user-select:text;user-select:text;}
+  html.touch #cross{opacity:.35;}
+  html.touch #corner-btns{left:calc(8px + env(safe-area-inset-left));right:auto;top:calc(8px + env(safe-area-inset-top));bottom:auto;flex-wrap:wrap;max-width:62vw;}
+  html.touch #corner-btns button{opacity:.85;min-height:36px;padding:5px 9px;font-size:12px;letter-spacing:0;}
+  html.touch #gear{top:calc(8px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right));opacity:.85;width:36px;height:36px;}
+  html.touch #hud{top:calc(52px + env(safe-area-inset-top));left:calc(8px + env(safe-area-inset-left));right:130px;}
+  html.touch #map{width:84px;height:84px;border-width:2px;top:calc(8px + env(safe-area-inset-top));right:calc(52px + env(safe-area-inset-right));bottom:auto;}
+  html.touch #place{top:calc(98px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right));bottom:auto;width:140px;font-size:12px;}
+  html.touch #vitals{top:calc(10px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right));bottom:auto;}
+  html.touch #vitals .bar{height:78px;}
+  html.touch #hover-panel{top:calc(10px + env(safe-area-inset-top));bottom:auto!important;right:calc(164px + env(safe-area-inset-right))!important;width:150px!important;height:64px!important;}
+  @media (max-width:640px){
+    html.touch #hover-panel{top:calc(122px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right))!important;}
+    html.touch #corner-btns{max-width:54vw;}
+    html.touch #hud{top:calc(96px + env(safe-area-inset-top));}
+  }
+  html.touch #meter{bottom:auto;top:calc(52px + env(safe-area-inset-top));}
+  html.touch #look-btn{display:none!important;}
+  html.touch .page-aside,html.touch .book-aside,html.touch #rest-panel .foot{display:none;}
+  html.touch #book-overlay{gap:0;}
+  html.touch .turn::before{width:30px;height:30px;}
+  #stick,#use-btn,#jump-btn,#close-btn,#glass-btns{display:none;}
+  html.touch.free #stick.on{display:block;position:fixed;width:112px;height:112px;margin:-56px 0 0 -56px;border-radius:50%;z-index:25;pointer-events:none;
+    border:2px solid #dccfa066;background:#00130b33;}
+  html.touch #stick.run{border-color:#e8c75a;box-shadow:0 0 10px #e8c75a88;}
+  #stick-nub{position:absolute;left:50%;top:50%;width:48px;height:48px;margin:-24px 0 0 -24px;border-radius:50%;background:#dccfa066;border:1px solid #dccfa0aa;}
+  html.touch.free #use-btn:not(.hide){display:block;position:fixed;right:calc(14px + env(safe-area-inset-right));bottom:calc(92px + env(safe-area-inset-bottom));z-index:30;max-width:44vw;min-height:52px;padding:6px 16px;
+    background:#c9a23a;color:#111;border:0;border-radius:26px;font:bold 15px Georgia,serif;box-shadow:0 2px 8px #000a;touch-action:none;overflow-wrap:anywhere;}
+  html.touch.free #jump-btn{display:block;position:fixed;right:calc(14px + env(safe-area-inset-right));bottom:calc(16px + env(safe-area-inset-bottom));z-index:30;width:64px;height:64px;border-radius:50%;
+    background:#00130b99;color:#dccfa0;border:1px solid #5a6b50;font:13px monospace;touch-action:none;}
+  html.touch #close-btn:not(.hide){display:block;position:fixed;right:calc(8px + env(safe-area-inset-right));top:calc(8px + env(safe-area-inset-top));z-index:100000;width:44px;height:44px;border-radius:50%;
+    background:#1d1a14;color:#e8c75a;border:1px solid #c9a23a;font-size:18px;box-shadow:0 2px 8px #000a;touch-action:none;}
+  html.touch.free #glass-btns:not(.hide){display:flex;flex-direction:column;gap:10px;position:fixed;left:calc(14px + env(safe-area-inset-left));top:50%;transform:translateY(-50%);z-index:40;}
+  #glass-btns button{width:52px;height:52px;border-radius:50%;background:#1d1a14cc;color:#e8c75a;border:1px solid #c9a23a;font-size:24px;touch-action:none;}
+  /* the telescope: the world through a brass ring, all else dark */
+  #scope{position:fixed;inset:0;z-index:35;pointer-events:none;background:radial-gradient(circle at center,transparent 0,transparent 43.4vmin,#3a2c12 43.6vmin,#c9a23a 44.4vmin,#6b5226 45.2vmin,#050403 45.8vmin);}
+  #scope .scope-says{position:absolute;left:0;right:0;bottom:6.5vh;text-align:center;color:#e8dcb8;font:15px/1.3 Georgia,serif;text-shadow:0 1px 3px #000,0 0 8px #000;padding:0 24px;}
+  #scope .scope-aim{position:absolute;left:50%;top:50%;width:9px;height:9px;margin:-5px 0 0 -5px;border:1px solid #e8dcb866;border-radius:50%;}
+  /* a named star: a ring on it, its name to the right */
+  #scope .scope-star{position:absolute;left:0;top:0;white-space:nowrap;color:#b9ac86;font:13px/1 Georgia,serif;text-shadow:0 1px 3px #000,0 0 6px #000;padding-left:15px;margin-top:-6px;}
+  #scope .scope-star b{color:#f2e8c8;font-weight:normal;font-size:15px;}
+  #scope .scope-star::before{content:'';position:absolute;left:-8px;top:-2px;width:15px;height:15px;border:1px solid #e8dcb8cc;border-radius:50%;}
+  #scope .scope-mag{position:absolute;left:0;right:0;bottom:2.5vh;text-align:center;color:#9c8c62;font:12px/1.3 Georgia,serif;}
   #cheat{position:fixed;left:50%;bottom:60px;transform:translateX(-50%);z-index:70;width:280px;padding:6px 10px;
        background:#0a2416;color:#dccfa0;border:1px solid #e8c75a;border-radius:4px;font:14px monospace;outline:none;}
   /* cursor mode: free mouse over canvas, crosshair hidden */
@@ -128,11 +191,11 @@
   body.cursor-mode #look-btn{display:block;}
   /* the corner buttons, in a row so they never overlap whatever their labels */
   #corner-btns{position:fixed;left:10px;bottom:10px;z-index:30;display:flex;gap:6px;}
-  #inv-btn,#journal-btn,#rest-btn{position:relative;
+  #inv-btn,#journal-btn,#rest-btn,#spell-btn,#map-btn{position:relative;
     background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
     font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;
     font-family:monospace;opacity:.7;}
-  #inv-btn:hover,#journal-btn:hover,#rest-btn:hover{opacity:1;}
+  #inv-btn:hover,#journal-btn:hover,#rest-btn:hover,#spell-btn:hover,#map-btn:hover{opacity:1;}
   #journal-btn.new::after{content:'';position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:#e8c75a;box-shadow:0 0 4px #e8c75a;}
   /* passing time (R): the choices, then a progress line while it passes */
   #rest-panel{position:fixed;left:10px;bottom:46px;z-index:40;width:260px;
@@ -181,31 +244,6 @@
   #vitals .sp i{background:#5b7fd6;}
   #vitals .st i{background:#c99a3a;}
   #vitals.winded .st i{background:#8a5a2a;}
-  /* the spellbook (C): a page of spells, cast by click or by number */
-  #spellbook{position:fixed;inset:0;z-index:45;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);
-    font-family:Georgia,'Times New Roman',serif;}
-  #spellbook .book{background:#1d1a14;border:2px solid #c9a23a;border-radius:10px;box-shadow:0 10px 40px #000c;color:#efe6cf;
-    padding:22px 26px 16px;width:min(560px,calc(100% - 32px));max-height:calc(100% - 32px);overflow-y:auto;}
-  #spellbook h2{margin:0 0 4px;color:#e8c75a;font-style:italic;font-weight:normal;font-size:24px;letter-spacing:.5px;}
-  #spellbook .sub{margin:0 0 16px;color:#a89c78;font-style:italic;font-size:13px;}
-  #spellbook .spells{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
-  #spellbook .spell{border:1px solid #5a4a24;border-radius:6px;padding:10px;cursor:pointer;background:#25211a;transition:background .12s,border-color .12s;}
-  #spellbook .spell:hover{background:#3a3320;border-color:#c9a23a;}
-  #spellbook .spell.off{opacity:.45;cursor:default;}
-  #spellbook .spell.off:hover{background:#25211a;border-color:#5a4a24;}
-  #spellbook .spell canvas{width:48px;height:48px;image-rendering:pixelated;display:block;margin-bottom:6px;}
-  #spellbook .spell .name{color:#e8c75a;font-size:16px;}
-  #spellbook .spell .key{float:right;color:#a89c78;font:12px monospace;}
-  #spellbook .spell .cost{font-size:12px;color:#8fa8d8;font-style:italic;}
-  #spellbook .spell .desc{font-size:13px;line-height:1.35;color:#d6ccb0;margin-top:3px;}
-  #spellbook h3{margin:18px 0 2px;color:#e8c75a;font-style:italic;font-weight:normal;font-size:19px;}
-  #spellbook .recipes{display:grid;gap:8px;}
-  #spellbook .recipe{border-top:1px solid #3a3020;padding-top:6px;}
-  #spellbook .recipe .name{color:#e8c75a;font-size:15px;}
-  #spellbook .recipe .wants{font-size:13px;color:#a89c78;margin-top:2px;}
-  #spellbook .recipe .wants .have{color:#efe6cf;text-decoration:underline;text-decoration-color:#c9a23a;}
-  #spellbook .recipe .wants .rare::after{content:' ★';color:#4ff0d0;}
-  #spellbook .foot{margin-top:14px;font:12px monospace;color:#a89c78;text-align:center;}
 </style>
 <script type="importmap">
 {
@@ -230,8 +268,6 @@
     <div id="intro-choices">
       <p class="intro-ask">Which Lea will you enter?</p>
       <div id="intro-presets"></div>
-      <label class="intro-rebake"><input type="checkbox" id="intro-rebake"> make the folk afresh
-        <span>— bake every character again instead of using the saved ones (slow)</span></label>
     </div>
     <div id="world-opts" class="hide">
       <span class="lbl">SIZE</span>

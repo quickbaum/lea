@@ -30,9 +30,14 @@
 //   way all through, turns back every four bars, or goes round while closing in to the fire and
 //   opening out again. Each dancer's place is worked out from the tune's own clock (dancePose),
 //   so the ring keeps together and in time. (Real historical figures, later: docs/music.md.)
+//   Practice: knowing a tune isn't having it in the hands (fluencyOf). By day, someone who's
+//   diligent goes off to a place of their own (agents.js practiceSpot), out of everyone's
+//   earshot, and drills their weakest tune a phrase at a time, slow, faltering, over and over
+//   (stepPractice, arrange.js roughen); main.js sounds it. What it buys you hear at the fire.
 
-import { TUNE_IDS, FOLK_TUNES, tune, schedule } from './tunes.js';
-import { DRUMS, parts } from './arrange.js';
+import { TUNE_IDS, FOLK_TUNES, tune, schedule, phraseSchedule } from './tunes.js';
+import { DRUMS, parts, liftFor, roughen } from './arrange.js';
+import { firstPlan, dropPlan } from './plans.js';
 import { memoryOf } from './recipes.js';
 import { addNews } from './gossip.js';
 import { craftsOf } from './making.js';
@@ -60,10 +65,13 @@ const EASE = { simple: { ear: 99, none: 1, teach: 99, teachNone: 2 },
                middling: { ear: 2, none: 0, teach: 3, teachNone: 1 },
                hard: { ear: 1, none: 0, teach: 2, teachNone: 1 } };
 const EASES = new Map();
+export function tuneWeight(id){
+  const P = tune(id), notes = P.phrases.reduce((a, p) => a + p.notes.filter(n => n.midi != null).length, 0);
+  return notes * new Set(schedule(id).notes.map(n => n.midi)).size / 7;
+}
 export function easeOf(id){
   if (!EASES.has(id)){
-    const P = tune(id), notes = P.phrases.reduce((a, p) => a + p.notes.filter(n => n.midi != null).length, 0);
-    const e = notes * new Set(schedule(id).notes.map(n => n.midi)).size / 7;
+    const e = tuneWeight(id);
     EASES.set(id, e <= 40 ? 'simple' : e <= 100 ? 'middling' : 'hard');
   }
   return EASES.get(id);
@@ -110,6 +118,93 @@ export function teachTune(n, id, now){
   const had = phrasesKnown(n, id, now), ear = earOf(n), E = EASE[easeOf(id)];
   return { had, got: learnTune(n, id, now, ear === 'good' ? phraseCount(id) : had + (ear === 'fair' ? E.teach : E.teachNone)), ear };
 }
+
+export const isHeritage = (n, id) => !!tunebook(n).get(id)?.heritage;
+
+// ---- the hands, and practice ---------------------------------------------------------
+// How well n's hands have a tune, 0..1: apart from how much of it they know. A tune grown up
+// with starts well; one just learnt starts middling, and nobody plays worse than that. Drilling and playing raise it, and it slips
+// slowly in the idle days, so it's kept up, not finished with.
+const HAND_BORN = [0.6, 1], HAND_NEW = 0.5, HAND_NEW_GOOD = 0.55, HAND_FLOOR = 0.5, HAND_SLIP = 0.04;   // a day's slip
+const HAND_PLAYED = 0.02;                                     // what playing a tune through at a fire gives
+const GO_GAIN = { simple: 0.06, middling: 0.03, hard: 0.015 };  // what one go at it gives (× ear)
+const EAR_GAIN = { good: 1.3, fair: 1, none: 0.6 };
+const AIM = 0.92, LAZY = 0.2, RUN = 0.7;                      // good enough to leave be; below this diligence, not unless told; past this, whole run-throughs too
+const SESSION = [80, 140], GAP = [1.5, 4], REPS = 3;          // seconds' practice; between goes; goes at a phrase before the next
+const SLOW = 0.62;                                            // how slowly the clumsiest drill it, of full speed
+export const ROUGH = 0.65;                                    // below this, they know it isn't right
+const whoOf = n => 'n' + n.id + '|' + (n.name || '');
+export function fluencyOf(n, id, now){
+  const h = n.hands?.get(id);
+  if (h) return Math.max(HAND_FLOOR, h.f - HAND_SLIP * (now - h.t));
+  return isHeritage(n, id) ? HAND_BORN[0] + (HAND_BORN[1] - HAND_BORN[0]) * hash01(whoOf(n), 'hand:' + id) : earOf(n) === 'good' ? HAND_NEW_GOOD : HAND_NEW;
+}
+export function drilled(n, id, now, gain){
+  (n.hands ??= new Map()).set(id, { f: Math.min(1, fluencyOf(n, id, now) + gain), t: now });
+}
+export const diligence = n => hash01(whoOf(n), 'diligent');
+// is n minded to practise, and what? { id, pull }, or null. A session under way carries on; a
+// plan to (told to, or a new tune they mean to get) comes first; else their weakest tune, if
+// it's weak enough and they're the sort who bothers.
+export function practiceWant(n, now){
+  const kind = instrumentOf(n);
+  if (!kind || DRUMS.has(kind)) return null;
+  if (n.practice) return { id: n.practice.id, pull: 1 };
+  const told = firstPlan(n, 'practice');
+  if (told && told.until >= now && phrasesKnown(n, told.tune, now)) return { id: told.tune, pull: 1.5 };
+  const d = diligence(n);
+  if (d < LAZY) return null;
+  let id = null, low = AIM;
+  for (const t of tunesOf(n, now)){ const f = fluencyOf(n, t, now); if (f < low){ low = f; id = t; } }
+  return id && { id, pull: d * (0.8 + AIM - low) };
+}
+// one go at it: a phrase, slow, or (once it's coming) now and then the whole of what they know
+function newGo(n, S, now){
+  const f = fluencyOf(n, S.id, now), k = phrasesKnown(n, S.id, now);
+  if (!k) return null;
+  const whole = f >= RUN && S.goes % (REPS + 1) === REPS;
+  const base = whole ? schedule(S.id, knownSet(k)) : phraseSchedule(S.id, Math.floor(S.goes / REPS) % k);
+  const up = liftFor(schedule(S.id).notes, S.kind), speed = whole ? 1 : SLOW + (1 - SLOW) * f;
+  const s = roughen({ notes: base.notes.map(x => ({ ...x, t: x.t / speed, dur: x.dur / speed, midi: x.midi + up })), length: base.length / speed },
+    f, whoOf(n) + S.id + S.goes + Math.floor(now * 600), { solo: true });
+  return { kind: S.kind, notes: s.notes, length: s.length, left: s.length };
+}
+// a moment's practice, from the Brain, at the spot. True when the session's over.
+export function stepPractice(n, w, dt, id){
+  const now = w.time, st = w.musicStats ??= { played: 0, learnt: 0, tunes: {} }, P = st.practice ??= { sessions: 0, goes: 0, alone: 0, gained: 0 };
+  let S = n.practice;
+  if (!S){ S = n.practice = { id, kind: n.instrument, left: SESSION[0] + Math.random() * (SESSION[1] - SESSION[0]), gap: 1, goes: 0, go: null }; P.sessions++; }
+  S.seen = now; S.left -= dt;
+  if (S.go){
+    S.go.left -= dt;
+    if (S.go.left <= 0){
+      const gain = GO_GAIN[easeOf(S.id)] * EAR_GAIN[earOf(n)];
+      drilled(n, S.id, now, gain); P.gained += gain;
+      const kn = phrasesKnown(n, S.id, now); if (kn) learnTune(n, S.id, now, kn);   // drilling it keeps it, as playing does
+      S.go = null; S.goes++; S.gap = GAP[0] + Math.random() * (GAP[1] - GAP[0]);
+    }
+  } else if ((S.gap -= dt) <= 0 && S.left > 0){
+    S.go = newGo(n, S, now);
+    if (!S.go) S.left = 0;
+    else {
+      P.goes++;
+      if (!(w.near?.(n.x, n.z, EARSHOT) ?? []).some(o => o !== n && !o._indoors)) P.alone++;
+      if ((w.fires || []).some(f => Math.hypot(f.x - n.x, f.z - n.z) < EARSHOT)) P.byFire = (P.byFire || 0) + 1;
+    }
+  }
+  if (S.left > 0 || S.go) return false;
+  n.practice = null; n._practiceRest = now + 0.5 + 0.8 * (1 - diligence(n));
+  const told = firstPlan(n, 'practice'); if (told?.tune === S.id) dropPlan(n, told);
+  return true;
+}
+// the go sounding now, if any: stale once the Brain's stopped coming back to it (talk, hunger)
+export const practiceGo = (n, now) => { const S = n.practice; return S?.go && now - S.seen < 2 / 600 ? S.go : null; };
+
+// answers to what you say about their playing (play-talk.js): 'admit' a rough player of
+// anything but a child's tune knows it; otherwise they take it badly and answer back
+export const keepAtReply = (n, id, now) => easeOf(id) !== 'simple' && (fluencyOf(n, id, now) < ROUGH || phrasesKnown(n, id, now) < phraseCount(id)) ? 'admit' : 'retort';
+// the song you offered them instead: one they know whole; heavier than theirs; or not
+export const songVerdict = (n, played, offered, now) => knowsTune(n, offered, now) ? 'knows' : tuneWeight(offered) > tuneWeight(played) ? 'better' : 'nobetter';
 
 // ---- instruments -----------------------------------------------------------------
 // does n's camp play? (a hash of the household: music runs in families)
@@ -161,8 +256,8 @@ export function stepMusic(f, w, dt){
   }
   if (!best){ M.rest = REST[1]; return; }
   const lead = Math.max(...best.ks);
-  const ps = choosers.map((n, i) => ({ npc: n, kind: n.instrument, k: best.ks[i] })).filter(p => p.k > 0);
-  for (const p of ps) learnTune(p.npc, best.id, w.time, p.k);              // playing it keeps it
+  const ps = choosers.map((n, i) => ({ npc: n, kind: n.instrument, k: best.ks[i], f: DRUMS.has(n.instrument) ? null : fluencyOf(n, best.id, w.time) })).filter(p => p.k > 0);
+  for (const p of ps){ learnTune(p.npc, best.id, w.time, p.k); if (p.f != null) drilled(p.npc, best.id, w.time, HAND_PLAYED); }   // playing it keeps it
   if (tuneful.length) for (const n of drummers) ps.push({ npc: n, kind: n.instrument, k: lead });   // the drum goes along
   parts(ps, best.id).forEach((part, i) => { ps[i].part = part; });
   // how long each plays: as far as they know it (a drum, the whole way under the others)

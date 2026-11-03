@@ -18,6 +18,8 @@
 //          (the top voice): the tune is what's learnt, and whoever knows it knows its parts
 //   texture 'unison': played together on the tune, not in parts (arrange.js)
 //   style  'gentry': played the Gentry's way, over a drone, with broken chords and bells (arrange.js)
+//   harmony the chord of each bar, where the page prints them ('C', 'Am'; arrange.js chords): the Gentry's
+//          way then plays those instead of guessing, and its drone follows their roots
 //   home   the key the harmony is heard in, for written-out music, which is kept in C with every
 //          accidental marked (arrange.js chords)
 // The written-out music comes from real scores, by tools/import_scores.py (js/scores.js); a
@@ -63,6 +65,8 @@ export const TUNES = {
     phrases: ['A2AA A2AA|A2D2F2A2|', 'G2GG G2GG|G2C2E2G2|', 'A2AA A2AA|A2B2c2d2|', 'c2A2G2E2|D4D4|'] },
 };
 Object.assign(TUNES, SCORED);
+// One song twice over: the folk's way and the Gentry's, as two tunes under two names. Off a printed
+// page (docs/texts/tunes.md). Added after the rest so the crypts' deal of the other songs stands.
 export const TUNE_IDS = Object.keys(TUNES);
 export const FOLK_TUNES = TUNE_IDS.filter(id => !TUNES[id].book);
 
@@ -166,6 +170,19 @@ export function tune(id){
 // form, or only those in `known` (a Set of phrase indices) and stopping at the first
 // one not known: someone who's half learnt a tune plays as far as they know it. `voice`:
 // which of written-out music's voices (0, the top, is the tune). A tied note is one note.
+// one phrase alone, from nought: what's drilled at practice (music-sim.js)
+export function phraseSchedule(id, k){
+  const P = tune(id), out = [];
+  let t = 0, held = null;
+  for (const n of P.phrases[k].notes){
+    const dur = n.len * P.unitSec;
+    if (held && n.midi === held.midi) held.dur += dur;
+    else if (n.midi != null) out.push(held = { t, dur, midi: n.midi, step: n.step, acc: n.acc });
+    if (!n.tie) held = null;
+    t += dur;
+  }
+  return { notes: out, length: t };
+}
 export function schedule(id, known = null, voice = 0){
   const P = tune(id), out = [], V = voice ? P.under[voice - 1] : P.phrases;
   let t = 0, held = null;

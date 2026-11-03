@@ -12,8 +12,8 @@ import { surnameFor } from './names.js';
 
 // sprites available per folk (dwarves only have a male sheet — so a dwarf group
 // reads as brothers / a warrior clan). Humans are the Lea sheets: each one is
-// replaced at load by a character baked for them (folk-avatars.js); the sheet only
-// shows if that bake is off (?bakedfolk=0) or fails. The M&M human sheets are retired.
+// replaced at load by a character from the pool (folk-pool.js); the sheet only
+// shows if that's off (?bakedfolk=0) or fails. The M&M human sheets are retired.
 const SLUGS = {
   human:  ['male-lea-1', 'male-lea-2', 'male-lea-3', 'female-lea-1', 'female-lea-2', 'female-lea-3'],
   elf:    ['male-peasant-elf', 'female-peasant-elf'],

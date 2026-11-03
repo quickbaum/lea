@@ -80,6 +80,24 @@ export function partNotes(id, part, known = null, kind = null){
   return { notes: up ? notes.map(n => ({ ...n, midi: n.midi + up })) : notes, length: s.length };
 }
 
+// a part as a player's hands actually give it (music-sim.js fluencyOf, 0..1): the odd wrong
+// note, an uneven touch. Alone (`solo`) they can also falter between notes, which is what practice
+// sounds like. In a band nobody falters: they'd lose each other. By a hash of `key`, so a tune joined partway is the same tune.
+const CLEAN = 0.95, SLIP = 0.32, FALTER = 0.22;
+const h01 = (a, b) => { let h = 2166136261 >>> 0; for (const c of a + '|' + b) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return (h % 10007) / 10007; };
+export function roughen({ notes, length }, f, key, { solo = false } = {}){
+  if (f >= CLEAN) return { notes, length };
+  const slip = Math.pow(1 - f, 1.5) * SLIP, out = [];
+  let late = 0;
+  for (let i = 0; i < notes.length; i++){
+    const n = notes[i], h = a => h01(key, i + a), wrong = h('w') < slip;
+    if (solo && i && h('f') < (1 - f) * FALTER) late += 0.15 + 0.35 * h('l');
+    out.push({ ...n, t: n.t + late, midi: wrong ? n.midi + (h('d') < 0.5 ? -1 : 1) * (h('s') < 0.6 ? 2 : 1) : n.midi,
+               vel: (n.vel ?? 0.82) * (1 - (1 - f) * 0.35 * h('v')) });
+  }
+  return { notes: out, length: length + late };
+}
+
 // how far (semitones, whole octaves) notes must go up to sit above instrument `kind`'s floor
 export function liftFor(notes, kind){
   const floor = FLOOR[kind] ?? 0, lo = Math.min(...notes.map(n => n.midi));
@@ -184,9 +202,16 @@ const endOf = s => s.notes.length ? s.notes.at(-1).t + s.notes.at(-1).dur : 0;
 // has one (written-out music is kept in C, every accidental marked), else its key.
 // [{ t, len, pcs: [root, third, fifth] }], from the first full bar.
 const chordCache = new Map();
+// a chord as a page prints it, 'C' or 'Am', as pitch classes [root, third, fifth]
+const printedChord = name => { const r = pcOf(stepMidi(28 + LETTERS.indexOf(name[0]), 'C')); return [r, pcOf(r + (name.endsWith('m') ? 3 : 4)), pcOf(r + 7)]; };
 export function chords(id){
   if (chordCache.has(id)) return chordCache.get(id);
   const T = tune(id), K = T.home || T.key, g = grid(id), t0 = tonicStep(K), out = [];
+  if (T.harmony){                                     // printed on the page: no guessing
+    T.harmony.forEach((name, i) => out.push({ t: g.pick + i * g.bar, len: g.bar, pcs: printedChord(name) }));
+    chordCache.set(id, out);
+    return out;
+  }
   const voices = Array.from({ length: T.voices }, (_, v) => schedule(id, null, v).notes);
   const all = voices.flat(), end = Math.max(...voices.map(v => v.length ? v.at(-1).t + v.at(-1).dur : 0));
   const sounding = (v, b) => v.find(n => n.t <= b + 1e-6 && b < n.t + n.dur - 1e-6);
@@ -232,6 +257,14 @@ function drone(id, s, fifth){
       else out.push({ t: c.t, dur: c.len, midi, vel: 0.38 });
     }
     return out;
+  }
+  if (T.harmony){                                     // printed chords: their roots, a bar at a time (a held A would grate under the G bars)
+    for (const c of bars){
+      const midi = 48 + pcOf(c.pcs[0] - 48), held = out.at(-1);
+      if (held && held.midi === midi && Math.abs(held.t + held.dur - c.t) < 1e-6) held.dur += c.len;
+      else out.push({ t: c.t, dur: c.len, midi, vel: 0.38 });
+    }
+    return fifth ? out.flatMap(n => [n, { ...n, midi: n.midi + 7, vel: 0.3 }]) : out;
   }
   const tonic = stepMidi(tonicStep(T.key), T.key), root = 48 + pcOf(tonic - 48);
   for (let i = 0; i < bars.length; i += 2){

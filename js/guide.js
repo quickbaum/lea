@@ -227,13 +227,17 @@ export function routeLegs(route){
   return legs;
 }
 // the way you cross a region of each kind
-const THROUGH = { wood: 'through', grove: 'through', carr: 'through', meadow: 'across', wetmeadow: 'across', marsh: 'across', fen: 'across',
+export const THROUGH = { wood: 'through', grove: 'through', carr: 'through', meadow: 'across', wetmeadow: 'across', marsh: 'across', fen: 'across',
   heath: 'over', rock: 'over', lake: 'along', greatlake: 'along the shore of', island: 'across' };
 // "Take the old road north, then east through Shirn Wood, then over Dirn Heath."
 // At most four legs: past that, the middle ones go unsaid ("…, and on to …").
-export function describeRoute(route){
+// the legs worth saying: a long route's first two and its last
+export function sayableLegs(route){
   const legs = routeLegs(route);
-  const said = legs.length > 4 ? [legs[0], legs[1], legs[legs.length - 1]] : legs;
+  return legs.length > 4 ? [legs[0], legs[1], legs[legs.length - 1]] : legs;
+}
+export function describeRoute(route){
+  const legs = routeLegs(route), said = sayableLegs(route);
   const parts = said.map((l, q) => {
     if (l.road) return q === 0 ? `take the old road ${l.dir}` : `follow the old road ${l.dir}`;
     const name = l.place?.name || 'open country';

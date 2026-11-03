@@ -199,8 +199,9 @@ class AnimNPC {
   // Replace the base atlas with one baked on this machine (js/avatar-bake.js). It has
   // its own frame size, and its own HEIGHT: the billboard spans `frameM` metres of
   // world, so a tall body is a tall sprite. Pose atlases don't apply to it.
+  // (or a texture to share, from the pool: a clone keeps its own frame and shares the upload)
   setAtlas(image, m, frameM){
-    const t = new THREE.Texture(image);
+    const t = image.isTexture ? image.clone() : new THREE.Texture(image);
     t.colorSpace = THREE.SRGBColorSpace;
     t.magFilter = t.minFilter = THREE.NearestFilter;
     t.generateMipmaps = false;
@@ -223,7 +224,7 @@ class AnimNPC {
   // a pose atlas baked on this machine (avatar-bake.js bakeSitAtlas): same frame
   // height and world scale as the walk atlas, its own width
   setPoseAtlas(pose, image, m){
-    const t = new THREE.Texture(image);
+    const t = image.isTexture ? image : new THREE.Texture(image);   // (_usePose clones it)
     t.colorSpace = THREE.SRGBColorSpace;
     t.magFilter = t.minFilter = THREE.NearestFilter;
     t.generateMipmaps = false;

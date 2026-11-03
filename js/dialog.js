@@ -6,14 +6,15 @@
 // [[node]] or [[node|label]] inline links. A tree built at runtime may give a
 // choice `run`, a function called when it's picked (before moving to `next`). `action` names a function supplied by
 // the caller in opts.actions — that's how Claude actually changes the weather.
-// A tree with a `voice` (speech-score.js VOICES: Puck's) sings: each screen's words come up one
-// at a time on the beat of a score worked out from them, each sounding a note on the voice's
+// A tree with a `lilt` (js/lilt.js: Puck's) sings: each screen's words come up one
+// at a time on the beat of a score worked out from them, each sounding a note on their
 // instrument (played by whatever setVoicePlayer was given; main.js gives its Instruments). A
 // click or Space shows the rest at once; the choices wait until the words are all there.
-// A voiced tree's text may carry hidden marks ({slow}, *stress*, …: speech-score.js), never
+// That tree's text may carry hidden marks ({slow}, *stress*, …: speech-score.js), never
 // shown; other trees' text is shown as written (claude.json's *asterisks* stay).
 
-import { prepare, score, VOICES } from './speech-score.js';
+import { prepare, score } from './speech-score.js';
+import { LILTS, handOf, inkOn } from './lilt.js';
 
 const cache = {};
 let voicePlayer = null;          // (kind, { notes, length }, { gain }) → Promise<{ stop } | null>
@@ -41,20 +42,21 @@ function wordify(el){
 
 // sing a line said in the world (talk-view.js bubbles): the notes start now, and the words come
 // up on their beats from t0 (ms, performance.now(); null until the notes are asked for)
-// { words: [{ text, t }], length, t0, stop() }, or null if the voice can't sing
-export function ringLine(text, voice){
-  if (!voicePlayer || !VOICES[voice]) return null;
-  const sc = score(text, voice);
+// { words: [{ text, t, br }], length, t0, stop() }, or null if they can't sing
+export function ringLine(text, lilt, who = lilt){
+  const hand = handOf(who);
+  if (!voicePlayer || !LILTS[lilt] || !hand?.kind) return null;
+  const sc = score(text, lilt, hand);
   if (!sc.words.length) return null;
   const r = { words: sc.words, length: sc.length, t0: null, perf: null, stop(){ this.perf?.stop(); } };
-  Promise.resolve(voicePlayer(VOICES[voice].kind, { notes: sc.notes, length: sc.length }, { gain: VOICES[voice].gain ?? 1 })).catch(() => null)
+  Promise.resolve(voicePlayer(hand.kind, { notes: sc.notes, length: sc.length }, { gain: hand.gain ?? 1 })).catch(() => null)
     .then(p => { r.perf = p; r.t0 = performance.now() + 80; });
   return r;
 }
 // sing one screen: { skip() }, or null if it can't (no player, or the words don't line up)
-function sing(textEl, choicesEl, text, voice){
-  const sc = score(text, voice), spans = wordify(textEl);
-  if (!voicePlayer || !VOICES[voice] || spans.length !== sc.words.length) return null;
+function sing(textEl, choicesEl, text, lilt, who = lilt){
+  const hand = handOf(who), sc = score(text, lilt, hand), spans = wordify(textEl);
+  if (!voicePlayer || !LILTS[lilt] || !hand?.kind || spans.length !== sc.words.length) return null;
   textEl.classList.add('singing'); choicesEl.classList.add('waiting');
   let perf = null, timer = null, done = false, t0 = 0;
   const finish = () => {
@@ -69,7 +71,7 @@ function sing(textEl, choicesEl, text, voice){
     timer = next === null ? setTimeout(finish, 250) : setTimeout(tick, Math.max(10, (next - now) * 1000));
   };
   // the words keep time even with no sound (no audio yet): the clock starts once the notes are asked for
-  Promise.resolve(voicePlayer(VOICES[voice].kind, { notes: sc.notes, length: sc.length }, { gain: VOICES[voice].gain ?? 1 })).catch(() => null).then(p => {
+  Promise.resolve(voicePlayer(hand.kind, { notes: sc.notes, length: sc.length }, { gain: hand.gain ?? 1 })).catch(() => null).then(p => {
     perf = p;
     if (done){ p?.stop(); return; }
     t0 = performance.now() + 80;                   // instruments.js starts its notes 80 ms on
@@ -150,7 +152,9 @@ function open(tree, opts){
       main.appendChild(back);
     }
     const t = document.createElement('div'); t.id = 'dlg-text';
-    t.appendChild(parseText(tree.voice ? prepare(node.text).clean : node.text, go));
+    t.appendChild(parseText(tree.lilt ? prepare(node.text).clean : node.text, go));
+    const hand = handOf(tree.hand);                  // their ink and lettering
+    if (hand){ t.style.color = inkOn(hand, 'panel'); if (hand.font) t.style.fontStyle = hand.font; }
     main.appendChild(t);
 
     // an optional roster of people (portrait + name + relation), e.g. one's kin
@@ -192,7 +196,7 @@ function open(tree, opts){
       cs.appendChild(b);
     }
     main.appendChild(cs);
-    if (tree.voice) song = sing(t, cs, node.text, tree.voice);
+    if (tree.lilt) song = sing(t, cs, node.text, tree.lilt, tree.hand);
   }
   go(tree.root);
 }
