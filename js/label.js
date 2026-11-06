@@ -20,7 +20,7 @@ export function makeLabel(text, { color = '#fff', bg = 'rgba(20,20,28,0.7)', siz
 
   const tex = new THREE.CanvasTexture(cv);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = tex.minFilter = THREE.NearestFilter; tex.generateMipmaps = false;
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
   sp.scale.set(worldH * w / h, worldH, 1);
   sp.renderOrder = 999;

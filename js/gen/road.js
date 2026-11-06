@@ -18,6 +18,7 @@ import { mulberry32 } from '../rng.js';
 
 export const ROAD_W = 3.6;     // half-width of the paving: 7.2u ≈ 4.8 m, a main road two carts can pass on
 export const VERGE  = 9;       // cleared either side of the paving: no trees or shrubs stand here
+export const CROWN  = 0.12;    // the camber: the crown of the paving stands this much above its kerbs
 export const BANK   = 8;       // the embankment's skirt: how far out the land is graded back to its own height
 const STEP = 2;                // profile sample spacing (the height grid's spacing)
 const CELL = 8;                // the planning grid

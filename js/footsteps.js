@@ -29,6 +29,17 @@ export class Footsteps {
     if (this.master) this.master.gain.value = 0.32 * this._vol;
   }
 
+  // shears: two blades closing, a dry snip with a little ring to it
+  snip(){
+    this.init();
+    if (!this.ctx) return;
+    const c = this.ctx, t = c.currentTime + 0.005, pitch = 0.9 + Math.random() * 0.25;
+    const n = c.createBufferSource(), f = c.createBiquadFilter(), g = c.createGain();
+    n.buffer = this.noise; f.type = 'bandpass'; f.frequency.value = 4200 * pitch; f.Q.value = 2.5;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(1.1, t + 0.012); g.gain.exponentialRampToValueAtTime(0.001, t + 0.07);
+    n.connect(f); f.connect(g); g.connect(this.master); n.start(t, Math.random() * 0.4); n.stop(t + 0.08);
+  }
+
   // a knock at a wooden door: three dull raps, a low thud under a short woody tick
   knock(){
     this.init();

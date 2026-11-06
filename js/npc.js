@@ -5,6 +5,7 @@ import { makeLabel } from './label.js';
 import { makePackTexture } from './textures.js';
 import { KIN_DYES, kinMark, patternMask } from './kin-mark.js';
 import { scanAtlas } from './headscan.js';
+import { lantern } from './lantern.js';
 
 const WHITE = new THREE.Color(1, 1, 1);
 const FACE_CARD_FALLBACK_TOP = 0.035;   // crown row / frameH if a frame's scan fails
@@ -127,6 +128,18 @@ let FACE_CARD = { size: 0.16, drop: 0.075, x: 0.0, fwd: 0.05 };
 try { FACE_CARD = { ...FACE_CARD, ...(await (await fetch('face_params.json')).json()) }; }
 catch (_) { /* no params file — defaults stand */ }
 
+// A crown's size and seat on the head: one crown-canvas pixel (crown.js) is this fraction of the
+// sprite's frame height, and the card stands this far in front of the body plane.
+const CROWN_PX = 1 / 256, CROWN_FWD = 0.05;
+// Where the head is in every cell of an atlas. Scanned once per image: those wearing the same
+// pool character share it. (Scanned at the atlas's nominal size, so a half-size phone atlas agrees.)
+const _headBoxes = new WeakMap();
+function headBoxes(image, m){
+  let b = _headBoxes.get(image);
+  if (!b) _headBoxes.set(image, b = scanAtlas(image, m, [...Array(m.rows).keys()]));
+  return b;
+}
+
 class AnimNPC {
   constructor(base, x, z, label = null){
     this.x = x; this.z = z; this.m = base.m; this.h = PERSON_H * raceScale(base.slug) * (base.heightScale || 1); this.label = label;
@@ -247,64 +260,44 @@ class AnimNPC {
     this._baseTex = tex; this._curPose = null;   // base atlas changed; re-sync on next pose check
     this.mesh.material.map = tex; this.mesh.material.needsUpdate = true;
   }
-  // Apply a procedurally-generated crown canvas to this NPC's sprite atlas.
-  // Expands each cell's height by topPad=100px, placing the crown in the headspace
-  // and the original character in the lower portion. Updates the billboard geometry
-  // so the crown appears in-world above the character's head.
+  // Put a flower crown (crown.js) on this NPC: a small card parented to the body sprite, so it
+  // leans, hops and hides with them. Their atlas is left alone: villagers share a character's
+  // atlas (folk-pool.js) and a phone's is half size, so a crown can't be painted into it. Where
+  // the head is comes from the atlas's own pixels, each frame (_updateCrown).
   wearCrown(crownCanvas){
-    this.m = { ...this.m };   // own copy — don't mutate the shared manifest entry
-    const origFH = this.m.frameH, topPad = 100, newFH = origFH + topPad;
-    const { cols, rows } = this.m, fw = this.m.frameW;
-    const srcImg = this._baseTex.image;
-    if (!srcImg?.width) return;
-    // Build expanded atlas: original content pushed down by topPad in each row
-    const cv = document.createElement('canvas');
-    cv.width = fw * cols; cv.height = newFH * rows;
-    const ctx = cv.getContext('2d');
-    for (let row = 0; row < rows; row++){
-      ctx.drawImage(srcImg,
-        0, row * origFH, fw * cols, origFH,
-        0, row * newFH + topPad, fw * cols, origFH);
-    }
-    // Composite crown into the top area of every cell (same pose across all walk frames).
-    // nominalH is the layout height (CROWN_H) used for scale/position; the actual canvas
-    // may be taller (overflow when arc centre sits below the canvas edge), and those extra
-    // pixels are drawn into the sprite area so flowers don't get clipped at the forehead.
-    const crownW = crownCanvas.width;
-    const nominalH = crownCanvas._nominalH || crownCanvas.height;
-    const scale  = Math.min(fw / crownW, topPad / nominalH);
-    const drawW  = crownW * scale, drawH = crownCanvas.height * scale;
-    for (let row = 0; row < rows; row++){
-      for (let col = 0; col < cols; col++){
-        ctx.drawImage(crownCanvas,
-          col * fw + (fw - drawW) / 2,
-          row * newFH + (topPad - nominalH * scale),
-          drawW, drawH);
-      }
-    }
-    // Replace texture
-    const t = new THREE.CanvasTexture(cv);
+    const t = new THREE.CanvasTexture(crownCanvas);
     t.colorSpace = THREE.SRGBColorSpace;
     t.magFilter = t.minFilter = THREE.NearestFilter;
     t.generateMipmaps = false;
-    t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping;
-    t.repeat.copy(this.tex.repeat); t.offset.copy(this.tex.offset);
-    this.tex.dispose?.();
-    this.tex = t; this._baseTex = t; this._curPose = null;
-    this.mesh.material.map = t; this.mesh.material.needsUpdate = true;
-    // Update frame dimensions and billboard height
-    this.m.frameH = newFH; this.m.topPad = topPad;
-    this._billboardH = this.h * newFH / origFH;
-    // Rebuild geometry to show the crown above the character's head
-    const gy = height(this.x, this.z);
-    this.mesh.geometry.dispose();
-    this.mesh.geometry = new THREE.PlaneGeometry(
-      this._billboardH * (fw / newFH), this._billboardH);
-    this.mesh.position.set(this.x, gy + this._billboardH / 2, this.z);
-    if (this.label) this.label.position.set(this.x, gy + this._billboardH + 0.6, this.z);
+    const k = this._billboardH * CROWN_PX, w = crownCanvas.width * k, h = crownCanvas.height * k, arc = crownCanvas._arc;
+    const geo = new THREE.PlaneGeometry(w, h);
+    geo.translate(w / 2 - arc.x * k, arc.y * k - h / 2, 0);   // the card's origin is the wreath's centre
+    this.crownMesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ map: t, alphaTest: 0.5, transparent: true, fog: true }));
+    this._crownDrop = arc.r * k;                              // the wreath's centre, below the top of the head
+    this.mesh.add(this.crownMesh);
+  }
+  // The crown has wilted: gone, with what it held on the GPU.
+  takeOffCrown(){
+    const cm = this.crownMesh;
+    if (!cm) return;
+    this.mesh.remove(cm);
+    cm.geometry.dispose(); cm.material.map.dispose(); cm.material.dispose();
+    this.crownMesh = null;
+  }
+  // Seat the crown on the head of the cell now showing. The numbers are in the body plane's own
+  // space, which update() has just scaled for a sitting atlas or a boat, so that's undone here.
+  _updateCrown(row, col, flip, clipFrac){
+    const cm = this.crownMesh, m = this.m, hb = headBoxes(this.tex.image, m)[row]?.[col];
+    cm.visible = !!hb;
+    if (!hb) return;
+    const H = this._billboardH, sx = this.mesh.scale.x, sy = this.mesh.scale.y;
+    const headY = (clipFrac - hb.top / m.frameH) * H - this._crownDrop;   // above the feet
+    cm.position.set((hb.cx / m.frameW - 0.5) * (flip ? -1 : 1) * H * this._baseAspect, (headY - H * clipFrac / 2) / sy, CROWN_FWD);
+    cm.scale.set(1 / sx, 1 / sy, 1);
+    cm.material.color.copy(this.mesh.material.color);         // the same daylight, lantern and fire
   }
   update(cam, dt, tint){
-    if (tint) this.mesh.material.color.copy(tint);   // brighten/dim with the daylight
+    if (tint) lantern.warm(this.mesh.material.color.copy(tint), this.x, this.z);   // brighten/dim with the daylight, and your lantern
     if (this.fireGlow) this.mesh.material.color.lerp(FIRE_GLOW, this.fireGlow);   // warmed by a fire
     this.moving = false;
     if (!this.talking){                          // frozen while in dialogue
@@ -416,6 +409,7 @@ class AnimNPC {
     if (this.hopGait) col = this.idleCol;              // legs-together frame reads as a bound
     this.setCell(row, col, flip);
     if (this.faceMesh) this._updateFace(row, col, flip, toCam, gy, hopOff + swayBob - chopDip, lean + sway, tint);
+    if (this.crownMesh) this._updateCrown(row, col, flip, clipFrac);
     if (boatClip) {
       // crop to the top half of the current cell so only torso+head shows above the gunwale
       this.tex.repeat.y = 0.5 / this.m.rows;
@@ -433,7 +427,9 @@ class AnimNPC {
   // along its heading, so it reads as a pack (visible when you see their back,
   // tucked behind them from the front). Texture redrawn only when contents change.
   _updatePack(toCam, sy = 1, tint, hopOff = 0){
-    const food = this.pack | 0, wood = this.firewood | 0, trink = this.trinkets | 0;
+    // a trader's stock rides on their back too, so they look loaded (js/traders.js)
+    let stock = 0; if (this.trader) for (const k in this.trader.stock) stock += this.trader.stock[k];
+    const food = (this.pack | 0) + stock, wood = this.firewood | 0, trink = this.trinkets | 0;
     if (food <= 0 && wood <= 0 && trink <= 0){ this.packMesh.visible = false; return; }
     // the morsels poking out are what's actually carried (larder.js), a few of each kind
     const kind = this.larder && this.larder.length
@@ -454,7 +450,7 @@ class AnimNPC {
     } else this.packMesh.position.set(
       this.x - fx*back, gy + this.h*0.6*sy + hopOff, this.z - fz*back);
     this.packMesh.rotation.set(0, toCam, 0, 'YXZ');
-    this.packMesh.material.color.copy(tint || WHITE);
+    lantern.warm(this.packMesh.material.color.copy(tint || WHITE), this.x, this.z);
     this.packMesh.visible = true;
   }
 
@@ -481,7 +477,7 @@ class AnimNPC {
       gy + this._billboardH * (1 - topFrac - FACE_CARD.drop) + yOff,
       this.z + fz * FACE_CARD.fwd - Math.sin(toCam) * ox);
     fm.rotation.set(0, toCam, rotZ, 'YXZ');
-    fm.material.color.copy(tint || WHITE);
+    lantern.warm(fm.material.color.copy(tint || WHITE), this.x, this.z);
     if (this.fireGlow) fm.material.color.lerp(FIRE_GLOW, this.fireGlow);
   }
 }

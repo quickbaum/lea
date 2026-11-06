@@ -13,15 +13,16 @@ import { at as frameAt } from './gen/settle.js';
 import { makeName, composeName } from './names.js';
 import { NavGrid } from './nav.js';
 import { readOmen, telescopeOf, glassReading } from './astrology.js';
-import { RECIPES, RAW_KINDS, BOOK_RECIPES, recipeFor, startPot, stepPot, carries, stepsKnown, potDish } from './recipes.js';
-import { DISHES } from './ingredients.js';
-import { addPlan, dropPlan, plansOf, firstPlan, hadDish, strongestCraving, mayCrave, craved } from './plans.js';
+import { RECIPES, RAW_KINDS, BOOK_RECIPES, POT_CAP, recipeFor, startPot, stepPot, carries, stepsKnown, potDish } from './recipes.js';
+import { DISHES, ingredient } from './ingredients.js';
+import { addPlan, dropPlan, plansOf, firstPlan, hadDish, strongestCraving, mayCrave, craved, INTENT, pursuitOf, intentBar, rivalNeed, isCommitted, resumePull, suspend, resumed, temperament, TRIP, startTrip, tripCheck, learnedRate } from './plans.js';
 import { addFood, takeFood, takeSpare, giveAll, total, countOf, snackCount, snackTarget, foresight, isKeeper, spoil, SNACKS, rawOf, rawKinds, addRaw, takeRaw, heldForDish } from './larder.js';
 import { addNews, pruneNews, knowCanoe, knownCanoes, GOSSIP_RANGE, GOSSIP_CD } from './gossip.js';
 import { nudge, regard } from './ties.js';
-import { ate as hadFood, lack, worth, strike, ends, wishOf, cropAt, isCrop, CROPS } from './trade.js';
+import { ate as hadFood, lack, worth, strike, ends, wishOf, cropAt, isCrop, CROPS, HUSBANDRY, nextCrop, ROAD_GOODS, useWorth, baseWorth, isWild, isCraft, craftWorth, craftStyles, CRAFT } from './trade.js';
+import { makeTraders, TRADE } from './traders.js';
 import { Conversation, DEFAULT_TALK, parted } from './convo.js';
-import { stepMusic, instrumentOf, tunesOf, dancePose, craftsKnown, giveInstrument, practiceWant, stepPractice } from './music-sim.js';
+import { stepMusic, instrumentOf, tunesOf, dancePose, craftsKnown, giveInstrument, practiceWant, stepPractice, roadTune, bringTune, SET_GAP, tuneWeight, phraseCount } from './music-sim.js';
 import { CRAFTS, addGoods, takeGoods, goodsOf, missingFor } from './making.js';
 import { DRUMS } from './arrange.js';
 import { FELLOWSHIPS, FELLOWSHIP_IDS, REACH as FELLOW_REACH, meetingOpen, occasion, memberHash, isMember } from './fellowships.js';
@@ -142,6 +143,7 @@ const STACK_BIAS  = 1.6;     // pull toward stacking wood we already carry
 const TEND_RADIUS = 5;       // a fire counts as attended if anyone is within this
 const FIRE_SHY_R  = 1.15;    // the no-step core of a lit fire — nobody walks through the blaze
 const FIRE_SHY_REACH = 1.8;  // distance at which a walker starts steering around the flame
+const FIRE_MIN_APART = 6;    // how near another a player may lay a fire
 const FIRE_CLEAR  = 5.0;     // min clearance a hearth keeps from a trunk (trees are flammable; 5 clears redwood canopies)
 const MAX_FIRE_SPREAD = 1.1; // max height range over a 2.5m ring before ground's too steep to lay a hearth
 const UNATTENDED_GRACE = 12; // seconds a lit fire may burn with nobody near before it's damped out
@@ -311,7 +313,11 @@ const HUT_INDOORS   = 1.35;  // a whole roof draws harder than a tree or a lean-
 const GROW_RATE  = 0.003;    // crop growth per second at full care in daylight (~a day to ripen)
 const CARE_FADE  = 0.0033;   // how fast a field's upkeep wears off (~five minutes from fully kept to neglected)
 const HOE_RATE   = 0.02;     // upkeep added per second of hoeing
-const HARVEST    = 8;        // food a ripe field puts in the house's store
+const HARVEST    = 16;       // food a ripe field puts in the house's store (its crop and soil scale it)
+const SOW_RATE   = 0.05;     // of a field's sowing done per second (~20 s)
+const STAKE_RATE = 0.015;    // of a field's poles or sticks set per second (~a minute and more)
+const STAKE_LOGS = 3;        // poles for a field come out of the woodpile, as this many logs' worth
+const SHOOTS     = 0.24;     // how far a climbing crop gets with nothing to climb
 const FARM_BIAS  = 0.55;     // pull toward the day's work in the field
 const WORK_T     = [25, 45]; // seconds one spell of field work lasts
 const REAP_T     = 30;       // seconds to bring a ripe field in
@@ -382,7 +388,6 @@ const COOK_KINDS = RAW_KINDS;              // (recipes.js — one list of what m
 export const needsCooking = (kind) => COOK_KINDS.has(kind);
 const COOK_TIME  = 22;      // seconds a potful takes to become edible
 const COOK_BIAS  = 1.0;     // pull toward taking raw food to the pot
-const POT_CAP    = 12;      // raw units a pot holds at once
 const STEW_SATIETY  = 0.34; // hunger one cooked portion from the pot relieves (a hearty meal)
 const POT_EAT_RANGE = 3.5;  // how close you must be to the pot to eat from it
 const TEA_WARMTH    = 0.3;  // chill a cup of chamomile tea takes off (recipes.js)
@@ -395,6 +400,7 @@ const SUP_BIAS      = 1.6;  // pull, when hungry & empty-handed, toward a pot wi
 // a stew's name, by its main ingredient (for the look-at description)
 const DISH_NAME = { ...DISHES, food: 'stew' };   // (ingredients.js `dish`)
 export const dishName = (kind) => RECIPES[kind] ? kind : recipeFor(kind) || DISH_NAME[kind] || `${kind} stew`;   // a recipe's name, or an ingredient's dish
+const potName = p => p.mine && !p.recipe ? `boiled ${p.kind}` : dishName(potDish(p));   // (the player, with no recipe: just boiled)
 
 // gossip lives in js/gossip.js (addNews / pruneNews / newsFor), told a turn at a time by js/convo.js — see docs/gossip.md
 const STARGAZER_CHANCE = 0.25;   // a quarter of folk read the stars (form & spread omens)
@@ -420,6 +426,19 @@ const MARKET_BIAS   = 1.0;   // pull of the trip, × that want
 const MARKET_DIST   = DIST_COST * 0.06;   // a planned journey across the Lea: the walk barely counts
 const MARKET_REACH  = 400;   // about half a day's walk: a village nearer than that is a neighbour
 const MARKET_GO     = 2.0;   // once set out, the journey holds — only a real need breaks it
+const SHELF_DT      = 20;    // how often a house looks to its shelf (s)
+const SHELF_HUNGER  = 0.85;  // ...only when someone there's really hungry: it's what they've to trade with
+const SHELF_TAKE    = 2;     // how much it brings down when the hearth's empty
+const SHELF_KEEP    = 8;     // ...and a house holds back this much from the pot: seed for the next swap
+const ROAD_SONGS = ["the boatman's song", 'the little star', 'the old cup', 'the washerwoman', "the rider's song"];   // what's sung on the road: the folk's own, and the cellar's tavern songs. A trader carries three
+const TRADER_CHAT_GAP = 0.12; // days between a trader's chats on the road
+const SALT_STRETCH  = 1.35;  // a harvest with salt on it, against one without
+const BLADE_RATE    = 1.2;   // a field dug with an iron-shod spade comes on this much quicker
+const BLADE_LIFE    = 10;    // harvests before it's worn out
+const CRAFT_EVENING = 78;    // seconds of evening in a day, in which a household gets through CRAFT.RATE of a piece
+const TRADER_FAINT = 0.8, TRADER_FAINT_PACE = 0.7;
+const LISTEN_GO     = 1.2;   // the pull of a musician playing at the well, while you're near (traders.js busk)
+const CRY_STAND     = 4;     // how far from a trader you stand while you wait your turn
 const MARKET_DAYS   = 0.6;   // …for this long, then it's given up
 const MARKET_HAVE   = 2;     // carrying this many crops already, they stay home
 const MARKET_RETRY  = 0.25;  // days before calling again at a door that turned them away
@@ -520,9 +539,11 @@ const CANOE_IDLE   = 1.5;       // days unworked before a half-made canoe is giv
 const COLLECT_BIAS  = 0.5;   // mild curiosity pull toward a nearby valuable
 const COLLECT_RANGE = 14;    // we won't trek far out of our way for a trinket
 const TRINKET_MAX   = 8;     // how many a person will carry
-const FLOWER_RANGE  = 35;    // how far an elf will walk to pick a flower
+const FLOWER_RANGE  = 35;    // how far a woman will walk to pick a flower
 const FLOWER_BIAS   = 1.4;   // strong enough to win from ~35 units at avg beauty
 const FLOWER_MAX    = 7;     // flowers needed to complete a crown
+const NO_FLOWERS    = [];
+const CROWN_DAYS    = 2;     // how long a crown lasts before it wilts away (she may then make another)
 
 const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
 
@@ -624,6 +645,7 @@ export class Campfire {
     this.foodStore = 0;      // the camp food cache (the basket by the hearth)
     // the cooking pot: raw units simmering, cooked portions waiting, ingredient, simmer seconds
     this.pot = { raw: 0, ready: 0, kind: null, cook: 0 };
+    this.hands = false;      // the player is sat at this fire (main.js; docs/cooking.md)
     this.view = null;        // CampfireView, set by the injected factory
     this.group = null;       // the view's THREE.Group (scene handle), if a view exists
   }
@@ -646,6 +668,15 @@ export class Campfire {
     return ev > WOOD_NIGHT_AT && night < 0.5 ? WOOD_CAP : WOOD_LOW; }
   needsWood(){ return this.woodpile < this.woodWant(); }
   addWood(logs){ this.woodpile = Math.min(WOOD_CAP, this.woodpile + logs); }
+  // is anyone minding it? One of the folk near, a pot with food in it (simmering or ready), or the
+  // player: at it, or near it (world.threat is where they stand)
+  minded(folkNear){
+    const you = this.world.threat;
+    return folkNear || (this.pot.raw + this.pot.ready) > 0 || this.hands || (!!you && Math.hypot(you.x - this.x, you.z - this.z) < TEND_RADIUS);
+  }
+  // (the woodpile catches again when the flame's low, so a fire only stays out with no pile)
+  douse(){ const logs = this.woodpile | 0; this.woodpile = 0; this.fuel = 0; return logs; }   // the player: put out, its logs taken back
+  rekindle(){ this.fuel = Math.max(this.fuel, 0.25); }   // a log on cold ashes: it catches, small
   extinguish(){ this.fuel = 0; }   // damped out; the view hides the flame & kills the light next frame
 
   // shared food cache at the hearth (the view mirrors it into the basket each frame)
@@ -668,6 +699,7 @@ export class Campfire {
   // will this go in the pot? An empty pot takes anything; a dish under way only its own base
   accepts(kind){
     const p = this.pot;
+    if (p.mine) return false;                       // the player's: only they add to it (recipes.js potAct)
     if (p.raw + p.ready >= POT_CAP) return false;
     if (p.raw + p.ready === 0) return true;
     const r = RECIPES[p.recipe];
@@ -682,16 +714,17 @@ export class Campfire {
     if (this.pot.ready <= 0) return 0;
     const q = this.pot.readyQ ?? 1;
     this.pot.ready -= 1;
-    if (this.pot.raw <= 0 && this.pot.ready <= 0){ this.pot.kind = null; this.pot.recipe = null; this.pot.readyQ = null; }
+    if (this.pot.raw <= 0 && this.pot.ready <= 0){ this.pot.kind = null; this.pot.recipe = null; this.pot.readyQ = null; this.pot.mine = false; this.pot.helper = false; }
     return Math.max(0.05, q);
   }
-  potReady(){ return this.pot.ready > 0; }
+  // ready for the folk to sup from: not while the player's still sat at their own pot, or it'd be gone before they'd ladled any
+  potReady(){ return this.pot.ready > 0 && !(this.pot.mine && this.hands); }
   // fuller descriptions for the inspect dialog (E on the fire) — read live each call
   potReport(){
     const p = this.pot;
     if (p.raw + p.ready <= 0)
       return "The pot hangs empty over the fire, waiting on something worth cooking.";
-    const dish = cap1(dishName(potDish(p)));
+    const dish = cap1(potName(p));
     if (p.ready > 0){
       let s = `${dish}, cooked and ready. There's enough ladled here to feed ${p.ready} ${p.ready === 1 ? 'soul' : 'souls'}.`;
       if (p.raw > 0) s += ` Another ${p.raw} ${p.raw === 1 ? 'portion is' : 'portions are'} still simmering.`;
@@ -724,7 +757,7 @@ export class Campfire {
   potLabel(){
     const p = this.pot;
     if (p.raw + p.ready <= 0) return null;
-    const dish = cap1(dishName(potDish(p)));
+    const dish = cap1(potName(p));
     if (p.ready > 0)                                  // cooked and being eaten
       return { title: 'Cooking pot', desc: `${dish} — ready to eat${p.raw > 0 ? ', more still simmering' : ''}.` };
     const prog = p.cook / COOK_TIME;                  // still simmering
@@ -1090,6 +1123,8 @@ class House {
     this.field = null;             // its Field
     this.spare = {};               // crops put by for trading, by kind (trade.js)
     this.ledger = [];              // its recent trades at the door, newest last
+    this.goods = {};               // what it's had off the traders and not used up yet: salt, a blade (docs/economy.md)
+    this.bladeWear = 0;            // harvests its iron blade has dug
     this.lastUsed = world.time;
     // the doorstep: the first open ground straight out from the door
     this.mouth = null;
@@ -1152,7 +1187,26 @@ class Field {
     this.x = f.x; this.z = f.z;
     this.growth = 0.2 + Math.random() * 0.6;     // 0 sown .. 1 ripe
     this.care = 0.5;                             // 0..1 how well kept, lately
-    this.crop = cropAt(f.x, f.z);                // what grows here (trade.js)
+    this.crop = cropAt(f.x, f.z);                // what grows here (trade.js); after each harvest, the next in the rotation
+    this.stored = this.crop;                     // what the house's store holds: the last crop brought in
+    this.turn = 0;                               // harvests so far
+    this.soil = 0.5 + Math.random() * 0.25;      // 0..1 how much heart the ground has: crops take it, pulses give it back
+    this.sown = true;
+    this.sowing = 0;
+    this.poles = 0;                              // what of its logs' worth has been taken from the woodpile for poles
+    // a climbing crop is mostly up its poles already; some have got no further than the shoots
+    this.supports = 1;
+    if (this.needs && Math.random() < 0.3){ this.supports = 0; this.growth = Math.min(this.growth, SHOOTS); }
+  }
+  get kept(){ return HUSBANDRY[this.crop]; }
+  get needs(){ return HUSBANDRY[this.crop].support; }
+  // can this house's woodpile (or what's already been taken from it) give the next pole?
+  get hasPoles(){ return this.supports * STAKE_LOGS < this.poles || (this.house.fire?.woodpile ?? 0) >= 1; }
+  // what the field wants done next: 'sow', 'stake' (poles or sticks, when there's wood), or 'hoe'
+  get job(){
+    if (!this.sown) return 'sow';
+    if (this.needs && this.supports < 1 && this.hasPoles) return 'stake';
+    return 'hoe';
   }
   // somewhere along the rows to stand and work
   workSpot(){
@@ -1164,14 +1218,43 @@ class Field {
   tick(dt){
     const w = this.world;
     this.care = Math.max(0, this.care - CARE_FADE * dt);
-    if (!this.ripe) this.growth = Math.min(1, this.growth + GROW_RATE * dt * (0.25 + 0.75 * (w.day ?? 1)) * (0.3 + 0.7 * this.care));
+    if (!this.sown || this.ripe) return;
+    const cap = this.needs && this.supports < 1 ? SHOOTS : 1;   // beans won't go on without something to climb
+    if (this.growth >= cap) return;
+    const rate = this.kept.rate * (0.55 + 0.9 * this.soil) * (this.house.goods.iron ? BLADE_RATE : 1);
+    this.growth = Math.min(cap, this.growth + GROW_RATE * rate * dt * (0.25 + 0.75 * (w.day ?? 1)) * (0.3 + 0.7 * this.care));
   }
   hoe(dt){ this.care = Math.min(1, this.care + HOE_RATE * dt); }
+  // a stretch of whatever the field wants next
+  work(dt){
+    const job = this.job;
+    if (job === 'sow'){
+      this.sowing += SOW_RATE * dt;
+      if (this.sowing >= 1){ this.sown = true; this.sowing = 0; this.care = Math.max(this.care, 0.5); }
+    } else if (job === 'stake'){
+      // each log's worth of poles comes off the woodpile as it's needed
+      if (this.supports * STAKE_LOGS >= this.poles && this.house.fire?.woodpile >= 1){ this.house.fire.woodpile -= 1; this.poles += 1; }
+      this.supports = Math.min(1, Math.min(this.supports + STAKE_RATE * dt, this.poles / STAKE_LOGS));
+    } else this.hoe(dt);
+  }
   reap(){
-    this.growth = 0; this.care = Math.max(this.care, 0.4);
-    this.house.fire?.addFood(HARVEST);
+    const k = this.kept;
+    // salt on the harvest: what's salted down doesn't spoil, so more of it reaches the table
+    const g = this.house.goods, salted = g.salt > 0;
+    if (salted) g.salt--;
+    this.house.fire?.addFood(Math.round(HARVEST * k.yield * (0.7 + 0.6 * this.soil) * (salted ? SALT_STRETCH : 1)));
+    if (g.iron && ++this.house.bladeWear >= BLADE_LIFE){ g.iron = 0; this.house.bladeWear = 0; }   // worn down to the socket
+    this.stored = this.crop;
     const sp = this.house.spare;                 // and some put by, to trade
     sp[this.crop] = Math.min(SPARE_CAP, (sp[this.crop] || 0) + CROP_SPARE);
+    this.soil = Math.max(0.1, Math.min(1, this.soil + k.soil));
+    // the poles come down and go back on the stack; the ground is left to be dug and sown with what's next
+    if (k.support) this.house.fire?.addWood?.(Math.round(this.poles * 0.6));
+    this.poles = 0; this.supports = 1;
+    this.turn++;
+    this.crop = nextCrop(this.crop, this.f.x, this.f.z, this.turn);
+    if (this.needs) this.supports = 0;
+    this.growth = 0; this.sown = false; this.sowing = 0; this.care = Math.max(this.care, 0.4);
   }
 }
 
@@ -1293,8 +1376,8 @@ class Brain {
     npc.pack = 2; npc.eatCd = 0;   // a couple of rations to start; gather/eat are decoupled
     npc.raw = 0; npc.rawKind = null; npc.rawBag = {};   // raw, must-be-cooked ingredients (separate from edible rations; larder.js addRaw)
     npc.trinkets = 0;              // valuables carried (shells/stones/amber/quartz) — see choose()
-    npc.flowerInventory = [];      // flower species IDs gathered toward a crown (female elves only)
-    npc.hasCrown = false;          // crown made this session — stops further gathering
+    npc.flowerInventory = [];      // flower species IDs gathered toward a crown (grown human women only)
+    npc.hasCrown = false;          // wearing one: stops further gathering till it wilts (crownUntil, in days)
     // pathfinding: A* waypoints toward the goal (see followPath); reachability is
     // judged by actual progress, and goals we truly can't reach get blacklisted.
     this.path = null; this.pathI = 0; this.pgx = 0; this.pgz = 0; this.repathT = 0;
@@ -1362,6 +1445,7 @@ class Brain {
     // 1a. what's carried goes off in time (larder.js) — berries soonest
     if ((this._spoilT = (this._spoilT || 0) - dt) <= 0){
       this._spoilT = 5;
+      if (npc.hasCrown && w.time >= npc.crownUntil){ npc.hasCrown = false; npc.crown = null; if (w._onCrownWilted) w._onCrownWilted(npc); }
       const lost = spoil(npc, w.time);
       if (lost){ npc._spoiled = { n: lost, t: w.time }; if (w.potStats) w.potStats.spoiled = (w.potStats.spoiled || 0) + lost; }
     }
@@ -1388,7 +1472,7 @@ class Brain {
         const meal = firstPlan(npc, 'meal');               // a shared meal is eaten together, not only by the hungry
         if (!tea && n.food <= EAT_AT && !(meal && meal.fire === f && n.food > 0.15)) continue;
         let q;
-        if (f.pot.ready > 0 && Math.hypot(f.x - npc.x, f.z - npc.z) < POT_EAT_RANGE && (q = f.takeStew()) > 0){
+        if (f.potReady() && Math.hypot(f.x - npc.x, f.z - npc.z) < POT_EAT_RANGE && (q = f.takeStew()) > 0){
           if (tea) n.warmth = clamp01(n.warmth - TEA_WARMTH * (0.5 + 0.5 * q));
           else n.food = clamp01(n.food - STEW_SATIETY * (0.55 + 0.45 * q));   // a botched pot fills you less
           ate = true;
@@ -1623,6 +1707,9 @@ class Brain {
       for (const f of this.fires){ if (!f.lit) continue; const d = Math.hypot(f.x - npc.x, f.z - npc.z); if (d < hd){ hd = d; hearth = f; } }
       if (!hearth && camp?.lit && Math.hypot(camp.x - npc.x, camp.z - npc.z) < STRANDED) hearth = camp;
     }
+    // what they're about (plans.js): a rival has to beat it by their bar
+    const intending = !INTENT.OFF, I = intending ? npc.intention : null;
+    let held = null, heldScore = -Infinity, back = null, backScore = -Infinity;
     const consider = (kind, x, z, ad, ref, opts = {}) => {
       const dist = Math.hypot(x - npc.x, z - npc.z);
       if (dist > (opts.reach || 70)) return;
@@ -1641,8 +1728,15 @@ class Brain {
       if (hearth && kind !== 'fire' && opts.leash !== false && (Math.hypot(x - hearth.x, z - hearth.z) > LIGHT_R
           || (DAY_WORK.has(kind) && !(kind === 'chop' && hearth.woodpile <= 0))))
         s -= DARK_COST * w.night * (n.food > 0.9 ? 0.3 : 1);
-      if (s > bestScore){ bestScore = s; best = { kind, x, z, ref, ...opts,
-        satisfy: opts.satisfy || (ref && ref.satisfy ? (a, dt) => ref.satisfy(a, dt) : () => {}) }; }
+      const pu = intending ? pursuitOf(kind) : null;
+      const pull = intending && npc.suspended?.length ? resumePull(npc, pu, w.time) : 0;
+      const mine = I && pu === I.what && s > heldScore, again = pull > 0 && s + pull > backScore;
+      if (s > bestScore || mine || again){
+        const c = { kind, x, z, ref, ...opts, satisfy: opts.satisfy || (ref && ref.satisfy ? (a, dt) => ref.satisfy(a, dt) : () => {}) };
+        if (s > bestScore){ bestScore = s; best = c; }
+        if (mine){ heldScore = s; held = c; }
+        if (again){ backScore = s + pull; back = c; }
+      }
     };
 
     for (const fire of this.fires){
@@ -1825,9 +1919,21 @@ class Brain {
     if (pack === 0 && n.food > 0.4 && storeFire)
       consider('getfood', storeFire.x, storeFire.z, {}, storeFire, { tol: 1.6, bias: GETFOOD_BIAS * n.food * p.food,
         satisfy: (a) => { const got = storeFire.takeFood((a.packMax || PACK_MAX) - (a.pack || 0));
-          if (got > 0) addFood(a, storeFire.home?.field?.crop || 'food', got, w.time); this.target = null; } });   // a household's store is its own crop
+          if (got > 0) addFood(a, storeFire.home?.field?.stored || 'food', got, w.time); this.target = null; } });   // a household's store is its own crop
     // what our plans want gathered (a dish's base and extras, a shared plan's part)
     const wants = wantedKinds(npc, w.time);
+    // a trip for food (plans.js): carry on till we've what we came for, or the place stops paying
+    const tripSecs = 600 * (w.time - (this._trip?.last ?? w.time));
+    if (this._trip && !this._asking){
+      const T = this._trip, end = tripCheck(T, tripSecs); T.last = w.time;
+      if (end){
+        npc._usualFood = learnedRate(T, w.time, 600 * (w.time - T.t0));
+        if (end === 'spent'){ this._spent = { x: npc.x, z: npc.z, until: w.time + TRIP.SPENT_DAYS }; this.tripStat('spent'); this._tripEnded = 'spent'; }
+        else if (end === 'filled'){ this.tripStat('filled'); this._tripEnded = 'filled'; }
+        this._trip = null;
+      }
+    }
+    const onTrip = this._trip, spent = this._spent && w.time < this._spent.until ? this._spent : null;
     // gather to keep stocked. Raw-edible foods go in the eating pack; things that
     // must be cooked go in a separate raw bag, bound for the pot.
     if (pack < cap || raw < rawCap)
@@ -1840,9 +1946,11 @@ class Brain {
         // keep a stock of snacks on hand — the more foresight, the more, and the keeping kind
         const snack = SNACKS.includes(pl.kind) ? Math.max(0, 1 - snackCount(npc) / snackTarget(npc)) * (isKeeper(pl.kind) ? foresight(npc) : 0.6) : 0;
         consider('food', pl.x, pl.z, {}, pl, { tol: 1.4, reach: wants.has(pl.kind) ? 150 : 70,
-          bias: FORAGE_BIAS * (deficit * p.food * (1 + PROVISION * (w.night < 0.5 ? ev : 0)) + SNACK_BIAS * snack) + PLAN_BIAS * (wants.get(pl.kind) || 0),
+          bias: FORAGE_BIAS * (deficit * p.food * (1 + PROVISION * (w.night < 0.5 ? ev : 0)) + SNACK_BIAS * snack) + PLAN_BIAS * (wants.get(pl.kind) || 0)
+            + (onTrip ? TRIP.HOLD : 0) - (spent && Math.hypot(pl.x - spent.x, pl.z - spent.z) < TRIP.SPENT_R ? TRIP.SPENT_COST : 0),
           satisfy: (a) => {                           // pick it: the fruit vanishes & regrows later
             if (pl.ripe){ const y = pl.collect(); if (y > 0){
+              if (this._trip){ this._trip.got += y; this._trip.gained += y; }
               if (needsCooking(pl.kind)) addRaw(a, pl.kind, Math.min(rawCap - (a.raw || 0), y));
               else addFood(a, pl.kind, Math.min((a.packMax || PACK_MAX) - (a.pack || 0), y), w.time);
               // now they *know* this patch — a food tip to pass on (it regrows)
@@ -1951,7 +2059,7 @@ class Brain {
     }
     // --- practice (music-sim.js; docs/music.md "Practice"): by day, someone with a weak tune
     //     goes off to a place of their own to work at it, unless something presses ---
-    if (w.night < 0.35 && !npc._hutIn && !npc._indoors && w.rain < 0.3 && w.time >= (npc._practiceRest || 0)){
+    if (!npc.trader && w.night < 0.35 && !npc._hutIn && !npc._indoors && w.rain < 0.3 && w.time >= (npc._practiceRest || 0)){   // (a trader keeps theirs up on the road)
       const want = practiceWant(npc, w.time), spot = want && this.practiceSpot(npc, camp);
       if (spot) consider('practice', spot.x, spot.z, {}, spot, { tol: 1.5, sit: true, reach: 140, leash: false, distCost: CHORE_DIST, bias: PRACTICE_BIAS * want.pull * clamp01(PRACTICE_EASE - surv) * (cur?.kind === 'practice' ? PRACTICE_KEEP : 1),
         satisfy: (a, dt2) => { a.actionLabel = 'practice'; if (stepPractice(a, w, dt2, want.id)) this.target = null; } });
@@ -2032,8 +2140,9 @@ class Brain {
     //     door. Set out only in the morning, so as to get there by day; once on
     //     the way, it's a commitment (this._market) and the berries by the path
     //     don't turn us back. A door we've traded at before draws us more. ---
-    if (this._market && (this._market.until < w.time || !this.tradeGoods(npc).length)) this._market = null;
-    if (!npc.home && w.houses && w.houses.length && w.rain < RAIN_SEEK){
+    if (this._market && (this._market.until < w.time || (!npc.trader && !this.tradeGoods(npc).length))) this._market = null;
+    if (npc.trader && !this._market){ /* a trader's round is their own (js/traders.js) */ }
+    else if (!npc.home && w.houses && w.houses.length && w.rain < RAIN_SEEK){
       const go = this._market;
       if (go){
         const m = go.meet && !go.meet._indoors ? go.meet : go.house.mouth;   // the door, or the one we've gone to find
@@ -2066,6 +2175,37 @@ class Brain {
           }
         }
       }
+    }
+
+    // --- occupations (plans.js): the post (js/mailboxes.js), a trader's round (js/traders.js), a day's round.
+    //     A job is a commitment like the market: only a real need breaks it ---
+    const JOB_YIELD = 0.75;    // a day's round gives way to a need past this, wholly by the time it's desperate
+    const doJob = occ => {
+      const job = occ?.jobs.get(npc);
+      if (job) consider(occ.name, job.x, job.z, {}, null, { tol: occ.tol?.(job) ?? 1.8, reach: 1e9, distCost: MARKET_DIST, leash: false, bias: occ.bias * (occ.yields ? 1 - Math.min(1, Math.max(0, (surv - JOB_YIELD) / (1 - JOB_YIELD))) : 1), sit: !!job.sit, committed: true,
+        satisfy: (a, dt) => occ.work(a, job, w.time, dt, this) });
+    };
+    doJob(w.post); doJob(w.traders);
+    if (w.rounds) for (const r of w.rounds) doJob(r);
+    // a trader's crying their wares at the well, and we've something to deal with: over we go, and wait our turn
+    const cg = npc._cryGo;
+    if (cg){
+      const c = cg.t.crying;
+      if (!c || c.visit !== cg.visit || w.night > 0.5) npc._cryGo = null;
+      else { const ang = w.npcs.indexOf(npc) * 2.4, tr = cg.t.who;
+        consider('cry', tr.x + Math.cos(ang) * CRY_STAND, tr.z + Math.sin(ang) * CRY_STAND, {}, cg.t, { tol: 2.5, reach: 1e9, distCost: MARKET_DIST, leash: false, bias: MARKET_GO,
+          satisfy: (a) => { if (tr.convo || tr.talking){ a.actionLabel = 'wait'; return; }
+            a._cryGo = null; this.target = null; w.traders.stats.cry.came++;
+            w.convos.push(Conversation.haggle(w, tr, a, a.home || null, true)); w.market.talks = (w.market.talks || 0) + 1; } }); }
+    }
+    // a musician playing at the well (agents.js busk): over to stand and listen, while the set lasts
+    const lg = npc._listenGo;
+    if (lg){
+      const c = lg.t.crying;
+      if (!c || c.visit !== lg.visit || w.night > 0.5 || w.time > lg.until) npc._listenGo = null;
+      else { const ang = w.npcs.indexOf(npc) * 2.4, mu = lg.t.who;
+        consider('listen', mu.x + Math.cos(ang) * CRY_STAND * 1.5, mu.z + Math.sin(ang) * CRY_STAND * 1.5, {}, lg.t, { tol: 2.5, reach: 1e9, distCost: MARKET_DIST, leash: false, bias: LISTEN_GO,
+          satisfy: (a) => { a.actionLabel = 'listen'; } }); }
     }
 
     // demand-sharing: hungry and short of food, ask a well-stocked neighbour for some.
@@ -2118,12 +2258,15 @@ class Brain {
         satisfy: (a) => { if (v.ripe){ const y = v.collect(); if (y > 0){ a.trinkets = (a.trinkets || 0) + y; a.trinketKind = v.kind; } } this.target = null; } });
     }
 
-    // flower crown: female elves gather wildflowers toward a custom crown.
+    // flower crown: grown human women gather wildflowers toward a custom crown.
     // Gated by beautyGate so survival needs come first, scaled by the beauty trait.
-    if (npc.gender === 'female' && npc.race === 'elf' && !npc.hasCrown &&
+    if (npc.gender === 'female' && npc.race === 'human' && npc.role !== 'child' && !npc.hasCrown &&
         (npc.flowerInventory?.length || 0) < FLOWER_MAX){
       let fl = null, fld = FLOWER_RANGE;
-      for (const o of (w.flowers || [])){ if (!o.alive) continue; const d = Math.hypot(o.x - npc.x, o.z - npc.z); if (d < fld){ fld = d; fl = o; } }
+      // (from the grid: a third of the folk ask this, and a big world grows thousands of flowers)
+      const cx = Math.floor(npc.x / FLOWER_RANGE), cz = Math.floor(npc.z / FLOWER_RANGE);
+      for (let i = cx - 1; i <= cx + 1; i++) for (let j = cz - 1; j <= cz + 1; j++)
+        for (const o of (w._flowerGrid.get(`${i},${j}`) || NO_FLOWERS)){ if (!o.alive) continue; const d = Math.hypot(o.x - npc.x, o.z - npc.z); if (d < fld){ fld = d; fl = o; } }
       if (fl) consider('gather-flower', fl.x, fl.z, {}, fl, { tol: 1.3, bias: FLOWER_BIAS * p.beauty * clamp01(1 - 0.5 * surv),
         satisfy: (a) => {
           if (fl.alive){
@@ -2131,9 +2274,12 @@ class Brain {
             a.flowerInventory = a.flowerInventory || [];
             a.flowerInventory.push(fl.speciesId);
             if (a.flowerInventory.length >= FLOWER_MAX){
-              if (w._onCrownMade) w._onCrownMade(a, [...a.flowerInventory]);
+              const made = a.flowerInventory;
               a.flowerInventory = [];
               a.hasCrown = true;
+              a.crownUntil = w.time + CROWN_DAYS;
+              a.crown = { t: w.time, x: fl.x, z: fl.z };   // when, and where she picked the last of them: what she says if asked (convo.js crownChain)
+              if (w._onCrownMade) w._onCrownMade(a, made);
             }
           }
           this.target = null;
@@ -2300,12 +2446,12 @@ class Brain {
           const spot = spell ? spell.spot : (this._farmSpot && this._farmSpot.f === fd ? this._farmSpot : (this._farmSpot = { f: fd, ...fd.workSpot() }));
           const reap = fd.ripe;
           consider(reap ? 'reap' : 'farm', spot.x, spot.z, {}, fd, { tol: 0.8, reach: 300, distCost: CHORE_DIST,
-            bias: (spell ? FARM_BIAS * 1.5 : FARM_BIAS * due * (reap ? 1.5 : 1 - 0.5 * fd.care)) * light,
+            bias: (spell ? FARM_BIAS * 1.5 : FARM_BIAS * due * (reap ? 1.5 : fd.job !== 'hoe' ? 1.25 : 1 - 0.5 * fd.care)) * light,
             satisfy: (a, dt2) => {
               if (!this._spell || this._spell.f !== fd)
                 this._spell = { f: fd, spot, left: reap ? REAP_T : WORK_T[0] + Math.random() * (WORK_T[1] - WORK_T[0]) };
               a.chopping = true;                         // the hoe's (or the sickle's) rhythm
-              if (!reap) fd.hoe(dt2);
+              if (!reap) fd.work(dt2);
               this._spell.left -= dt2;
               if (this._spell.left <= 0){
                 if (reap && fd.ripe) fd.reap();
@@ -2482,6 +2628,16 @@ class Brain {
         { tol: 1.7, satisfy: (a, dt) => { a.needs.company = clamp01(a.needs.company - (kin ? 0.16 : 0.10) * dt); } });
     }
 
+    if (intending) best = this.settleIntention(best, bestScore, held, heldScore, back, backScore, homeward);
+    if (!this._asking && INTENT.TRIPS){
+      if (best?.kind === 'food' && !this._trip) this._trip = startTrip(p, npc, npc.pack, npc.packMax || PACK_MAX, w.time, npc._usualFood);
+      else if (this._trip && best && pursuitOf(best.kind) !== 'eat'){
+        npc._usualFood = learnedRate(this._trip, w.time, 600 * (w.time - this._trip.t0));
+        this.tripStat('left');
+        this._trip = null;
+      }
+    }
+
     // release a seat we're abandoning
     if (this.target && this.target.ref instanceof Campfire &&
         (!best || best.ref !== this.target.ref)) this.target.ref.release(npc);
@@ -2503,6 +2659,46 @@ class Brain {
     if (best && best.kind === 'boat-fish') this._seekBoat = best.boat; else if (this._seekBoat && (!best || best.kind !== 'boat-fish')) this._seekBoat = null;
     if (best && best.kind === 'revere' && !this._pilgrim)
       this._pilgrim = { shrine: best.ref, stage: 0, dwell: 0, lap: 0, laid: false, heard: false };
+  }
+
+  tripStat(how){ const S = this.world.intentStats ||= { causes: {}, stints: {} }; (S.trips ||= { filled: 0, spent: 0, left: 0 })[how]++; }
+
+  // Hold to what they're about unless a rival clears the bar; if it changes, say why and keep what was
+  // interrupted in mind (plans.js).
+  settleIntention(best, bestScore, held, heldScore, back, backScore, homeward){
+    const npc = this.npc, w = this.world, n = npc.needs, I = npc.intention;
+    let pu = best ? pursuitOf(best.kind) : null;
+    if (I && pu === I.what) return best;
+    if (this._asking) return best;   // a talk asking what they'd do next (convo.js willLeave): that doesn't change their mind
+    const steady = npc.persona?.steadiness ?? 1;
+    if (I && best && held && heldScore >= ACT_MIN && !best.committed && !isCommitted(best.kind) && bestScore < heldScore + intentBar(I.what, steady, rivalNeed(pu, n), heldScore)) return held;
+    const finished = !I || !held || heldScore < ACT_MIN || !!this._tripEnded;
+    if (finished && back && backScore >= ACT_MIN && backScore >= bestScore){ best = back; bestScore = backScore; pu = pursuitOf(best.kind); }
+    const why = this._tripEnded === 'spent' ? 'spent' : this._tripEnded === 'filled' ? 'filled' : finished ? 'done' : this.whyChanged(best, homeward);
+    this._tripEnded = null;
+    if (I){
+      const S = w.intentStats ||= { causes: {}, stints: {} };
+      S.causes[why] = (S.causes[why] || 0) + 1;
+      if (why === 'drift'){ const k = `${I.what}>${pu}`; (S.drift ||= {})[k] = (S.drift[k] || 0) + 1; }
+      (S.stints[I.what] ||= []).push(w.time - I.since);
+      if (!finished) suspend(npc, I, w.time);
+    }
+    if (pu) resumed(npc, pu);
+    npc.intention = pu ? { what: pu, why, since: w.time } : null;
+    return best;
+  }
+
+  // why they broke off: 'drift' is a rival that merely scored better, which a watcher couldn't explain
+  whyChanged(best, homeward){
+    const w = this.world, n = this.npc.needs, pu = pursuitOf(best.kind);
+    if (pu === 'eat' && n.food > 0.6) return 'hunger';
+    if (pu === 'warm' && w.rain > 0.3) return 'rain';
+    if ((pu === 'warm' || pu === 'hearth') && n.warmth > 0.6) return 'cold';
+    if (pu === 'sleep' && n.rest > 0.6) return 'tired';
+    if (pu === 'hearth' && homeward > 0.3) return 'evening';
+    if ((pu === 'greet' || pu === 'hearth') && n.company > 0.6) return 'lonely';
+    if (best.kind.startsWith('plan') || ['shared', 'market', 'post', 'trade', 'cry', 'practice', 'revere'].includes(pu)) return 'planned';
+    return 'drift';
   }
 
   // ── fellowships (js/fellowships.js) ───────────────────────────────────────────
@@ -2791,7 +2987,7 @@ class Brain {
     // habitat borders don't make anyone stutter
     const p = pace(npc.x, npc.z, Math.sin(a), Math.cos(a));
     npc._pace = npc._pace == null ? p : npc._pace + (p - npc._pace) * Math.min(1, dt * 3);
-    const spd = WALK * npc._pace * dt;
+    const spd = WALK * npc._pace * (npc.trader && npc.needs.food > TRADER_FAINT ? TRADER_FAINT_PACE : 1) * dt;   // a trader out of food goes slower
     const ok = (h) => { const x = npc.x + Math.sin(h) * spd, z = npc.z + Math.cos(h) * spd;
       return walkable(x, z) && Math.hypot(x, z) < WORLD_R ? [x, z] : null; };
     let to = ok(a);
@@ -2858,7 +3054,7 @@ class Brain {
     const turnedAway = (why) => { cd.set(h, now + MARKET_RETRY); w.market.miss[why] = (w.market.miss[why] || 0) + 1; };
     const free = o => !o.sleeping && !o.convo && !o.talking;
     // who answers: the one we came out to find, someone home and awake, or someone near the door
-    let v = meet && !meet._indoors && free(meet) && Math.hypot(meet.x - a.x, meet.z - a.z) < 3 ? meet : null;
+    let v = meet && !meet._indoors && free(meet) && Math.hypot(meet.x - a.x, meet.z - a.z) < MARKET_ANSWER ? meet : null;   // (within a talk's reach, as at the door)
     if (!v) v = h.household.find(o => o._indoors === h && free(o));
     if (!v){ let vd = MARKET_ANSWER;
       for (const o of h.household){ if (o._indoors || !free(o)) continue;
@@ -2869,7 +3065,7 @@ class Brain {
         const d = Math.hypot(o.x - h.x, o.z - h.z); if (d < fd){ fd = d; f = o; } }
       if (f){ this._market = { house: h, until: Math.min(go ? go.until : now + 0.15, now + 0.15), meet: f }; return; }
     }
-    if (!v) return turnedAway('nobody');
+    if (!v) return turnedAway(meet ? 'lost them' : 'nobody');
     if (v._indoors) h.leave(v);                          // comes to the door
     cd.set(h, now + MARKET_RETRY);                       // one talk at a door, then off
     w.convos.push(Conversation.haggle(w, a, v, h));
@@ -3421,10 +3617,14 @@ export class AgentWorld {
     this.canoeBuilds = []; // canoes being made on the bank (CanoeBuild)
     this.canoeStats = { started: 0, made: 0, abandoned: 0, bark: 0, found: 0, missed: 0 };   // tallies (harness)
     this._reachAt = new Map();   // boatReachAt cache: launch point -> grounds + where to step in
-    this.flowers = [];    // wildflowers elves pick for crown-making
-    this._onCrownMade = null;  // callback(npc, flowerIds[]) when elf finishes gathering
+    this.flowers = [];    // wildflowers women pick for crown-making
+    this._flowerGrid = new Map();   // those flowers by cell, FLOWER_RANGE wide (setFlowers)
+    this._onCrownMade = null;  // callback(npc, flowerIds[]) when a woman finishes gathering
+    this._onCrownWilted = null;  // callback(npc) when her crown is spent
     this.npcs = [];       // NPCs that have brains (for pairwise company)
     this.fauna = [];      // rabbits (quarry) — roam, flee, hunted for meat
+    this.flocks = [];     // sheep, one flock to a band (js/sheep.js, docs/sheep.md)
+    this.viewer = null;   // where the player's eye is, so far flocks can sleep
     this.boats = [];      // communal canoes NPCs ferry across the water (docs/boats.md)
     this.threat = null;   // a {x,z} the fauna flee from too (the player), set per frame
     this.day = 1; this.night = 0; this.evening = 0;
@@ -3488,6 +3688,7 @@ export class AgentWorld {
   // deal trade.js strike finds, the crop the caller wants most, the bid and the
   // counter either side of the deal, and the wild food the household is short of.
   tradeTerms(a, v, h){
+    if (a.trader) return this.traderTerms(a, v, h);
     const now = this.time;
     const vCap = (v.packMax || PACK_MAX) - (v.pack || 0);
     const offers = [];
@@ -3511,6 +3712,7 @@ export class AgentWorld {
   // "Done.": the goods change hands, if they're all still there — it's been a few
   // turns of talk, and something may have been eaten. Returns whether it happened.
   tradeDone(a, v, h, d, t){
+    if (a.trader) return this.traderDone(a, v, h, d, t);
     const now = this.time, M = this.market;
     if (!d){ M.miss['no deal'] = (M.miss['no deal'] || 0) + 1; this.tradePlan(a, h, t.wish); return false; }
     const g = tradeGoods(a).find(x => x.kind === d.give);
@@ -3538,6 +3740,222 @@ export class AgentWorld {
       give: d.give, gn: d.gn, get: d.get, qn: d.qn, wish: t.wish, t: now, hops: 1 });
     return true;
   }
+  // ---- a trader's haggle (js/traders.js, docs/economy.md) ----
+  // How much use someone has for one of the road's goods: a house for salt and a blade (it's used up, or worn
+  // out, so the want comes back); a maker for wire and board. Anyone else has next to none.
+  roadGoodUse(v, h, kind){
+    if (kind === 'salt') return h ? 0.8 : 0.1;
+    if (kind === 'iron') return h && h.field && !h.goods.iron ? 0.9 : 0;
+    const crafts = craftsKnown(v); let use = 0;
+    for (const [c] of crafts) if (CRAFTS[c]?.needs.some(([m]) => m === kind)) use = 0.9;
+    return use;
+  }
+  // what one more of a kind is worth to the person at the door, whichever kind it is
+  traderWorth(v, h, kind){
+    const now = this.time;
+    if (ROAD_GOODS.has(kind)) return useWorth(v, kind, this.roadGoodUse(v, h, kind), kind === 'wire' || kind === 'board' ? goodsOf(v, kind) : h ? (h.goods[kind] || 0) : 0);
+    if (isCraft(kind)) return craftWorth(v, kind, (h?.goods[kind] || 0) + goodsOf(v, kind), h?.craft === kind);
+    if (kind === 'trinket') return worth(v, kind, v.trinkets || 0, now);
+    return worth(v, kind, stockOf(v, kind) + (h && h.spare[kind] || 0), now);
+  }
+  // put traders on the road (js/traders.js). `sites` from traderSites; `count` how many
+  startTraders({ seed, count, road, sites, keepOf, setOff = null, musicians = 0 }){
+    this.musicAt = new Map();      // place id → when a tune was last played out there (busk)
+    const keep = kind => { const it = ingredient(kind);       // pretty things, wire and board don't go off; food does
+      return !it || !(isCrop(kind) || isWild(kind)) ? 1e4 : keepOf(kind); };
+    const T = makeTraders({ seed, road, ...sites, keepOf: keep, base: baseWorth,
+      pick: () => {
+        const folk = this.npcs.filter(n => !n.home && n.name && !n.postRider && n.role !== 'child');
+        if (!folk.length) return [];
+        // loners first: they've no one to leave
+        const order = [...folk].sort((a, b) => (a.group?.kind === 'lone' ? 0 : 1) - (b.group?.kind === 'lone' ? 0 : 1));
+        return order.slice(0, count);
+      },
+      callDoor: (n, h) => {
+        const before = this.market.talks || 0, D = this.traders.stats.door;
+        n.brain.callAt(n, h);
+        D.called = (D.called || 0) + 1;
+        if ((this.market.talks || 0) === before && !n.brain._market) D.nobody = (D.nobody || 0) + 1;
+      },
+      accost: n => this.traderAccost(n),
+      cry: (n, t, c) => this.traderCry(n, t, c),
+      song: (n, on, secs, roll) => roadTune(n, this, on, secs, roll),
+      setOff,
+      // the lone musicians (docs/economy.md): one of the folk with a fife or fiddle, a loner if there is one
+      pickMusic: () => {
+        const folk = this.npcs.filter(n => !n.home && n.name && !n.postRider && !n.trader && !n.shepherding && n.role !== 'child');
+        const score = n => (n.group?.kind === 'lone' ? 0 : 2) + (instrumentOf(n) && !DRUMS.has(n.instrument) ? 0 : 1);
+        return folk.sort((a, b) => score(a) - score(b)).slice(0, musicians);
+      },
+      thirst: (id, now) => Math.min(3, now - (this.musicAt.get(id) ?? -99)),
+      busk: (n, t, c, secs) => this.busk(n, t, c, secs),
+      tuneUp: (n, roll) => {        // a fife or fiddle, whatever they had before, and a few songs off the road
+        if (!instrumentOf(n) || DRUMS.has(n.instrument)) giveInstrument(n, roll() < 0.75 ? 'tabor pipe' : 'vielle');
+        const pool = [...ROAD_SONGS];
+        for (let i = 0; i < 3; i++) bringTune(n, pool.splice(Math.floor(roll() * pool.length), 1)[0], this.time, 0.8 + roll() * 0.15);
+      },
+      feed: (n, kind, k) => {       // k 0: can it be eaten as it is? k 1: they've eaten one, as they walk
+        const it = ingredient(kind);
+        if (!it?.eat || !(isCrop(kind) || isWild(kind))) return false;
+        if (k > 0){ n.needs.food = 0; hadFood(n, kind, this.time); }
+        return true;
+      } });
+    this.traders = T;
+    return T;
+  }
+  // A trader at the well calls out what they've got. Whoever's in earshot and has something to deal with makes up
+  // their mind once (one to a household) and comes over. Returns how many are on their way, or waiting.
+  traderCry(a, t, c){
+    const road = Object.keys(t.stock).filter(k => t.stock[k] > 0 && !isCrop(k) && !isWild(k)).sort((x, y) => t.stock[y] - t.stock[x]);
+    this._emit({ type: 'say', convo: (t._cryTalk ??= { heard: true, cry: true }), move: { who: a, to: null, key: 'tr-cry', icon: 'trade', dur: 3.5, wares: (road.length ? road : Object.keys(t.stock)).slice(0, 2) } });
+    const S = this.traders.stats.cry, spoken = new Set();
+    let coming = 0;
+    for (const o of this.npcs) if (o._cryGo?.t === t && o._cryGo.visit === c.visit){ coming++; if (o.home) spoken.add(o.home); }
+    for (const o of this.npcs){
+      if (o === a || o.trader || o.role === 'child' || o.postRider || o.sleeping || o.convo || o.talking || o._indoors || o._cryGo) continue;
+      if (o._cryHeard === c.visit || Math.hypot(o.x - c.spot.x, o.z - c.spot.z) > TRADE.CRY_R) continue;
+      const h = o.home || null;
+      if (h && spoken.has(h)) continue;
+      o._cryHeard = c.visit; S.heard++;
+      if (h) spoken.add(h);
+      if (!this.traderTerms(a, o, h).deal) continue;
+      o._cryGo = { t, visit: c.visit }; coming++;
+    }
+    return coming;
+  }
+  // A musician's set at the well (traders.js, docs/economy.md "Lone musicians"). Now and then whoever's about and free
+  // comes over to listen, more readily where there's been no music lately. At the end of each tune, each household
+  // standing by may give them something to eat: likelier for a tune well played, a richer one, and in a place that
+  // hadn't heard one in a while. They take no more than their supper (TRADE.SUPPER).
+  busk(a, t, c, secs){
+    const now = this.time, T = this.traders, S = T.stats.busk, q = c.q;
+    if (!secs){ roadTune(a, this, false, 0, t.songRoll); return; }
+    const thirst = Math.min(3, now - (this.musicAt.get(q.id) ?? -99)) / 3;
+    if (now >= c.beat){
+      c.beat = now + TRADE.CRY_BEAT;
+      for (const o of this.near(c.spot.x, c.spot.z, TRADE.CRY_R, [])){
+        if (o === a || o.trader || o.postRider || o.sleeping || o.convo || o.talking || o._indoors || o._listenGo || o._cryGo || o._listened === c.visit) continue;
+        o._listened = c.visit;
+        if (t.songRoll() < 0.25 + 0.5 * thirst){ o._listenGo = { t, visit: c.visit, until: now + 0.12 }; c.coming++; S.came++; }
+      }
+    }
+    const end = roadTune(a, this, true, secs, t.songRoll, SET_GAP);
+    if (!end) return;
+    S.tunes++;
+    this.musicAt.set(q.id, now);
+    const good = end.f * (0.7 + 0.3 * Math.min(1, tuneWeight(end.id) / 100)) * (end.k / phraseCount(end.id));
+    const given = new Set();
+    for (const o of this.near(a.x, a.z, 18, [])){         // (earshot, as music-sim.js has it)
+      const h = o.home;
+      if (o === a || !h || given.has(h) || o.sleeping || o._indoors || o.role === 'child') continue;
+      given.add(h);
+      if (T.edible(t) >= TRADE.SUPPER) break;
+      if (t.songRoll() > good * (0.5 + 0.5 * thirst)) continue;
+      const k = Object.keys(h.spare).filter(k => h.spare[k] > 0 && isCrop(k)).sort((x, y) => h.spare[y] - h.spare[x])[0];
+      if (!k) continue;
+      h.spare[k]--; T.put(t, k, 1); S.fed++;
+      nudge(o, a, 0.03, 0.02);
+      this._emit({ type: 'give', from: o, to: a, item: 'food', kind: k });
+    }
+  }
+  // Walking along, a trader stops anyone of the folk with something they'd deal for: a pedlar's trade is
+  // half of it on the road. Each person once in a while, and only when there's a deal to be had.
+  traderAccost(a){
+    const now = this.time;
+    for (const o of this.near(a.x, a.z, TRADE.MEET_R, this._scratch)){
+      if (o === a || o.home || o.trader || o.convo || o.talking || o.sleeping || o._indoors) continue;
+      const cd = a._metAt || (a._metAt = new Map());
+      if ((cd.get(o) ?? -9) + TRADE.MEET_DAYS > now) continue;
+      cd.set(o, now);
+      if (!this.traderTerms(a, o, null).deal) continue;
+      this.convos.push(Conversation.haggle(this, a, o, null));
+      return true;
+    }
+    return false;
+  }
+  // What's on the table between a trader and whoever they've met: the trader's stock against the household's
+  // spare, its pretty things, and (with one of the folk) what they carry. The trader values all of it by what
+  // it should fetch elsewhere, and writes down what it's worth here. The same strike finds the deal.
+  traderTerms(a, v, h){
+    const now = this.time, T = this.traders, t = a.trader;
+    const offers = [], wants = [];
+    const vRoom = (v.packMax || PACK_MAX) - (v.pack || 0);
+    for (const kind in t.stock){
+      const have = t.stock[kind]; if (have <= 0) continue;
+      const b = this.traderWorth(v, h, kind), rawK = RAW_KINDS.has(kind);
+      T.observe(t, kind, b, now);
+      const room = ROAD_GOODS.has(kind) || isCraft(kind) ? 99 : kind === 'trinket' ? TRINKET_MAX - (v.trinkets || 0) : rawK ? PACK_MAX - (v.raw || 0) : vRoom;
+      const keep = isCrop(kind) || isWild(kind) ? TRADE.KEEP_BACK : 0;      // food for the road isn't for sale
+      const take = kind === 'iron' ? Math.min(have, 1) : Math.min(have - keep, room);
+      if (take > 0) offers.push({ kind, have: take, from: 'stock', a: T.resale(t, kind, now), b });
+    }
+    const theirs = [];
+    if (h) for (const [c, k] of Object.entries(h.spare)) if (k > 0) theirs.push({ kind: c, have: k, from: 'spare' });
+    if (h) for (const k in h.goods) if (isCraft(k) && h.goods[k] > 0) theirs.push({ kind: k, have: h.goods[k], from: 'craft' });
+    if ((v.trinkets || 0) > 0) theirs.push({ kind: 'trinket', have: v.trinkets, from: 'trinket' });
+    if (!h){ for (const g of tradeGoods(v)) if (g.kind !== 'trinket') theirs.push(g);
+      for (const k of ['hide', 'gut']) if (goodsOf(v, k) > 0) theirs.push({ kind: k, have: goodsOf(v, k), from: 'goods' }); }
+    for (const g of theirs){
+      // a piece of handiwork: what they'd lose by parting with it, not what another would add. Or they'd sell back
+      // the one thing from elsewhere they've just bought, because they own one
+      const b = isCraft(g.kind) ? craftWorth(v, g.kind, Math.max(0, (h?.goods[g.kind] || 0) + goodsOf(v, g.kind) - 1), h?.craft === g.kind) : this.traderWorth(v, h, g.kind);
+      T.observe(t, g.kind, b, now);
+      wants.push({ ...g, a: T.wanted(t, g.kind, now), b });
+    }
+    const room = T.room(t);
+    // a trader's "offers" are what they give and "wants" what they get: strike takes the trader's gain first
+    const deal = room >= 0 && offers.length && wants.length ? strike(offers, wants, 4, Math.max(1, room + 4)) : null;
+    let bidQ = deal && deal.qn, askQ = bidQ;
+    if (deal){ const e = ends(offers.find(o => o.kind === deal.give), wants.find(x => x.kind === deal.get), deal); bidQ = e.bid; askQ = e.ask; }
+    return { deal, bidQ, askQ, offers, wants,
+      want: wants.length ? wants.reduce((x, y) => y.a - y.b > x.a - x.b ? y : x).kind : null,
+      wish: null,
+      show: offers.length ? offers.reduce((x, y) => y.b > x.b ? y : x).kind : null };
+  }
+  // "Done.": the trader's stock goes to the buyer, and theirs into the trader's pack
+  traderDone(a, v, h, d, t){
+    const T = this.traders, tr = a.trader, now = this.time;
+    if (!d){ const why = !t.wants.length ? 'nothing to buy' : !t.offers.length ? 'nothing to sell' : 'no swap both gain from';
+      T.stats.door[why] = (T.stats.door[why] || 0) + 1; return false; }
+    const g = t.wants.find(x => x.kind === d.get);
+    const has = !g ? 0 : g.from === 'craft' ? (h?.goods[d.get] || 0) : g.from === 'spare' ? (h?.spare[d.get] || 0) : g.from === 'trinket' ? (v.trinkets || 0) : g.from === 'goods' ? goodsOf(v, d.get) : g.from === 'raw' ? rawOf(v, d.get) : countOf(v, d.get);
+    if ((tr.stock[d.give] || 0) < d.gn || has < d.qn) return false;
+    // what the trader gets
+    if (g.from === 'spare') h.spare[d.get] -= d.qn;
+    else if (g.from === 'craft') h.goods[d.get] -= d.qn;
+    else if (g.from === 'trinket') v.trinkets -= d.qn;
+    else if (g.from === 'goods') takeGoods(v, d.get, d.qn);
+    else if (g.from === 'raw') takeRaw(v, d.get, d.qn);
+    else takeFood(v, d.qn, now, d.get);
+    T.put(tr, d.get, d.qn);
+    // what they give
+    tr.stock[d.give] -= d.gn; if (tr.stock[d.give] <= 0) delete tr.stock[d.give];
+    if (ROAD_GOODS.has(d.give)){
+      if (h && (d.give === 'salt' || d.give === 'iron')) h.goods[d.give] = (h.goods[d.give] || 0) + d.gn;
+      else addGoods(v, d.give, d.gn);      // (one of the folk keeps it with their materials: it's theirs to swap on)
+    }
+    else if (isCraft(d.give)){ if (h) h.goods[d.give] = (h.goods[d.give] || 0) + d.gn; else addGoods(v, d.give, d.gn); }
+    else if (d.give === 'trinket'){ v.trinkets = (v.trinkets || 0) + d.gn; }
+    else if (RAW_KINDS.has(d.give)) addRaw(v, d.give, d.gn);
+    else addFood(v, d.give, d.gn, now);
+    tr.gain += d.gainA; tr.deals++; T.stats.deals++;
+    tr.moved[d.give] = (tr.moved[d.give] || 0) + d.gn;
+    if (t.came) T.stats.cry.dealt++;
+    this._emit({ type: 'give', from: a, to: v, item: 'food', kind: d.give });
+    this._emit({ type: 'give', from: v, to: a, item: 'food', kind: d.get });
+    nudge(a, v, 0.05, 0.04); nudge(v, a, 0.05, 0.04);
+    const rec = { t: now, folk: a, villager: v, house: h, gave: d.give, gn: d.gn, got: d.get, qn: d.qn, trader: true };
+    (T.log ??= []).push(rec); if (T.log.length > 200) T.log.shift();
+    if (h){
+      h.ledger.push(rec); if (h.ledger.length > 12) h.ledger.shift();
+      a._lastTrade = rec; v._lastTrade = rec;
+      // it's news as any trade is, and what a trader saw goes where they go next
+      addNews(a, { kind: 'market', key: 'market:' + this.houses.indexOf(h), subj: a, house: h, x: h.mouth.x, z: h.mouth.z,
+        give: d.give, gn: d.gn, get: d.get, qn: d.qn, wish: null, t: now, hops: 1 });
+    }
+    return true;
+  }
+
   // one of the folk means to bring a household what it's short of (heard at the
   // door, or of a trade in talk): gathering it is now on their agenda (wantedKinds)
   tradePlan(n, h, item){
@@ -3656,6 +4074,15 @@ export class AgentWorld {
   // the new hearth stays reachable. First pass insists on tree clearance; if hemmed
   // in by trees it relaxes that, but the slope bar is NEVER bypassed. Only if no
   // gentle ground exists within reach at all does it fall back to clearSpot.
+  // can a fire be laid just here? null if so, else why not, in words (the player's fire: safeFireSpot's rules)
+  fireSpotWhy(x, z){
+    if (Math.hypot(x, z) >= WORLD_R || !walkable(x, z) || terrainType(x, z) !== 'grass') return 'Not on this ground.';
+    if (builtBand(x, z) >= 2) return 'Not in among the houses.';
+    if (ringSpread(x, z, 2.5) > MAX_FIRE_SPREAD) return 'Too steep to lay a fire.';
+    for (const t of this.trees) if (Math.hypot(x - t[0], z - t[1]) < FIRE_CLEAR) return 'Too near the trees.';
+    for (const f of this.fires) if (Math.hypot(x - f.x, z - f.z) < FIRE_MIN_APART) return 'There is a fire here already.';
+    return null;
+  }
   safeFireSpot(x, z){
     const ok = (px, pz, needClear) => {
       if (Math.hypot(px, pz) >= WORLD_R || !walkable(px, pz)) return false;
@@ -3851,7 +4278,8 @@ export class AgentWorld {
   // sheltered site nearby (the world's first hearth). refine=false lays it right
   // here, just nudged clear of trunks — for an NPC building one where it stands,
   // so the new fire is guaranteed reachable (no jumping across the water it's stuck at).
-  addCampfire(x, z, { refine = true, built = true } = {}){
+  addCampfire(x, z, { refine = true, built = true, exact = false } = {}){
+    if (exact) return this._newFire(x, z, built);   // exactly here, near another or not (the player's: fireSpotWhy said yes)
     // Don't create a second fire too close to an existing one; return the nearest instead.
     let nearest = null, nd = 28;
     for (const f of this.fires){ if (f.home) continue; const d = Math.hypot(f.x - x, f.z - z); if (d < nd){ nd = d; nearest = f; } }
@@ -3867,11 +4295,15 @@ export class AgentWorld {
     } else {
       const c = this.safeFireSpot(x, z); if (c){ [x, z] = c; }   // build clear of trees & off slopes
     }
+    return this._newFire(x, z, built);
+  }
+  _newFire(x, z, built){
     const f = new Campfire(this, x, z, { built });   // built:false => raised as a ritual (see Brain.buildRite)
     if (this.makeFireView) this.makeFireView(f);     // sets f.view + f.group
     this.fires.push(f);
     if (f.group) this.scene.add(f.group);
     this._fireLists();
+    this.onFireLaid?.(f);                            // the ground round it clears (main.js)
     return f;
   }
   // which fires each person sees (Brain.fires): the open ones, plus — for a
@@ -3886,9 +4318,11 @@ export class AgentWorld {
   // the houses, in the order households are given them.
   setHouses(S){
     this.houses = []; this.fields = [];
-    for (const p of S.places) for (const b of p.buildings){
+    this.crafts = craftStyles(S.places);
+    for (const [pi, p] of S.places.entries()) for (const b of p.buildings){
       if (!b.dwelling) continue;
       const h = new House(this, b);
+      h.craft = `craft-${pi}`; h.goods[h.craft] = 1; h.craftWork = 0;     // the village's own work: one piece to hand to start with
       // its hearth: a real Campfire (woodpile, pot, store) the household keeps,
       // but indoors — never drawn, never lit for anyone else (Brain.fires)
       const f = new Campfire(this, b.x, b.z);
@@ -3914,6 +4348,7 @@ export class AgentWorld {
     if (f.group) this.scene.remove(f.group);
     for (const n of this.npcs) if (n.brain) n.brain._blacklist.delete(f);
     this._fireLists();
+    this.onFireGone?.(f);
   }
 
   // ---- huts (docs/camp.md) ----------------------------------------------------
@@ -4176,8 +4611,17 @@ export class AgentWorld {
     this.catches[s.kind] = (this.catches[s.kind] || 0) + n;
     return n;
   }
-  setFlowers(list){ this.flowers = list || []; }
+  setFlowers(list){
+    this.flowers = list || [];
+    this._flowerGrid = new Map();
+    for (const f of this.flowers){
+      const k = `${Math.floor(f.x / FLOWER_RANGE)},${Math.floor(f.z / FLOWER_RANGE)}`;
+      const cell = this._flowerGrid.get(k);
+      if (cell) cell.push(f); else this._flowerGrid.set(k, [f]);
+    }
+  }
   setOnCrownMade(cb){ this._onCrownMade = cb || null; }
+  setOnCrownWilted(cb){ this._onCrownWilted = cb || null; }
 
   // scatter `n` rabbits across walkable land (the quarry; drawn by js/fauna.js)
   spawnFauna(n = FAUNA_N){
@@ -4200,6 +4644,12 @@ export class AgentWorld {
     npc.culture = culture;
     // individual temperament + skill (see makePersona / Brain.choose)
     const p = npc.persona = makePersona(this.rng);
+    // traits cluster along spectrums (plans.js temperament), by a stream of their own so no seeded draw moves
+    const tm = temperament(`${npc.slug}|${this._tempers = (this._tempers || 0) + 1}`);
+    p.steadiness = tm.steadiness; p.restlessness = tm.restlessness; p.temper = tm;
+    p.company    = Math.min(1.6, Math.max(0.4, p.company + 0.2 * tm.plasticity));
+    p.beauty     = Math.min(1.8, Math.max(0.3, p.beauty + 0.2 * tm.plasticity));
+    p.generosity = Math.min(1.6, Math.max(0.4, p.generosity + 0.15 * tm.stability));
     if (npc.group && npc.group.kind === 'lone') p.company = Math.min(p.company, 0.65);   // loners keep apart
     npc.packMax      = Math.max(3, Math.round(PACK_MAX * p.strength));     // strong → carries more food
     npc.trinketMax   = Math.max(3, Math.round(TRINKET_MAX * p.strength));
@@ -4230,6 +4680,9 @@ export class AgentWorld {
 
   update(dt){
     this._rebuildNeighbours();   // bins for near(); everything below asks it instead of scanning everyone
+    this.post?.tick(this.time, this.day > 0.4 && !(this.evening > 0));   // js/mailboxes.js: who's got a letter to walk today
+    if (this.rounds) for (const r of this.rounds) r.tick(this.time, ((this.time % 1) + 1) % 1);   // plans.js dayRound
+    this.traders?.tick(this.time, this.day > 0.4 && !(this.evening > 0));   // js/traders.js: who's on the road, and what's next on their round
 
     // the fish come back to a spot left alone
     if (this.fishing.length){
@@ -4262,9 +4715,7 @@ export class AgentWorld {
       // never leave a fire burning unattended: if nobody is near it, the last to
       // leave damps it (a short grace so brief stepping-away doesn't kill it).
       if (f.lit){
-        // a pot with food in it (simmering or ready) keeps the fire "in use"
-        const tended = (f.pot.raw + f.pot.ready) > 0 || near;
-        if (tended) f.idleT = 0;
+        if (f.minded(near)) f.idleT = 0;
         else { f.idleT += dt; if (f.idleT > UNATTENDED_GRACE) f.extinguish(); }
         f.deadT = 0; keep.push(f);
       } else {
@@ -4276,11 +4727,35 @@ export class AgentWorld {
         if (f.deadT > FIRE_RECLAIM){
           if (f.group) this.scene.remove(f.group);
           for (const n of this.npcs) if (n.brain) n.brain._blacklist.delete(f);
+          this.onFireGone?.(f);
         } else keep.push(f);
       }
     }
     if (keep.length !== this.fires.length){ this.fires = keep; this._fireLists(); }
     for (const fd of this.fields) fd.tick(dt);   // the crops grow
+    // an empty hearth draws on what's put by: nobody goes hungry beside a full shelf to have something to trade.
+    // So a thin year leaves little to sell, and what is sold is dear (docs/economy.md)
+    // of an evening the household works at the village's craft, while it's fed and hasn't a few pieces by it already
+    if (this.houses.length && this.evening && (this._craftT = (this._craftT || 0) + dt) > SHELF_DT){
+      const part = CRAFT.RATE * this._craftT / CRAFT_EVENING; this._craftT = 0;
+      for (const h of this.houses){
+        if ((h.goods[h.craft] || 0) >= CRAFT.STORE || !h.household.length || !(h.fire?.foodStore >= 1)) continue;
+        h.craftWork += part;
+        if (h.craftWork >= 1){ h.craftWork -= 1; h.goods[h.craft] = (h.goods[h.craft] || 0) + 1; this.craftsMade = (this.craftsMade || 0) + 1; }
+      }
+    }
+    if (this.houses.length && (this._shelfT = (this._shelfT || 0) + dt) > SHELF_DT){
+      this._shelfT = 0;
+      for (const h of this.houses){
+        if (!h.fire || h.fire.foodStore >= 1 || !h.household.some(n => n.needs.food > SHELF_HUNGER)) continue;
+        const [crop, k] = Object.entries(h.spare).sort((a, b) => b[1] - a[1])[0] || [];
+        if (!(k > 0) || Object.values(h.spare).reduce((a, b) => a + b, 0) <= SHELF_KEEP) continue;
+        const m = Math.min(k, SHELF_TAKE);
+        h.spare[crop] -= m; h.fire.addFood(m);
+        if (h.field) h.field.stored = crop;
+        this.market.eaten = (this.market.eaten || 0) + m;
+      }
+    }
     // the roofs rot (fast under rain) — mending them is the folk's own business
     for (const h of this.huts) h.tick(dt, this.rain || 0);
     // A raising nobody has come back to is given up on and the ground cleared —
@@ -4320,8 +4795,12 @@ export class AgentWorld {
           if (d <= GOSSIP_RANGE && n._gossipCd <= 0 && o._gossipCd <= 0 && !n.convo && !n.sleeping && !o.sleeping && !n._indoors && !o._indoors && !parted(n, o, now)){
             // close enough to talk. Someone already talking isn't interrupted: you ask to
             // join theirs, and the talk's culture says how that goes (convo.js offerJoin)
-            if (o.convo) o.convo.offerJoin(n);
-            else if (Conversation.worthIt(this, n, o)) this.convos.push(new Conversation(this, n, o));
+            // (a trader passes the time of day with whoever they meet, and carries the news along the road, but
+            // not at every step, and two traders on the same road have nothing to say to each other: js/traders.js)
+            const busy = q => q.trader && (q.trader.crying?.busk || now - (q._chatAt ?? -9) < TRADER_CHAT_GAP);   // (nobody chats with a musician mid-set)
+            if ((n.trader && o.trader) || busy(n) || busy(o)) n._gossipCd = o._gossipCd = GOSSIP_CD;
+            else if (o.convo) o.convo.offerJoin(n);
+            else if (Conversation.worthIt(this, n, o)){ this.convos.push(new Conversation(this, n, o)); if (n.trader) n._chatAt = now; if (o.trader) o._chatAt = now; }
             else n._gossipCd = o._gossipCd = GOSSIP_CD;   // nothing to say: a nod will do
           } else if (d <= GOSSIP_RANGE * 2 && n._glanceCd <= 0 && n.ties){  // passing by: a glimpse of how they feel
             const t = n.ties.get(o);
@@ -4340,6 +4819,7 @@ export class AgentWorld {
       if (this.time - b.lastT > CANOE_IDLE){ this.canoeStats.abandoned++; this.removeCanoeBuild(b); }
     }
     for (const q of this.fauna) q.update(dt);          // rabbits roam / flee / respawn
+    for (const f of this.flocks) f.tick(dt, this);     // sheep (js/sheep.js)
     for (const c of this.convos) c.update(dt);         // talk, a turn at a time (convo.js)
     if (this.projects.length) this.projects = this.projects.filter(p => !p.tick(this.time));   // deadlines (projects.js)
     if (this.convos.some(c => c.done)) this.convos = this.convos.filter(c => !c.done);

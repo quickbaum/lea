@@ -8,8 +8,9 @@
 //                             portal's palace (main.js doors)
 //   palaceSpec(p)             the level behind a portal: a crypt in the palace style
 //                             (gen/under.js cryptStyle), entered level, two floors
-//   portalPaths(portals, route)  the walks between them: each portal to its nearest two,
-//                             by `route(x0, z0, x1, z1)` (guide.js planRoute, scenic)
+//   portalPaths(doors, route)  the old paths between thin places: each door to its nearest
+//                             two, by `route(x0, z0, x1, z1)` (guide.js planRoute, scenic)
+//   hoverPaths(paths, height)  the same paths for the Gentry's lights, in the air over them
 //
 // A portal is { id, x, z, y, face, stand, at, name, level, seed }: `face` is the way its
 // front looks (away from the thin place, so you see the place behind it), `stand` the spot
@@ -83,7 +84,7 @@ export function palaceSpec(p){
     mouths: [{ x: p.x, z: p.z, y: p.y, face: p.face }] };
 }
 
-// the walks between portals: each to its two nearest, every pair once
+// the walks between doors (planPortals' or extraDoor's): each to its two nearest, every pair once
 export function portalPaths(portals, route){
   const pairs = new Set(), paths = [];
   for (const a of portals){
@@ -100,6 +101,22 @@ export function portalPaths(portals, route){
     }
   }
   return paths;
+}
+// the old paths as the Gentry's lights go along them (wisps.js): over the ground, rising
+// and dipping as they go. A point every 6u or so is plenty, and the land is read only for those
+export const HOVER = [1.3, 3.1];                    // how high over the ground, least and most
+export function hoverPaths(paths, height){
+  const mid = (HOVER[0] + HOVER[1]) / 2, swing = (HOVER[1] - HOVER[0]) / 2;
+  return paths.map(P => {
+    const pts = [];
+    let next = 0;
+    P.pts.forEach(([x, z], i) => {
+      if (P.cum[i] < next && i < P.pts.length - 1) return;
+      next = P.cum[i] + 6;
+      pts.push([x, height(x, z) + mid + swing * Math.sin(P.cum[i] * 0.07), z]);
+    });
+    return { pts };
+  });
 }
 // the point `s` along a path
 export function alongPath(P, s){

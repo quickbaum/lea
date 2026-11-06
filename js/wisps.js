@@ -3,10 +3,15 @@
 // nearest few carry real light, from a fixed pool, so the scene's light count never
 // changes and nothing recompiles.
 //
-//   wisps(scene, paths, { lights })  →  { update(dt, camera, t) }
+//   wisps(parent, paths, { lights, spacing, reach })  →  { update(dt, camera, t), fade(k) }
+//
+// Out in the Lea (faerie-view.js) the paths run for hundreds of units and no light may be
+// added to the scene: `reach` shows each light only within that far of you, and `lights: 0`
+// makes them glow without lighting anything.
 
 import * as THREE from 'three';
 import { mulberry32 } from './rng.js';
+import { crisp } from './textures.js';
 
 const COLOURS = [0xcab8ff, 0x9fb8ff, 0xffe6b0, 0xe8c8ff, 0xb0f0ff];
 const SPACING = 11;                  // u of path to each light
@@ -21,7 +26,7 @@ export function haloTex(){
   const g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
   gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.18, 'rgba(255,255,255,0.85)'); gr.addColorStop(0.45, 'rgba(255,255,255,0.22)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
-  return HALO = new THREE.CanvasTexture(cv);
+  return HALO = crisp(new THREE.CanvasTexture(cv));
 }
 
 // a path, measured: the point `s` along it (a loop wraps; otherwise there and back, easing
@@ -43,10 +48,10 @@ function measure(path){
     r: Math.max(...P.map(p => Math.hypot(p[0] - P[0][0], p[2] - P[0][2]))) };
 }
 
-export function wisps(scene, paths, { lights = 6 } = {}){
+export function wisps(scene, paths, { lights = 6, spacing = SPACING, reach = 0 } = {}){
   const r = mulberry32(0x3157), tex = haloTex(), all = [];
   for (const path of paths){
-    const M = measure(path), n = Math.max(1, Math.round(M.len / SPACING));
+    const M = measure(path), n = Math.max(1, Math.round(M.len / spacing));
     for (let q = 0; q < n; q++) all.push({ M, s0: q * M.len / n + r() * 2, v: (SPEED[0] + r() * (SPEED[1] - SPEED[0])) * (r() < 0.5 ? 1 : -1),
       colour: new THREE.Color(COLOURS[(r() * COLOURS.length) | 0]), ph: r() * 6.28, pos: new THREE.Vector3(), near: true });
   }
@@ -57,7 +62,7 @@ export function wisps(scene, paths, { lights = 6 } = {}){
     g.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e5);             // moved every frame: never culled
     const pts = new THREE.Points(g, new THREE.PointsMaterial({ map: tex, size, vertexColors: true, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity, fog: false }));
     pts.material.userData.own = true; pts.frustumCulled = false; scene.add(pts);
-    return { pos, col, g };
+    return { pos, col, g, mat: pts.material, opacity };
   };
   const motes = cloud(all.length * (TAIL + 1), 0.42, 1), glows = cloud(all.length, 2.4, 0.55);
   all.forEach((w, i) => {
@@ -72,19 +77,21 @@ export function wisps(scene, paths, { lights = 6 } = {}){
     update(dt, camera, t){
       const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z, live = [];
       all.forEach((w, i) => {
-        const near = Math.hypot(w.M.cx - cx, w.M.cz - cz) - w.M.r < NEAR, base = i * (TAIL + 1) * 3;
+        const s = w.s0 + w.v * t, dir = Math.sign(w.v), base = i * (TAIL + 1) * 3;
+        if (reach) w.M.at(s, w.pos);
+        const near = reach ? Math.hypot(w.pos.x - cx, w.pos.z - cz) < reach : Math.hypot(w.M.cx - cx, w.M.cz - cz) - w.M.r < NEAR;
         if (!near){
           if (w.near) for (let k = 0; k <= TAIL; k++){ motes.pos[base + k * 3 + 1] = FAR; glows.pos[i * 3 + 1] = FAR; }
           w.near = false; return;
         }
         w.near = true;
-        const s = w.s0 + w.v * t, dir = Math.sign(w.v);
-        w.M.at(s, w.pos);
+        if (!reach) w.M.at(s, w.pos);
         glows.pos.set([w.pos.x, w.pos.y, w.pos.z], i * 3);
         for (let k = 0; k <= TAIL; k++){ const p = k ? w.M.at(s - dir * k * TAIL_GAP, tmp) : w.pos; motes.pos.set([p.x, p.y, p.z], base + k * 3); }
         live.push(w);
       });
       motes.g.attributes.position.needsUpdate = true; glows.g.attributes.position.needsUpdate = true;
+      if (!pool.length) return;
       live.sort((a, b) => a.pos.distanceToSquared(camera.position) - b.pos.distanceToSquared(camera.position));
       pool.forEach((l, q) => {
         const w = live[q];
@@ -92,5 +99,6 @@ export function wisps(scene, paths, { lights = 6 } = {}){
         l.position.copy(w.pos); l.color.copy(w.colour); l.intensity = 2.4 * (0.85 + 0.15 * Math.sin(t * 2.1 + w.ph));
       });
     },
+    fade(k){ motes.mat.opacity = motes.opacity * k; glows.mat.opacity = glows.opacity * k; },
   };
 }

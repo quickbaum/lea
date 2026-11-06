@@ -47,8 +47,10 @@ export class TrailField {
   // grass/reed/fern suppression empties it — reused wholesale rather than a new
   // system. Marked permanent so it never regrows. Call after addGrass(); flush()
   // to apply at once. `strength` peaks at the centre and fades to 0 at the rim.
+  // Returns its cells, for release() if the clearing is one day given back.
   clearing(cx, cz, r, strength = 0.7){
-    if (!this.permanent) this.permanent = new Set();
+    if (!this.permanent) this.permanent = new Map();   // cell -> how many clearings hold it
+    const cells = [];
     const span = Math.ceil(r / STEP);
     const col0 = Math.round((cx + SIZE / 2) / STEP), row0 = Math.round((cz + SIZE / 2) / STEP);
     for (let row = row0 - span; row <= row0 + span; row++){
@@ -62,15 +64,63 @@ export class TrailField {
         const f = Math.min(1, (1 - d / r) / 0.3);
         const w = strength * f * f * (3 - 2 * f);
         const i = row * COLS + col;
-        if (w > this.wear[i]){ this.wear[i] = w; this.permanent.add(i); this._paintCell(i); }
+        this.permanent.set(i, (this.permanent.get(i) || 0) + 1); cells.push(i);
+        if (w > this.wear[i]){ this.wear[i] = w; this._paintCell(i); }
       }
     }
     this._pending = true;
+    return cells;
+  }
+
+  // The same, for a rectangle (a sheepfold's floor): bare right up to the sides, fading over `edge` beyond them. a turns
+  // it, as a building's a does.
+  clearingBox(cx, cz, a, hl, hw, strength = 0.7, edge = 2){
+    if (!this.permanent) this.permanent = new Map();
+    const cells = [], c = Math.cos(a), s = Math.sin(a), span = Math.ceil((Math.hypot(hl, hw) + edge) / STEP);
+    const col0 = Math.round((cx + SIZE / 2) / STEP), row0 = Math.round((cz + SIZE / 2) / STEP);
+    for (let row = row0 - span; row <= row0 + span; row++){
+      for (let col = col0 - span; col <= col0 + span; col++){
+        if (col < 0 || col > SEG || row < 0 || row > SEG) continue;
+        const dx = col * STEP - SIZE / 2 - cx, dz = row * STEP - SIZE / 2 - cz;
+        const out = Math.max(Math.abs(dx * c + dz * s) - hl, Math.abs(dz * c - dx * s) - hw);
+        if (out > edge) continue;
+        const f = out <= 0 ? 1 : 1 - out / edge, w = strength * f * f * (3 - 2 * f), i = row * COLS + col;
+        this.permanent.set(i, (this.permanent.get(i) || 0) + 1); cells.push(i);
+        if (w > this.wear[i]){ this.wear[i] = w; this._paintCell(i); }
+      }
+    }
+    this._pending = true;
+    return cells;
+  }
+
+  // Give a clearing back: its cells start to regrow like any bare ground, slowly
+  // (decaySoil). One a second clearing still holds stays kept.
+  release(cells){
+    for (const i of cells){
+      const n = this.permanent.get(i) - 1;
+      if (n > 0){ this.permanent.set(i, n); continue; }
+      this.permanent.delete(i);
+      this.active.add(i);
+    }
   }
 
   // wear (0..1) at a world point; 0 off the mesh. Lets other systems (e.g. the
   // decorative grass) keep off trodden ground too.
   wearAt(x, z){ const i = this.idx(x, z); return i < 0 ? 0 : this.wear[i]; }
+
+  // the same, as the blades read it. In a kept clearing it blends the four cells
+  // round the point, or the clearing's edge is a staircase of 2u squares; a path
+  // keeps its nearest-cell grain.
+  bladeWearAt(x, z){
+    const i = this.idx(x, z);
+    if (i < 0) return 0;
+    if (!this.permanent?.has(i)) return this.wear[i];
+    const fc = (x + SIZE / 2) / STEP, fr = (z + SIZE / 2) / STEP;
+    const c = Math.floor(fc), r = Math.floor(fr), ac = fc - c, ar = fr - r;
+    if (c < 0 || c >= SEG || r < 0 || r >= SEG) return this.wear[i];
+    const a = r * COLS + c, w = this.wear;
+    return (w[a] * (1 - ac) + w[a + 1] * ac) * (1 - ar) + (w[a + COLS] * (1 - ac) + w[a + COLS + 1] * ac) * ar;
+  }
 
   _add(row, col, amt){
     if (col < 0 || col > SEG || row < 0 || row > SEG) return;
@@ -78,6 +128,16 @@ export class TrailField {
     this.wear[i] = Math.min(this.opts.cap, this.wear[i] + amt);
     this.active.add(i);
     this._paintCell(i);
+  }
+
+  // how closely grazed this ground is, 0..1. The array appears the first time anything's eaten
+  setLawn(x, z, k){
+    const i = this.idx(x, z);
+    if (i < 0) return;
+    if (!this.lawn) this.lawn = new Uint8Array(COLS * COLS);
+    this.lawn[i] = k * 255;
+    this._paintCell(i);
+    this._pending = true;
   }
 
   // a walker treads (x,z) this frame. Narrow kernel: the centre line takes the
@@ -102,6 +162,9 @@ export class TrailField {
     // hue (flattened, bruised grass), giving the dark patch a path begins as.
     const dark = 1 - 0.5 * smooth(0.04, 0.22, w);              // down to 0.5 brightness
     let r = b[i*3] * dark, g = b[i*3+1] * dark, bl = b[i*3+2] * dark;     // 0..255, like ground.color
+    // grazed short: paler and yellower, no earth in it (js/sward.js)
+    const lawn = this.lawn ? this.lawn[i] / 255 : 0;
+    if (lawn){ r *= 1 + 0.2 * lawn; g *= 1 + 0.16 * lawn; bl *= 1 + 0.03 * lawn; }
     // Stage B — soil chips through: only past this cell's OWN hashed threshold,
     // so bare earth emerges in a grainy, speckled way that grows with traffic.
     const soilThr = 0.32 + this._hash(i) * 0.46;               // 0.32..0.78 per cell

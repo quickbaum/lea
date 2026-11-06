@@ -6,7 +6,8 @@
 <title>Quickbaum's Lea</title>
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:monospace;color:#cdb;}
-  #c{display:block;width:100vw;height:100vh;image-rendering:pixelated;cursor:crosshair;}
+  html{image-rendering:pixelated;}   /* nothing here is ever blurry: tools/check-pixels.mjs */
+  #c{display:block;width:100vw;height:100vh;cursor:crosshair;}
   #hud{position:fixed;left:8px;top:8px;font-size:12px;line-height:1.5;
        text-shadow:1px 1px 0 #000;pointer-events:none;opacity:.85;}
   #cross{position:fixed;left:50%;top:50%;width:10px;height:10px;margin:-5px 0 0 -5px;
@@ -14,19 +15,47 @@
   #cross:before,#cross:after{content:"";position:absolute;background:#fff;}
   #cross:before{left:4px;top:0;width:2px;height:10px;}
   #cross:after{top:4px;left:0;height:2px;width:10px;}
-  /* the round minimap: turns with you, north marked on its rim */
-  #map{position:fixed;right:10px;bottom:10px;width:172px;height:172px;border-radius:50%;
-       border:4px solid #1d1a14;box-shadow:0 0 0 1px #c9a23a,0 3px 10px rgba(0,0,0,.6);}
-  /* the name of where you are, just above the minimap */
-  #place{position:fixed;right:10px;bottom:190px;width:180px;text-align:center;pointer-events:none;
-       font:italic 14px Georgia,'Times New Roman',serif;color:#e8c75a;letter-spacing:.3px;
-       text-shadow:0 1px 2px #000,0 0 6px #000;transition:opacity .35s ease;}
-  #place.fade{opacity:0;}
-  body.no-minimap #place{bottom:10px;}
+  /* the top right, after mocks/hud mock.psd: the place's sign hung from the top of the window,
+     the minimap under it in the ring with the spell points and stamina (js/vitals-view.js) */
+  @font-face{font-family:Alagard;src:url(fonts/Alagard.ttf);font-display:block;}
+  #map{position:fixed;right:33px;top:112px;width:172px;height:172px;border-radius:50%;}
+  #vitals{position:fixed;right:3px;top:82px;width:232px;height:232px;z-index:26;pointer-events:none;}
+  #vitals svg{display:block;width:100%;height:100%;}
+  #vitals .hit{pointer-events:stroke;}
+  #vitals.winded .st{opacity:.55;}
+  /* the backpack, after mocks/backpack_1.psd (js/bag-view.js): off the window's right edge, its foot tucked
+     behind the book, so it goes by the bottom; a short window slides it down behind the book, not up into the ring */
+  #bag{position:fixed;right:-6px;top:max(318px,calc(100vh - 379px));width:198px;height:256px;z-index:24;cursor:pointer;}
+  #bag:hover{filter:brightness(1.12);}
+  #bag .back,#bag .flap{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+  /* open, on its way into the pack's card: its straps come up over the ring as on the board, its foot still behind the book */
+  #bag .open-back{position:absolute;left:-2px;top:-89px;width:225px;height:345px;pointer-events:none;display:none;}
+  #bag.open{z-index:27;pointer-events:none;}
+  #bag.open .back,#bag.open .flap{display:none;}
+  #bag.open .open-back{display:block;}
+  #bag.gone{visibility:hidden;}
+  .bag-item{position:fixed;z-index:100002;pointer-events:none;object-fit:contain;}
+  .bag-item.in{position:absolute;z-index:auto;}
+  .bag-item.box{box-sizing:border-box;overflow:hidden;padding:1px;border-radius:3px;background:color-mix(in srgb,var(--tint) 28%,#10241a);
+    border:1px solid color-mix(in srgb,var(--tint) 70%,#dccfa0);color:#efe6cf;font:7px/1 Georgia,serif;overflow-wrap:anywhere;}
+  /* rest: in the corner the ring leaves empty at its top right; the same brass-ringed disc as close-x.js */
+  #rest-btn{position:fixed;right:7px;top:86px;width:34px;height:34px;z-index:27;padding:0;border:0;border-radius:50%;cursor:pointer;
+    color:#ebcc5e;font:13px Alagard,Georgia,serif;background:radial-gradient(circle at 38% 28%,#4a3f2a,#231e15 62%,#15120c);
+    box-shadow:0 0 0 1.5px #c9a23a,0 0 0 2.5px #0009,inset 0 1px 1px #fff3,0 3px 8px #000b;transition:color .12s,box-shadow .12s,transform .12s;}
+  #rest-btn:hover{color:#fff3c4;transform:scale(1.08);box-shadow:0 0 0 1.5px #f0cf6a,0 0 0 2.5px #0009,inset 0 1px 1px #fff5,0 3px 10px #000c;}
+  /* the sign's art runs on up past the window's top, so the chains still reach when it bounces;
+     it sways about a point well above the window (js/place-sign.js) */
+  #place{position:fixed;right:18px;top:0;width:202px;height:73px;pointer-events:none;transform-origin:50% -150px;}
+  #place::before{content:'';position:absolute;left:0;right:0;top:-35.6%;bottom:0;background:url(sprites/hud/sign.png) 0 0/100% 100% no-repeat;}
+  /* place-sign.js shrinks a long name to fit */
+  #place span{position:absolute;left:12px;right:12px;top:13px;bottom:0;display:flex;align-items:center;justify-content:center;
+       white-space:nowrap;font:22px Alagard,Georgia,serif;color:#ebcc5e;
+       text-shadow:2px 0 #533607,-2px 0 #533607,0 2px #533607,0 -2px #533607,1.5px 1.5px #533607,-1.5px 1.5px #533607,1.5px -1.5px #533607,-1.5px -1.5px #533607;}
   /* the big map (M) */
   #bigmap{position:fixed;inset:0;z-index:60;background:#0d0c09;cursor:grab;}
   #bigmap:active{cursor:grabbing;}
   #bigmap canvas{display:block;width:100vw;height:100vh;}
+  #bigmap>.close-x{top:calc(14px + env(safe-area-inset-top));right:calc(14px + env(safe-area-inset-right));}
   #bigmap .hint{position:absolute;left:0;right:0;bottom:12px;text-align:center;pointer-events:none;
        font:12px monospace;color:#cdbf98;opacity:.75;text-shadow:0 1px 3px #000;}
   #start{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
@@ -88,7 +117,7 @@
   #intro-presets .preset.last{border-color:#c9a23a;box-shadow:0 0 0 1px #c9a23a inset;}
   #intro-presets .preset.custom{border-style:dashed;}
   /* settings: gear button + sound panel */
-  #gear{position:fixed;right:10px;top:10px;z-index:30;width:34px;height:34px;
+  #gear{position:fixed;right:228px;top:10px;z-index:30;width:34px;height:34px;
         background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
         font-size:18px;line-height:1;cursor:pointer;opacity:.7;}
   #gear:hover{opacity:1;}
@@ -129,7 +158,8 @@
     #rest-panel,#inv-panel{max-height:calc(100dvh - 16px);overflow-y:auto;box-sizing:border-box;}
     #inv-panel{left:8px;bottom:8px;padding:8px 12px;}
     #inv-panel h3{margin:0 0 4px;}
-    #rest-panel{bottom:8px;left:8px;padding:10px 14px;}
+    #rest-panel{top:auto;right:auto;bottom:8px;left:8px;padding:10px 14px;}
+    #inv-panel>.close-x{top:4px;right:4px;}
     #bigmap canvas{height:100dvh;}
   }
   /* ---- a finger: the HUD moves out from under the thumbs (js/touch.js) ---- */
@@ -139,14 +169,17 @@
   html.touch #corner-btns{left:calc(8px + env(safe-area-inset-left));right:auto;top:calc(8px + env(safe-area-inset-top));bottom:auto;flex-wrap:wrap;max-width:62vw;}
   html.touch #corner-btns button{opacity:.85;min-height:36px;padding:5px 9px;font-size:12px;letter-spacing:0;}
   html.touch #gear{top:calc(8px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right));opacity:.85;width:36px;height:36px;}
-  html.touch #hud{top:calc(52px + env(safe-area-inset-top));left:calc(8px + env(safe-area-inset-left));right:130px;}
-  html.touch #map{width:84px;height:84px;border-width:2px;top:calc(8px + env(safe-area-inset-top));right:calc(52px + env(safe-area-inset-right));bottom:auto;}
-  html.touch #place{top:calc(98px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right));bottom:auto;width:140px;font-size:12px;}
-  html.touch #vitals{top:calc(10px + env(safe-area-inset-top));right:calc(144px + env(safe-area-inset-right));bottom:auto;}
-  html.touch #vitals .bar{height:78px;}
-  html.touch #hover-panel{top:calc(10px + env(safe-area-inset-top));bottom:auto!important;right:calc(164px + env(safe-area-inset-right))!important;width:150px!important;height:64px!important;}
+  html.touch #hud{top:calc(52px + env(safe-area-inset-top));left:calc(8px + env(safe-area-inset-left));right:190px;}
+  html.touch #map{width:84px;height:84px;top:calc(66px + env(safe-area-inset-top));right:calc(72px + env(safe-area-inset-right));}
+  html.touch #place{top:env(safe-area-inset-top);right:calc(44px + env(safe-area-inset-right));width:140px;height:51px;}
+  html.touch #place span{left:8px;right:8px;top:9px;font-size:15px;text-shadow:1px 0 #533607,-1px 0 #533607,0 1px #533607,0 -1px #533607;}
+  html.touch #vitals{top:calc(51px + env(safe-area-inset-top));right:calc(57px + env(safe-area-inset-right));width:114px;height:114px;}
+  html.touch #bag{right:calc(4px + env(safe-area-inset-right));top:calc(50px + env(safe-area-inset-top));width:50px;height:65px;}
+  html.touch #rest-btn{right:calc(45px + env(safe-area-inset-right));top:calc(143px + env(safe-area-inset-top));}
+  html.touch #rest-panel{right:auto;top:auto;left:10px;bottom:46px;}
+  html.touch #hover-panel{top:calc(10px + env(safe-area-inset-top))!important;right:calc(190px + env(safe-area-inset-right))!important;width:150px!important;height:64px!important;}
   @media (max-width:640px){
-    html.touch #hover-panel{top:calc(122px + env(safe-area-inset-top));right:calc(8px + env(safe-area-inset-right))!important;}
+    html.touch #hover-panel{top:calc(222px + env(safe-area-inset-top))!important;right:calc(8px + env(safe-area-inset-right))!important;}
     html.touch #corner-btns{max-width:54vw;}
     html.touch #hud{top:calc(96px + env(safe-area-inset-top));}
   }
@@ -182,23 +215,21 @@
   /* cursor mode: free mouse over canvas, crosshair hidden */
   body.cursor-mode #c{cursor:default;}
   body.cursor-mode #cross{display:none;}
-  /* inventory button */
-  /* look button — only visible in cursor mode */
-  #look-btn{position:fixed;right:10px;bottom:10px;z-index:30;display:none;
+  /* look button — names the key that swaps mouse modes; hidden while a panel has the mouse */
+  #look-btn{position:fixed;right:232px;bottom:10px;z-index:30;display:none;
     background:rgba(0,19,11,.85);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
     font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;font-family:monospace;}
   #look-btn:hover{background:#1a3a1a;}
-  body.cursor-mode #look-btn{display:block;}
+  body.cursor-mode #look-btn,body.mouselook #look-btn{display:block;}
   /* the corner buttons, in a row so they never overlap whatever their labels */
   #corner-btns{position:fixed;left:10px;bottom:10px;z-index:30;display:flex;gap:6px;}
-  #inv-btn,#journal-btn,#rest-btn,#spell-btn,#map-btn{position:relative;
+  #spell-btn,#map-btn,#stop-tune{position:relative;
     background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
     font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;
     font-family:monospace;opacity:.7;}
-  #inv-btn:hover,#journal-btn:hover,#rest-btn:hover,#spell-btn:hover,#map-btn:hover{opacity:1;}
-  #journal-btn.new::after{content:'';position:absolute;top:-3px;right:-3px;width:7px;height:7px;border-radius:50%;background:#e8c75a;box-shadow:0 0 4px #e8c75a;}
+  #spell-btn:hover,#map-btn:hover,#stop-tune:hover{opacity:1;}
   /* passing time (R): the choices, then a progress line while it passes */
-  #rest-panel{position:fixed;left:10px;bottom:46px;z-index:40;width:260px;
+  #rest-panel{position:fixed;right:243px;top:82px;z-index:40;width:260px;
     background:rgb(0,19,11);border:1px solid #5a6b50;border-radius:6px;
     box-shadow:0 10px 40px #000b;padding:16px 20px;
     color:#dccfa0;font-family:monospace;font-size:13px;line-height:1.5;}
@@ -214,36 +245,32 @@
   #rest-panel .track i{display:block;height:100%;width:0;background:#e8c75a;}
   #rest-panel .foot{margin-top:10px;font-size:12px;color:#a89c78;}
   /* inventory panel */
-  #inv-panel{position:fixed;left:10px;bottom:46px;z-index:40;
-    background:rgb(0,19,11);border:1px solid #5a6b50;border-radius:6px;
-    box-shadow:0 10px 40px #000b;padding:16px 20px;min-width:180px;
-    color:#dccfa0;font-family:monospace;font-size:13px;line-height:1.8;}
-  #inv-panel h3{margin:0 0 8px;font-size:13px;letter-spacing:2px;opacity:.6;font-weight:normal;}
+  /* the open pack is made of the bag (sprites/hud/bag-*.png): its leather, its highlight, its line, 5px as the art's is */
+  #inv-panel{position:fixed;left:10px;bottom:46px;z-index:40;box-sizing:content-box;
+    background:#52321b;border:5px solid #2e2018;border-radius:18px 12px 12px 14px;
+    box-shadow:inset 4px 4px 0 #653f24,0 10px 40px #000b;padding:14px 20px 12px;min-width:180px;
+    color:#ecdcb8;font-family:monospace;font-size:13px;line-height:1.8;}
+  #inv-panel>.close-x{top:-14px;right:-14px;}
+  #inv-panel h3{margin:0 0 6px;font:20px/1.2 Alagard,Georgia,serif;color:#ebcc5e;text-shadow:1px 1px 0 #2e2018,-1px 1px 0 #2e2018,1px -1px 0 #2e2018,-1px -1px 0 #2e2018;}
   /* the pack as a grid (js/pack-view.js): a box per ingredient, as big as the thing */
-  #inv-panel .pack-grid{position:relative;user-select:none;touch-action:none;
-    background-color:#06180f;background-image:linear-gradient(#24382b 1px,transparent 1px),linear-gradient(90deg,#24382b 1px,transparent 1px);
-    border:1px solid #3d4f38;}
-  #inv-panel .pack-box{position:absolute;margin:1px;box-sizing:border-box;cursor:grab;overflow:hidden;
-    background:color-mix(in srgb,var(--tint) 28%,#10241a);border:1px solid color-mix(in srgb,var(--tint) 70%,#dccfa0);border-radius:3px;
-    font:12px/1.1 Georgia,'Times New Roman',serif;padding:3px 3px;color:#efe6cf;}
+  #inv-panel .pack-scroll{border:3px solid #2e2018;border-radius:4px;box-sizing:content-box;scrollbar-width:thin;scrollbar-color:#a8834a #2e2018;}
+  /* a finger on an empty cell scrolls; on a box, it drags the box */
+  #inv-panel .pack-grid{position:relative;user-select:none;touch-action:pan-y;
+    background-color:#3e2513;background-image:linear-gradient(#2e2018 2px,transparent 2px),linear-gradient(90deg,#2e2018 2px,transparent 2px);}
+  #inv-panel .pack-box{position:absolute;margin:1px;box-sizing:border-box;cursor:grab;overflow:hidden;touch-action:none;
+    background:color-mix(in srgb,var(--tint) 22%,#653f24);border:3px solid #2e2018;border-radius:6px;
+    font:12px/1.1 Georgia,'Times New Roman',serif;padding:2px;color:#f3e7cc;}
   #inv-panel .pack-box:hover{border-color:#e8c75a;}
-  #inv-panel .pack-box.raw{color:#b8ad8a;}
+  #inv-panel .pack-box.raw{color:#d2bf98;}
   #inv-panel .pack-box .nm{display:block;hyphens:auto;-webkit-hyphens:auto;}
-  #inv-panel .pack-box .pic{position:absolute;inset:2px;width:calc(100% - 4px);height:calc(100% - 4px);object-fit:contain;image-rendering:pixelated;pointer-events:none;}
-  #inv-panel .pack-box .ct{position:absolute;right:4px;bottom:2px;color:#e8c75a;font:11px monospace;}
+  #inv-panel .pack-box .pic{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;image-rendering:pixelated;pointer-events:none;}
+  #inv-panel .pack-box .ct{position:absolute;right:3px;bottom:0;color:#ebcc5e;font:11px monospace;text-shadow:1px 1px 0 #2e2018,-1px 1px 0 #2e2018,1px -1px 0 #2e2018,-1px -1px 0 #2e2018;}
   #inv-panel .pack-box.lifted{z-index:2;cursor:grabbing;opacity:.85;box-shadow:0 4px 14px #000a;}
-  #inv-panel .pack-ghost{position:absolute;margin:1px;box-sizing:border-box;border:2px dashed #7fc77a;border-radius:3px;pointer-events:none;}
-  #inv-panel .pack-ghost.bad{border-color:#c75a4a;}
+  #inv-panel .pack-ghost{position:absolute;margin:1px;box-sizing:border-box;border:3px dashed #a8d98a;border-radius:6px;pointer-events:none;}
+  #inv-panel .pack-ghost.bad{border-color:#e0705c;}
   #inv-panel .pack-foot{margin-top:8px;height:49px;display:flex;gap:10px;box-sizing:border-box;}   /* fixed: hovering never moves the panel */
-  #inv-panel .pack-desc{flex:1;min-width:0;height:100%;overflow:hidden;font-size:12px;line-height:1.35;color:#a89c78;}
-  #inv-panel .pack-hint{flex:none;width:88px;text-align:right;font-size:11px;line-height:1.35;color:#6f6650;}
-  /* spell points and stamina: two upright bars beside the minimap (main.js drawVitals) */
-  #vitals{position:fixed;right:192px;bottom:14px;z-index:20;display:flex;gap:4px;pointer-events:auto;}
-  #vitals .bar{position:relative;width:7px;height:120px;background:#0b0a07cc;border:1px solid #1d1a14;box-shadow:0 0 0 1px #c9a23a66;}
-  #vitals .bar i{position:absolute;left:0;right:0;bottom:0;}
-  #vitals .sp i{background:#5b7fd6;}
-  #vitals .st i{background:#c99a3a;}
-  #vitals.winded .st i{background:#8a5a2a;}
+  #inv-panel .pack-desc{flex:1;min-width:0;height:100%;overflow:hidden;font-size:12px;line-height:1.35;color:#e0cda6;}
+  #inv-panel .pack-hint{flex:none;width:88px;text-align:right;font-size:11px;line-height:1.35;color:#bfa57c;}
 </style>
 <script type="importmap">
 {
@@ -259,7 +286,7 @@
 <div id="cross"></div>
 <div id="hud"></div>
 <canvas id="map" width="192" height="192"></canvas>
-<div id="place" class="hide"></div>
+<div id="place" class="hide"><span></span></div>
 <div id="meter" class="hide"></div>
 <div id="start">
   <div class="splash-content">
@@ -294,12 +321,11 @@
     <p class="controls hide" id="controls-text">WASD/&uarr;&darr; move &middot; mouse/&larr;&rarr; look &middot; shift run &middot; space jump &middot; E talk &middot; I pack &middot; J journal &middot; R rest &middot; C spells &middot; O sound &middot; esc release</p>
   </div>
 </div>
-<button id="look-btn" title="Return to mouselook (Esc)">&#x25B6; look</button>
+<button id="look-btn" title="Return to mouselook (L)">L to Look</button>
 <div id="corner-btns">
-<button id="inv-btn" title="Inventory (pack)">pack</button>
-<button id="journal-btn" title="Journal (J)">journal</button>
-<button id="rest-btn" title="Pass time (R)">rest</button>
+  <button id="stop-tune" class="hide">Stop playing (T)</button>
 </div>
+<button id="rest-btn" title="Pass time (R)">Zzz</button>
 <div id="rest-panel" class="hide"></div>
 <div id="inv-panel" class="hide"></div>
 <input id="cheat" class="hide" type="text" autocomplete="off" spellcheck="false" maxlength="40">
@@ -327,7 +353,7 @@
       <label><input type="checkbox" id="gfx-meter"> frame meter</label>
     </div>
     <button class="done" id="settings-done">DONE</button>
-    <p class="credit" style="margin:10px 0 0;font:11px/1.4 monospace;opacity:.6;text-align:center">Speech icons by Lorc, Delapouite and Skoll — <a href="https://game-icons.net" target="_blank" rel="noopener" style="color:inherit">game-icons.net</a>, CC BY 3.0. Sayings: Hávamál tr. H. A. Bellows (1923); Proverbs, JPS 1917; traditional songs.</p>
+    <p class="credit" style="margin:10px 0 0;font:11px/1.4 monospace;opacity:.6;text-align:center">Speech icons by Lorc, Delapouite and Skoll — <a href="https://game-icons.net" target="_blank" rel="noopener" style="color:inherit">game-icons.net</a>, CC BY 3.0. Lettering on the sign: Alagard, by Hewett Tsoi. Sayings: Hávamál tr. H. A. Bellows (1923); Proverbs, JPS 1917; traditional songs.</p>
   </div>
 </div>
 <script>window.LEAVES_CONFIG = { target: '#start', opacity: 0.9, density: 100 };</script>

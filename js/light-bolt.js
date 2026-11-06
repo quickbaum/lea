@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { crisp } from './textures.js';
 
 // A ball of light thrown from your hand (docs/skeletons.md, "Light against the dead"): a hot
 // white core in a soft gold glow, flying fast and homing on what it was thrown at, and on
@@ -22,7 +23,7 @@ function glowTex(){
   r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.25, 'rgba(255,240,190,0.9)');
   r.addColorStop(0.55, 'rgba(255,200,110,0.35)'); r.addColorStop(1, 'rgba(255,170,60,0)');
   g.fillStyle = r; g.fillRect(0, 0, 64, 64);
-  TEX = new THREE.CanvasTexture(c); TEX.colorSpace = THREE.SRGBColorSpace;
+  TEX = crisp(new THREE.CanvasTexture(c)); TEX.colorSpace = THREE.SRGBColorSpace;
   return TEX;
 }
 const glow = (size, color = 0xffffff) => {

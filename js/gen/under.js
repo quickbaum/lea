@@ -48,6 +48,11 @@ function noise2(seed){
 //   A      the stone: an arcade spec of the one opening
 //   px, pz where the stone's middle plane crosses the mouth's line; f along the face, t across
 // `e.scale` (the elder's cave: 2) makes the whole of it that many times the size.
+export const WELL = { L: 4.6, W: 1.5 };                    // the crypt stair: length back from the mouth, half-width
+// The ground kept clear of grass at a crypt's stair: from where you stand before it to the far
+// kerb, 0.6u all round its opening (main.js, as a trail clearing, which thins out over its last
+// eighth or so: hence r is a little more than the 5.1u the kerb's far corners need).
+export const stairClearing = e => ({ x: e.x - Math.cos(e.face) * 0.55, z: e.z - Math.sin(e.face) * 0.55, r: 6 });
 export const MOUTH = { back: 0.6, LEAN: 0.3, DROP: 0.4 };   // DROP: how steeply the passage goes down, past its first 2u
 // the passage's floor u in from the mouth (land.js sets e.floor)
 export const mouthFloor = (e, u) => e.floor - MOUTH.DROP * Math.max(0, u - 2);
@@ -1346,18 +1351,21 @@ function buildCrypt(spec){
     const S = shaped(fl, kind, circleShape(cx, cz, RR), (x, z) => y + sp + H * pointed(Math.min(1, Math.hypot(x - cx, z - cz) / RR)), sp);
     const ring = [];
     for (let k = 0; k < G.n; k++){
-      const [dx, dz] = dirTo(k * Math.PI * 2 / G.n), x = cx + dx * G.ring, z = cz + dz * G.ring;
+      // on the ribs' bearings, half a step from the windows': each window looks through an arch, not at a pier
+      const [dx, dz] = dirTo((k + 0.5) * Math.PI * 2 / G.n), x = cx + dx * G.ring, z = cz + dz * G.ring;
       const c = kind === 'grandrotunda' ? { kind: 'pier', style: 'gothic', free: true, x, z, k: 1.1, r: 0.95 * 1.1, y, h: G.colH, top: y + G.colH, solid: true, noShaft: true, toNave: [0, 0] }   // free: on a circle, not a bay's corner
         : { kind: 'column', x, z, r: 0.62, y, h: G.colH, solid: true };
       L.props.push(c); ring.push(c);
     }
     for (let k = 0; k < G.n; k++) L.arcades.push({ a: [ring[k].x, ring[k].z], b: [ring[(k + 1) % G.n].x, ring[(k + 1) % G.n].z], y: y + G.colH + 0.42, depth: kind === 'grandrotunda' ? 1.2 : 0.8 });
+    const [ww, wh, wy, wp] = kind === 'grandrotunda' ? [3.6, 6.4, 5.0, 'clerestory'] : [2.4, 3.8, 3.0, 'lancet'];
+    const torchOff = (RR * Math.PI / G.n - ww / 2 - 0.6) / 2;   // along the wall from the shaft: halfway to the window's surround
     for (let k = 0; k < G.n; k++){
       const th = (k + 0.5) * Math.PI * 2 / G.n, [wx, wz, nx, nz] = wallPt(S.shape, th, RR);
       S.ribs.push([cx - nx * 0.5, cz - nz * 0.5, wx + nx * 0.06, wz + nz * 0.06]); S.springs.push([wx, wz, nx, nz]);
       const [lx, lz, lnx, lnz] = wallPt(S.shape, k * Math.PI * 2 / G.n, RR);
-      if (kind === 'grandrotunda') panelAt(lx, lz, lnx, lnz, 3.6, 6.4, y + 5.0, 'clerestory'); else panelAt(lx, lz, lnx, lnz, 2.4, 3.8, y + 3.0, 'lancet');
-      const [tx, tz, tnx, tnz] = wallPt(S.shape, th - 0.25 * 12 / RR, RR); torchAt(fl, tx, tz, tnx, tnz, 2.6);
+      panelAt(lx, lz, lnx, lnz, ww, wh, y + wy, wp);
+      const [tx, tz, tnx, tnz] = wallPt(S.shape, th - torchOff / RR, RR); torchAt(fl, tx, tz, tnx, tnz, 2.6);
     }
     S.bosses.push([cx, cz]);
     if (kind === 'treasury'){
@@ -1966,6 +1974,11 @@ function buildCrypt(spec){
   const openAt = openAtOf(L), backed = (x, z, face) => !openAt(x - Math.cos(face) * 0.5, z - Math.sin(face) * 0.5);
   L.sconces = L.sconces.filter(s => s.kind || (openAt(s.x, s.z) && backed(s.x, s.z, s.face)));   // braziers and candles stand free
   L.panels = L.panels.filter(p => backed(p.x, p.z, p.face));
+  // a rib that comes down over a window lands on the wall above its arch: no shaft down through the glass
+  for (const R of L.regions) if (R.type === 'shaped') R.springs = R.springs.filter(([x, z]) => !L.panels.some(p => {
+    const fx = Math.cos(p.face), fz = Math.sin(p.face), dx = x - p.x, dz = z - p.z;
+    return p.y < R.spring && Math.abs(dx * fx + dz * fz) < 0.6 && Math.abs(dz * fx - dx * fz) < (p.w || p.s) / 2 + 0.24;
+  }));
   // doorways: where a passage runs into a room along its own axis
   const seen = new Set();
   for (let j = 0; j < L.H; j++) for (let i = 0; i < L.W; i++){

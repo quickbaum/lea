@@ -20,6 +20,9 @@ const inRing = p => !!p && (p.thin || []).includes('fairy ring');
 export const PREPARATIONS = {
   'fairy salve': {
     maker: 'stargazer', moon: 'new',
+    // once made: the stargazers keep the wax put by, made up at that dark of the moon (and tell
+    // each other), so any of them, on any day, needs only what has to be fresh-got
+    again: ['four-leaf clover'],
     intro: "Of the green salve for the eye, by which the midwife saw the Gentry as they are.",
     wants: [
       { kind: 'four-leaf clover', n: 1, test: p => dawn(p) && inRing(p), say: 'a leaf of four, picked at first light within a fairy ring', wrong: "That clover wasn't picked at first light in a ring. It won't take." },
@@ -52,9 +55,14 @@ export function shelfBook(sh){
 // number), as the instrument it makes (making.js CRAFTS), or null. One book to a shelf
 export const shelfCraft = sh => sh.maker != null ? CRAFT_IDS[sh.maker % CRAFT_IDS.length] : null;
 
+// what a preparation wants: all of it, or, once it's been made (`again`), only what it wants every time
+export const prepWants = (id, again = false) => {
+  const P = PREPARATIONS[id];
+  return again && P.again ? P.wants.filter(w => P.again.includes(w.kind)) : P.wants;
+};
 // what you carry of each want, rightly got: [{ want, have, rightly }] (pack: makePack)
-export function wantsMet(pack, id){
-  return PREPARATIONS[id].wants.map(w => {
+export function wantsMet(pack, id, again = false){
+  return prepWants(id, again).map(w => {
     const have = pack.counts[w.kind] || 0, rightly = w.test ? pack.countWhere(w.kind, w.test) : have;
     return { want: w, have, rightly, ok: rightly >= w.n };
   });

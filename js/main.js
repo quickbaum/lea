@@ -2,14 +2,24 @@ import * as THREE from 'three';
 import { TOUCH, stick, touchControls } from './touch.js';
 import { SIZE, WATER, WORLD_SEED, WORLD_R, WORLD } from './config.js';
 import { mulberry32, fork } from './rng.js';
-import { height, biome, walkable, buildTerrain, terrainType, soilRichness, pace, setWearSource, settlements, ruins, under } from './terrain.js';
+import { height, biome, walkable, solidAt, buildTerrain, terrainType, treeCover, soilRichness, pace, setWearSource, settlements, road, ruins, under, roadBand, builtBand } from './terrain.js';
 import { spawnPeasants, spawnNamedNPC } from './npc.js';
-import { PuckFlock } from './puck.js';
+import { PuckFlock, setPuckObstacles } from './puck.js';
 import { makeTrolls } from './troll.js';
 import { loadSkeletonKit, makeSkeleton } from './skeleton.js';
 import { makeGuards } from './skeleton-guards.js';
 import { makeBolts } from './light-bolt.js';
 import { Warren } from './fauna.js';
+import { SheepView } from './sheep-view.js';
+import { ShearHands } from './shear-hands.js';
+import { shearable } from './shear.js';
+import { StuckWatch, watchWorld } from './stuck.js';
+import { habitat as habitatAt } from './terrain.js';
+import { spawnFlocks, SHEEP } from './sheep.js';
+import { flockOwners, flockLand, raiseCommons } from './flock-land.js';
+import { hireShepherds } from './shepherd.js';
+import { Sward } from './sward.js';
+import { buildFolds } from './fold-view.js';
 import { plantWorld, cullFlora, floraTilesDrawn, setFloraLod, makeFairyRing } from './gen/flora.js';
 import { Footsteps } from './footsteps.js';
 import { whoAnswers, answerWait, doorMood, onDoorSide } from './knock.js';
@@ -26,23 +36,31 @@ import { RECIPES, RAW_KINDS, RARE, BOOK_RECIPES, stepsKnown, memoryOf } from './
 import { INGREDIENTS, LOOKS, ingredient, edible } from './ingredients.js';
 import { makePack } from './pack.js';
 import { packView } from './pack-view.js';
+import { bagView } from './bag-view.js';
 import { makeJournal } from './journal.js';
 import { journalBlocks } from './journal-view.js';
 import { makeBook } from './book-view.js';
 import { describe as describeProv, THIN_R, DAWN, isDawn } from './provenance.js';
-import { PREPARATIONS, shelfBook, shelfCraft, wantsMet, daysToNewMoon, NEW_MOON } from './stillroom.js';
-import { CRAFTS, canMake, needsText, teachCraft, goodsOf, takeGoods } from './making.js';
+import { PREPARATIONS, prepWants, shelfBook, shelfCraft, wantsMet, daysToNewMoon, NEW_MOON } from './stillroom.js';
+import { CRAFTS, canMake, needsText, teachCraft, goodsOf, takeGoods, addGoods } from './making.js';
 import { houseName, phaseName } from './astrology.js';
 import { makeVitals, tickVitals, canRun, spend, eat, eatValue, SP_MAX, ST_MAX } from './vitals.js';
-import { worth, isWild, VALUABLES } from './trade.js';
+import { vitalsView } from './vitals-view.js';
+import { worth, isWild, isCrop, VALUABLES, ROAD_GOODS, isCraft, nameCraft } from './trade.js';
+import { craftPic, designOf } from './craft-view.js';
+import { traderSites, traderCount, TRADE } from './traders.js';
 import { addFood, countOf, rawOf, rawKinds, addRaw, giveForDish } from './larder.js';
 import { CampfireView, ShelterView, HutView, FireLights } from './campfire-view.js';
+import { makeCookView } from './cook-view.js';
+import { lantern } from './lantern.js';
 import { ShrineView } from './shrine-view.js';
 import { TrailField } from './trails.js';
 import { buildRoad } from './road-view.js';
 import { buildSettlements } from './settle-view.js';
 import { buildRuins } from './ruins-view.js';
-import { buildEntrances, buildLevelView, entranceHit } from './under-view.js';
+import { stairClearing } from './gen/under.js';
+import { buildEntrances, buildLevelView, entranceHit, entranceAim, FAERIE_LIGHT } from './under-view.js';
+import { createGlance } from './glance.js';
 import { buildLevel } from './gen/under.js';
 import { buildStairView, buildGroundsView } from './faerie-places-view.js';
 import { juliaWarm } from './julia-tex.js';
@@ -80,10 +98,21 @@ import { Mycelium } from './mycelium.js';
 import { treeVoice, facedTreeVoice, ringTree, woodRumour } from './wood-talk.js';
 import { TreeFaces } from './tree-faces.js';
 import { createMaps } from './map.js';
-import { places, placeAt, placePhrase, settlementNames, ruinNames, underNames } from './gen/places.js';
+import { closeX } from './close-x.js';
+import { places, placeAt, placePhrase, settlementNames, farNames, ruinNames, underNames } from './gen/places.js';
 import { makeTalkView } from './talk-view.js';
+import { makeMail } from './mail.js';
+import { makeTombRite } from './tomb-rite.js';
+import { makePerfLog, sendPerfLog } from './perf-log.js';
+import { treePieces } from './kin.js';
+import { personBlocks, loadSkull } from './person-view.js';
+import './kit/bub-lineage.js';       // the Bub's family tree (a link to the kit's own file: docs/skeletons.md)
+import { buildJunctions } from './junction-view.js';
+import { addNews } from './gossip.js';
+import { nudge, regard } from './ties.js';
 import { isMember, mayHear, atSecretRite } from './fellowships.js';
 import { makeTosses } from './toss.js';
+import { crisp } from './textures.js';
 
 // Bake any sprites that are in tools/bakes.json but not yet on disk.
 // Runs in the user's Chrome (real GPU) and saves results to the server.
@@ -127,6 +156,7 @@ const rng = mulberry32(WORLD_SEED);
 const { ground, waterTex } = buildTerrain(scene);
 buildRoad(scene);                                          // the Old Road's paving (js/gen/road.js)
 const settleView = buildSettlements(scene);                // the villages' wooden buildings (js/gen/settle.js)
+const junctionView = buildJunctions(scene, { junctions: settlements().junctions, nameOf: p => settlementNames()[settlements().places.indexOf(p)].name, height });                // the signpost and mailbox where each lane meets the road
 buildRuins(scene);                                         // the old stone ruins, mostly far from the road (js/gen/ruins.js)
 buildEntrances(scene);                                     // cave mouths and the crypt stair (js/gen/under.js)
 const forage = plantWorld(scene, fork(rng), { ground });   // ground passed so duff can be painted under trees
@@ -217,8 +247,10 @@ const SAYINGS = new Map();
 fetch('sayings.json').then(r => r.json()).then(d => { for (const s of d.sayings) SAYINGS.set(s.id, s); setSayings(d.sayings); })
   .catch(e => console.warn('no sayings:', e));
 const fireLights = new FireLights(scene);                 // hearths borrow these; the count never changes
+lantern.attach(scene);                                    // yours, after dark
 agents.setTrees(forage.trees);                             // so the hearth lands in a clearing
 agents.setObstacles(forage.obstacles);                    // trunks & shrubs people walk around
+setPuckObstacles((x, z, r) => agents.obstaclesWithin(x, z, r));   // and Puck hops round
 agents.buildNav();                                        // A* walkability grid (routes around water/trees)
 agents.setHouses(settlements());                          // the village dwellings, each with its hearth lit (docs/settlements.md)
 agents.setShrubs(forage.shrubs);                           // choppable firewood for the fires
@@ -249,7 +281,7 @@ agents.setFishing(fishingSpots({ height, walkable, water: WATER, radius: WORLD_R
   rng: mulberry32((WORLD_SEED ^ 0xf15b) >>> 0) }),
   fishingGrounds({ height, water: WATER, radius: WORLD_R, rng: mulberry32((WORLD_SEED ^ 0xb0a7) >>> 0) }));   // …and out on the deep water, from a boat
 const fishView = makeFishingView(scene, { water: WATER });
-agents.setFlowers(forage.flowers || []);                   // wildflowers female elves pick for crown-making
+agents.setFlowers(forage.flowers || []);                   // wildflowers human women pick for crown-making
 agents.setOnCrownMade(async (npc, flowerIds) => {
   const crownCanvas = await generateCrown(flowerIds);
   npc.wearCrown(crownCanvas);
@@ -257,9 +289,31 @@ agents.setOnCrownMade(async (npc, flowerIds) => {
   // crown on the painted-face portrait too (the old PORTRAIT_* params were tuned
   // for the 100×100 wojak portrait, not the new head template).
 });
+agents.setOnCrownWilted(npc => npc.takeOffCrown());
 agents.spawnFauna();                                       // rabbits — quarry that roam, flee & are hunted (docs/hunting.md)
 let warren = null;
 new Warren(scene, agents.fauna).load().then(w => { warren = w; });   // draws the rabbits
+const sheepView = new SheepView(scene, 150);               // and the sheep (docs/sheep.md); they're spawned once the bands exist
+const _sheepTint = new THREE.Color();
+function drawSheep(tint){
+  let n = 0;
+  sheepView.setHeld(-1);
+  if (!down) for (const f of agents.flocks){
+    if (!f.awake) continue;
+    for (const s of f.sheep){
+      if (n >= sheepView.capacity) break;
+      lantern.warm(_sheepTint.copy(tint), s.x, s.z);
+      if (s.held) sheepView.setHeld(n);
+      sheepView.set(n++, s, height(s.x, s.z), _sheepTint);
+    }
+  }
+  sheepView.setCount(n);
+  if (n){
+    sheepView.setLight({ sunDir: sky.sunDir });
+    sheepView.shared.uSun.value.copy(sky.sunLight.color).multiplyScalar(sky.sunLight.intensity * 0.65);
+    sheepView.update(performance.now() / 1000);
+  }
+}
 
 // trails: a wear field that NPCs (and the player) tread into bare paths over
 // time, suppressing grass on the route. See docs/trails.md.
@@ -278,7 +332,16 @@ for (const n of facedTrees){
   trail.clearing(n.x, n.z, r);
   for (const s of forage.shrubs) if (s.alive !== false && Math.hypot(s.x - n.x, s.z - n.z) < r * 0.8) s.chop();
 }
+// and the steps down to each crypt, worn bare around the well
+for (const e of under().entrances) if (e.kind === 'stair'){ const c = stairClearing(e); trail.clearing(c.x, c.z, c.r); }
 trail.flush();
+
+// A fire laid by anyone clears the grass round it, the same way, for as long as it
+// stands; once it's gone the ground grows back slowly. A house's hearth never comes
+// here: it's indoors. r takes in the sitting circle, the woodpile and the basket.
+const FIRE_CLEARING_R = 5;
+agents.onFireLaid = f => { f.clearedCells = trail.clearing(f.x, f.z, FIRE_CLEARING_R); };
+agents.onFireGone = f => { if (f.clearedCells) trail.release(f.clearedCells); f.clearedCells = null; };
 
 // decorative single-pixel grass blades that carpet the ground near the camera
 // and sway in the wind (cosmetic only; not tracked). See js/grass.js. Concentric
@@ -290,6 +353,9 @@ trail.flush();
 // no density ring). Only a gentle alpha dissolve at the far edge, where the clumps
 // take over.
 const grassDetail = new GrassDetail(scene, { trail, radius: 22, count: 60000, fade: 'alpha' });
+const sward = new Sward();                                 // how short it's been eaten (docs/sheep.md)
+grassDetail.sward = sward;
+let foldView = null;
 
 // what you carry: a grid of boxes (pack.js, drawn by pack-view.js); `basket` is its
 // counts ({ berries: 3 }), kept in step by the pack, for everything that only asks how many
@@ -343,13 +409,22 @@ fetch('sprites/npc/lea_clan.json').then(r => r.ok ? r.json() : []).catch(() => [
                          : CULTURES[cq] || CULTURES.folk;
     for (const n of api.npcs) agents.attach(n, cultureOf(n));
     for (const g of api.groups) if (g.village) agents.settleIn(g.npcs, agents.houses[g.house]);   // villagers move in
+    // sheep are held in common by a band (docs/sheep.md, js/flock-land.js)
+    spawnFlocks(agents, flockOwners(api.groups), mulberry32((WORLD_SEED ^ 0x5eef) >>> 0), flockLand(agents, sward));
+    { const commons = raiseCommons(agents, trail);
+      foldView = buildFolds(scene, commons.map(c => c.fold), commons.map(c => c.hut), height);
+      // a shepherd speaks first (js/shepherd.js): within earshot, and not over a conversation you're in
+      hireShepherds(agents, ((sky.time % 1) + 1) % 1, { sayAloud: (n, kind, line) => {
+        if (down || document.getElementById('dlg-overlay') || n.convo || Math.hypot(n.x - pos.x, n.z - pos.z) > 35) return;
+        talkView.say(n, { who: n, to: PLAYER, key: 'shepherd-' + kind, icon: kind === 'chased' ? 'cross' : 'hello', line });
+      } }); }
     // the fellowships (js/fellowships.js, docs/fellowships.md): who belongs, and the stones they meet at
     { const rn = ruinNames();
       agents.setFellowships({ circles: ruins().map((u, i) => ({ u, i })).filter(q => q.u.kind === 'circle')
         .map(({ u, i }) => ({ x: u.x, z: u.z, r: u.rad || 10, name: rn[i].name })) }); }
     setLoad('painting faces…', 0.08);
     // Portraits first, then warmTrails. warmTrails pre-simulates synchronously and
-    // triggers onCrownMade for any elf who gathers 7 flowers. onCrownMade is async
+    // triggers onCrownMade for any woman who gathers 7 flowers. onCrownMade is async
     // (awaits generateCrown), so it completes after warmTrails returns. If portraits
     // were generated AFTER warmTrails, wojak.ready() could overwrite a crown portrait
     // that onCrownMade had already set. Generating portraits first guarantees the
@@ -413,6 +488,7 @@ function setLoad(msg, frac){
   if (_loadFill)  _loadFill.style.width  = (frac * 100).toFixed(1) + '%';
   if (frac >= 1){
     _worldReady = true;
+    perfLog?.mark('ready');
     // Brief pause so the bar visually completes before swapping to CLICK TO ENTER.
     setTimeout(() => {
       _loadStatus?.classList.add('done');
@@ -460,15 +536,15 @@ async function warmTrails(seconds, onProgress){
 const footsteps = new Footsteps();
 const ambience = new Ambience();
 const instruments = new Instruments();
-setVoicePlayer((kind, sched, o) => instruments.play(kind, sched, o));   // a voiced speaker's words ring (dialog.js sing)
+setVoicePlayer((kind, sched, o) => instruments.play(kind, sched, { ...o, voice: true }));   // a voiced speaker's words ring (dialog.js sing)
 let tunePlaying = null;          // { id, kind, perf }: the tune you're playing (playTune, below)
+const stopTuneBtn = document.getElementById('stop-tune');   // shown while you play; T does the same
+stopTuneBtn.addEventListener('click', () => stopTune());
 
 // While the splash is up the world is rendered but paused, and name tags hide.
 let playing = false;
 let inDialog = false;          // a conversation is open (keeps us 'in game', not menu)
 let settingsOpen = false;      // the sound settings panel is open (also keeps us 'in game')
-const nameTags = [];
-const registerTag = (tag) => { if (tag){ tag.visible = playing; nameTags.push(tag); } };
 
 // my in-world presence for shared diagnosis (name tag above a peasant)
 let avatar = null;
@@ -486,16 +562,16 @@ if (showNpcDbg) npcDbg.style.display = 'block';
 
 // "hover" panel for the peasant the player is looking at (pointer-locked view =
 // whoever is nearest the centre of the screen): portrait + name in a framed box
-// stacked just above the minimap, sharing the map's frame so they read as a pair.
+// just under the minimap's ring.
 const hoverPanel = document.createElement('div');
 hoverPanel.id = 'hover-panel';
-hoverPanel.style.cssText = 'position:fixed;right:10px;bottom:222px;width:180px;height:90px;'
+hoverPanel.style.cssText = 'position:fixed;right:28px;top:320px;width:180px;height:90px;'
   + "border:10px solid;border-image:url('thin_dark_frame.png') 10 round;background:#1d1a14;"
   + "display:none;align-items:center;gap:8px;padding:6px;box-sizing:border-box;overflow:hidden;"
   + "font-family:Georgia,'Times New Roman',serif;color:#efe6cf;z-index:40;";
 const hoverFace = document.createElement('img');
 hoverFace.style.cssText = 'width:56px;height:56px;flex:0 0 56px;object-fit:cover;'
-  + 'border:1px solid #c9a23a;border-radius:3px;background:#0c0e16;background-size:20px;image-rendering:auto;';
+  + 'border:1px solid #c9a23a;border-radius:3px;background:#0c0e16;background-size:20px;';
 // name + description stack vertically beside the (optional) portrait
 const hoverText = document.createElement('div');
 hoverText.style.cssText = 'flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:3px;';
@@ -549,6 +625,8 @@ function describeTemp(f, cloud = 0.5){
 const _fwd = new THREE.Vector3(), _to = new THREE.Vector3();
 const TALK_RANGE = 4.5;       // how close you must be to actually talk / pick up
 const FRAME_RANGE = TALK_RANGE; // the box reads an object/person exactly when E can act on it
+const PUCK_REACH = 6;         // Puck bolts from anyone inside 7, so a little further off than anyone else
+const SHEEP_REACH = 8;        // sheep move off at 7 and stop just past it, so you have to be able to reach one standing there
 const LOOK_CONE = 0.97;       // ~14° cone: how near the cursor a target must sit
 const ENTRANCE_REACH = 9;     // a cave mouth or the crypt stair: how far off your view can meet it and E still go down
 
@@ -585,25 +663,14 @@ function forageLabel(p){
   return { title, desc: 'Ripe for the picking.' };
 }
 
-function updateFocus(){
-  nearTalker = null; nearFruit = null; nearObject = null; nearBoat = null; nearTree = null; nearRing = null; nearFish = null; nearHouseDoor = null;
-  nearEntrance = null; nearFind = null; nearExit = -1; nearSconce = null; nearShelf = null; nearPortal = null; nearDoor = null; nearChest = null;
-  if (!playing || inDialog || document.pointerLockElement !== canvas){ hoverPanel.style.display = 'none'; return; }
-  if (down){ underFocus(); return; }
-  camera.getWorldDirection(_fwd);
-
-  // ONE cone pick across everything you might look at — people, forageables,
-  // campfires — so the box and the E-target are always the same thing.
-  let best = null, bestDot = LOOK_CONE;
-  const consider = (x, z, eyeY, maxDist, data) => {
-    const { dist, dot } = focusAt(eyeY, x, z);
-    if (dist < 0.4 || dist > maxDist) return;
-    if (dot > bestDot){ bestDot = dot; best = { dist, ...data }; }
-  };
+// everything above ground you might look at, as consider(x, z, eyeY, maxDist, data): the hover
+// box and E pick from these, and so does the glance
+const SIGN_AIM = 2.7, BOX_AIM = 1.5;   // how far above the ground you aim at them (units): the plank, and the box
+function focusables(consider){
   // the box only reads something you're relatively close to (FRAME_RANGE);
   // E still only fires once within TALK_RANGE
   if (avatar) consider(avatar.x, avatar.z, height(avatar.x, avatar.z) + 1.0, FRAME_RANGE, { kind: 'person', c: avatar, dialog: 'claude', name: 'Claude' });
-  if (puck)   consider(puck.x,   puck.z,   height(puck.x,   puck.z)   + 1.0, FRAME_RANGE, { kind: 'person', c: puck,   dialog: 'puck',   name: 'Puck'   });
+  if (puck && !(puck.aloof > 0)) consider(puck.x,   puck.z,   height(puck.x,   puck.z)   + 1.0, PUCK_REACH, { kind: 'person', c: puck,   dialog: 'puck',   name: 'Puck', reach: PUCK_REACH });
   for (const T of trolls){ const [x, z] = T.front(pos.x, pos.z); consider(x, z, height(x, z) + T.h * 0.59, FRAME_RANGE, { kind: 'person', c: T, dialog: T.dialog, name: T.name }); }
   for (const n of npcApi.npcs) if (!n._indoors)            // nobody indoors to be seen
     consider(n.x, n.z, height(n.x, n.z) + n.h * 0.6, FRAME_RANGE, { kind: 'person', c: n, peasant: true, name: n.name || 'a peasant', npc: n });
@@ -612,7 +679,8 @@ function updateFocus(){
   // ends the conversation)
   for (const p of forage.pickables ? forage.pickables() : []){
     if (!p.ripe) continue;
-    consider(p.x, p.z, height(p.x, p.z) + 0.5, FRAME_RANGE,
+    const m = p.aim();                                 // by the fruit itself: up in its tree, or down in the grass
+    consider(p.x + m.dx, p.z + m.dz, height(p.x, p.z) + m.y, FRAME_RANGE,
       p.ring ? { kind: 'ring', item: p } : { kind: 'fruit', item: p });
   }
   // campfires (informational — not an E target)
@@ -621,6 +689,13 @@ function updateFocus(){
   // rabbits (informational)
   for (const q of agents.fauna || [])
     if (q.alive) consider(q.x, q.z, height(q.x, q.z) + 0.3, FRAME_RANGE, { kind: 'rabbit', q });
+  // sheep (informational)
+  if (!down) for (const f of agents.flocks)
+    if (f.awake) for (const s of f.sheep){
+      // one you could shear catches the eye, as Puck does. Short of wool, it's only there to read about, up close
+      const ready = shearable(s) && !boating;
+      consider(s.x, s.z, height(s.x, s.z) + 0.8, ready ? SHEEP_REACH : FRAME_RANGE, { kind: 'sheep', s, f, wool: ready ? s : null, reach: ready ? SHEEP_REACH : undefined });
+    }
   // fishing spots: aim at the water off the bank (E casts, if you're on the bank)
   if (!boating && !playerFish)
     for (const sp of agents.fishing)
@@ -629,11 +704,51 @@ function updateFocus(){
   if (!boating)
     for (const b of boats.list)
       if (!b.aboard) consider(b.x, b.z, WATER + 0.4, FRAME_RANGE, { kind: 'boat', boat: b });
+  // a house door, from its own side of the house
+  if (!boating)
+    for (const h of agents.houses)
+      if (onDoorSide(h, pos.x, pos.z)) consider(h.door.x, h.door.z, height(h.door.x, h.door.z) + 1.2, FRAME_RANGE, { kind: 'door', house: h });
+  for (const b of agents.canoeBuilds)                // a canoe being made on the bank
+    consider(b.x, b.z, height(b.x, b.z) + 0.3, FRAME_RANGE, { kind: 'canoe-bed', bed: b });
+  // where a lane meets the road: its signpost, and its mailbox
+  for (const q of junctionView.list){
+    consider(q.j.x, q.j.z, height(q.j.x, q.j.z) + SIGN_AIM, FRAME_RANGE, { kind: 'sign', sign: q });
+    consider(q.j.box.x, q.j.box.z, height(q.j.box.x, q.j.box.z) + BOX_AIM, FRAME_RANGE, { kind: 'mailbox', mailbox: q });
+  }
+  // shrubs: firewood, E to cut. They're everywhere, so they come last and only take the eye from nothing (updateFocus)
+  if (!boating) for (const s of forage.shrubs)
+    if (s.alive !== false && Math.abs(s.x - pos.x) < FRAME_RANGE && Math.abs(s.z - pos.z) < FRAME_RANGE)
+      consider(s.x, s.z, height(s.x, s.z) + 0.6, FRAME_RANGE, { kind: 'shrub', shrub: s });
+}
+
+// you're out in the world: no panel has you. The look may be locked or the cursor free, since
+// the keys walk and aim either way
+function inWorld(){ return playing && !inDialog && !settingsOpen && !invOpen && !restOpen && !myBook.isOpen && !maps.bigOpen && !skyPicker._open; }
+
+function updateFocus(){
+  nearSheep = null; nearTalker = null; nearFruit = null; nearShrub = null; nearObject = null; nearBoat = null; nearTree = null; nearRing = null; nearFish = null; nearHouseDoor = null; nearSign = null; nearMailbox = null;
+  nearTomb = null; nearWarden = false; nearEntrance = null; nearFind = null; nearExit = -1; nearSconce = null; nearShelf = null; nearPortal = null; nearDoor = null; nearChest = null;
+  if (!inWorld()){ hoverPanel.style.display = 'none'; return; }
+  if (down){ underFocus(); return; }
+  camera.getWorldDirection(_fwd);
+
+  // ONE cone pick across everything you might look at — people, forageables,
+  // campfires — so the box and the E-target are always the same thing.
+  let best = null, bestDot = LOOK_CONE, held = null;   // held: what the glance is on. It needn't be near the middle of the view
+  const consider = (x, z, eyeY, maxDist, data) => {
+    const { dist, dot } = focusAt(eyeY, x, z);
+    if (dist < 0.4 || dist > maxDist) return;
+    if (glance.target && glanceRef(data) === glance.target) held = { dist, ...data };
+    if (data.kind === 'shrub' && best && best.kind !== 'shrub') return;   // anything else in the cone comes first
+    if (dot > bestDot){ bestDot = dot; best = { dist, ...data }; }
+  };
+  focusables(consider);
   // a cave mouth, the crypt stair: aimed at by the opening itself (under-view
   // entranceHit), not a point near it — you look down into a stairwell. A hit
   // counts as near dead centre, so it wins unless someone stands in the way.
   for (const en of under().entrances){
     if (en.troll || Math.hypot(en.x - pos.x, en.z - pos.z) > 16) continue;   // the troll's: he's in the way
+    if (en === glance.target) held = { dist: Math.hypot(en.x - pos.x, en.z - pos.z), kind: 'entrance', e: en };
     const t = entranceHit(en, camera.position.x, camera.position.y, camera.position.z, _fwd.x, _fwd.y, _fwd.z, ENTRANCE_REACH);
     if (t >= 0 && 0.99 > bestDot){ bestDot = 0.99; best = { dist: t, kind: 'entrance', e: en }; }
   }
@@ -641,15 +756,11 @@ function updateFocus(){
   // an entrance, a hit counts as near dead centre)
   if (sight) for (const pt of doors()){
     if (Math.hypot(pt.x - pos.x, pt.z - pos.z) > 16) continue;
+    if (pt === glance.target) held = { dist: Math.hypot(pt.x - pos.x, pt.z - pos.z), kind: 'portal', p: pt };
     const t = portalHit(pt);
     if (t >= 0 && t <= FRAME_RANGE && 0.99 > bestDot){ bestDot = 0.99; best = { dist: t, kind: 'portal', p: pt }; }
   }
-  // a house door, from its own side of the house
-  if (!boating)
-    for (const h of agents.houses)
-      if (onDoorSide(h, pos.x, pos.z)) consider(h.door.x, h.door.z, height(h.door.x, h.door.z) + 1.2, FRAME_RANGE, { kind: 'door', house: h });
-  for (const b of agents.canoeBuilds)                // a canoe being made on the bank
-    consider(b.x, b.z, height(b.x, b.z) + 0.3, FRAME_RANGE, { kind: 'canoe-bed', bed: b });
+  if (held) best = held;
 
   // Trees are everywhere and never move, so they're the LOWEST-priority thing to
   // frame — only when nothing more interesting (a person, forage, a fire) sits in
@@ -666,14 +777,18 @@ function updateFocus(){
   }
 
   // wire E to whatever's framed, if it's within reach and actionable
-  if (best && best.dist <= TALK_RANGE){
+  if (best && best.dist <= (best.reach ?? TALK_RANGE)){
     if (best.kind === 'person') nearTalker = best;
     else if (best.kind === 'fruit') nearFruit = best.item;
+    else if (best.kind === 'shrub') nearShrub = best.shrub;
+    else if (best.kind === 'sheep' && best.wool && !best.s.held) nearSheep = best.s;
     else if (best.kind === 'fire') nearObject = best.fire;   // inspect the fire/pot with E
     else if (best.kind === 'boat') nearBoat = best.boat;      // climb aboard with E
     else if (best.kind === 'tree') nearTree = best.node;      // listen to a tree with E
     else if (best.kind === 'ring') nearRing = best.item;      // the fungus talks (and can be picked)
     else if (best.kind === 'door') nearHouseDoor = best.house;   // knock with E
+    else if (best.kind === 'sign') nearSign = best.sign;         // read it with E
+    else if (best.kind === 'mailbox') nearMailbox = best.mailbox;   // open it with E
   }
   if (best && best.kind === 'entrance') nearEntrance = best.e;   // within ENTRANCE_REACH already
   if (best && best.kind === 'portal' && best.dist <= TALK_RANGE + 1.5) nearPortal = best.p;
@@ -697,7 +812,7 @@ function updateFocus(){
   };
   if (best && best.kind === 'person' && best.name){
     const label = best.peasant ? displayName(best.npc) : best.name;   // strangers stay anonymous
-    showText(label, '', best.npc && best.npc.portrait, markBackdrop(best.npc?.group?.id));
+    showText(label, best.npc?.postRider ? 'Carries the post along the road.' : best.npc?.trader ? (best.npc.trader.kind === 'music' ? 'Plays along the road, for their supper.' : 'Trades along the road.') : '', best.npc && best.npc.portrait, markBackdrop(best.npc?.group?.id));
   } else if (best && best.kind === 'fruit'){
     const { title, desc } = forageLabel(best.item); showText(title, desc, null);
   } else if (best && best.kind === 'tree'){
@@ -718,6 +833,10 @@ function updateFocus(){
     showText('A fairy ring', 'Violet caps in a circle. The rest of it is underfoot.', null);
   } else if (best && best.kind === 'rabbit'){
     showText('A rabbit', best.q.fleeing ? 'Bolting — wary of you.' : 'Grazing, ears twitching.', null);
+  } else if (best && best.kind === 'sheep'){
+    const doing = { run: 'Off with the others.', walk: 'Walking back to the others.', rest: 'Lying down, chewing.', graze: 'Head down, grazing.' }[best.s.mode];
+    const wool = best.s.len < 0.25 ? ' Freshly shorn.' : shearable(best.s) ? '' : ' Its wool is growing back.';
+    showText('A sheep', `${doing} One of the ${best.f.name} flock.${wool}`, null);
   } else if (best && best.kind === 'entrance'){
     showText(underNames()[best.e.level].name, best.e.kind === 'cave' ? 'A cave mouth. Cold air breathes out of it.' : `Steps going down ${STAIR_WHERE[best.e.site] || STAIR_WHERE.chapel}.`, null);
   } else if (best && best.kind === 'portal'){
@@ -726,6 +845,10 @@ function updateFocus(){
     // what you can see from the step: a lamp shows after dark if someone's home (settle-view.js)
     const dark = (sky.night ?? 0) >= 0.5;
     showText('A door', !dark ? 'The door of a house.' : best.house.occupied ? 'There is lamplight in the window.' : 'The windows are dark.', null);
+  } else if (best && best.kind === 'sign'){
+    showText('A signpost', `It points up the lane: ${best.sign.name}.`, null);
+  } else if (best && best.kind === 'mailbox'){
+    showText('A mailbox', mailHolds(best.mailbox) ? 'Its flag is up. There are letters in it.' : 'Its flag is down.', null);
   } else if (best && best.kind === 'boat'){
     const by = best.boat.madeBy;
     showText('A bark canoe', by ? `${displayName(by)} made it. Anyone may take it.` : 'Moored at the water’s edge. Anyone may take it.', null);
@@ -736,6 +859,8 @@ function updateFocus(){
       : need === 'ribs' ? 'The bark is down. It wants poles for the ribs.'
       : b.progress < 0.55 ? 'The sides are bent up against stakes.'
       : b.progress < 0.85 ? 'Ribs in, the seams half sewn.' : 'Nearly done. The seams are being gummed.', null);
+  } else if (best && best.kind === 'shrub'){
+    showText('A shrub', 'Dry enough to burn.', null);
   } else if (best && best.kind === 'fire'){
     const pot = best.fire.potLabel && best.fire.potLabel();   // something simmering?
     if (pot) showText(pot.title, pot.desc, null);
@@ -771,8 +896,8 @@ function tryClickInteract(e){
 
   if (avatar) check(avatar.x, height(avatar.x, avatar.z) + 1.0, avatar.z,
     { kind: 'person', c: avatar, dialog: 'claude', name: 'Claude' });
-  if (puck)   check(puck.x, height(puck.x, puck.z) + 1.0, puck.z,
-    { kind: 'person', c: puck, dialog: 'puck', name: 'Puck' });
+  if (puck && !(puck.aloof > 0)) check(puck.x, height(puck.x, puck.z) + 1.0, puck.z,
+    { kind: 'person', c: puck, dialog: 'puck', name: 'Puck', reach: PUCK_REACH });
   for (const T of trolls){ const [x, z] = T.front(pos.x, pos.z); check(x, height(x, z) + T.h * 0.59, z, { kind: 'person', c: T, dialog: T.dialog, name: T.name }); }
   for (const n of npcApi.npcs) if (!n._indoors)
     check(n.x, height(n.x, n.z) + n.h * 0.6, n.z,
@@ -785,8 +910,13 @@ function tryClickInteract(e){
   if (!boating && !down)
     for (const h of agents.houses)
       if (onDoorSide(h, pos.x, pos.z)) check(h.door.x, height(h.door.x, h.door.z) + 1.2, h.door.z, { kind: 'door', house: h });
+  if (!down)
+    for (const q of junctionView.list){
+      check(q.j.x, height(q.j.x, q.j.z) + SIGN_AIM, q.j.z, { kind: 'sign', sign: q });
+      check(q.j.box.x, height(q.j.box.x, q.j.box.z) + BOX_AIM, q.j.box.z, { kind: 'mailbox', mailbox: q });
+    }
 
-  if (best && bestDist3d <= TALK_RANGE) {
+  if (best && bestDist3d <= (best.reach ?? TALK_RANGE)) {
     doInteract(best);
   }
 }
@@ -800,7 +930,7 @@ function doInteract(target){
     document.exitPointerLock?.();
     const onClose = () => {
       mapMark = null; npc.talking = false; inDialog = false;
-      try { canvas.requestPointerLock(); } catch (_){}
+      relock();
     };
     if (target.peasant){
       const tree = peasantTree(npc, sky, target.door);
@@ -823,15 +953,25 @@ function doInteract(target){
       openTalk(target.dialog, { actions: weatherActions, onClose, onNav });
     }
   } else if (target.kind === 'fire'){
-    inDialog = true; document.exitPointerLock?.();
-    const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch(_){} };
-    talkTree(fireTree(target.fire), { onClose });
+    sitAt(target.fire);
   } else if (target.kind === 'boat'){
     board(target.boat);
   } else if (target.kind === 'door'){
     knockAt(target.house);
+  } else if (target.kind === 'sign'){
+    readSign(target.sign);
+  } else if (target.kind === 'mailbox'){
+    openMailbox(target.mailbox);
   }
 }
+
+// where a lane meets the road (js/junction-view.js): the name, and how many live up it; and the box
+function readSign(q){ setForageMsg(`${q.name}. Population ${mail.population(q.j)}.`, 6000); }
+function openMailbox(q){
+  inDialog = true; document.exitPointerLock?.();
+  talkTree(mail.boxTree(q.j), { onClose: () => { inDialog = false; relock(); } });
+}
+const mailHolds = q => mail.boxes[junctionView.list.indexOf(q)].letters.length > 0;
 
 // ---------- knocking at a house door (js/knock.js) ----------
 // You knock, and wait on the step: someone indoors comes out to you and the talk opens,
@@ -864,7 +1004,6 @@ function tickKnock(dt){
 
 // ---------- inventory panel ----------
 const invPanel = document.getElementById('inv-panel');
-const invBtn   = document.getElementById('inv-btn');
 let invOpen = false;
 
 // Where, how and under what sky something was got (js/provenance.js): every unit that goes
@@ -898,6 +1037,7 @@ function packUse(kind){
   if (e.use === 'sight') return 'Use: touch it to one eye, after dark, at a fairy ring, a stone circle or a sacred tree.';
   if (e.use === 'play') return tunePlaying?.kind === kind ? 'Playing. Click it again to stop.' : tunesRead.size ? 'Click to play a tune on it.' : "Click to play it. You don't know a tune for it yet.";
   if (e.raw) return 'Raw: it wants a pot over a fire.';
+  if (e.use === 'fire') return `${TOUCH ? 'Double-tap' : 'Right-click'} to lay a fire (${FIRE_LOGS} logs), or drag it onto a fire you're sat at to feed it.`;
   if (e.group === 'trinket') return 'A pretty thing, worth a trade.';
   if (e.use === 'unlock') return `A key. Aim at the door with its sign on it and ${TOUCH ? 'tap Use' : 'press E'}.`;
   if (e.use === 'look') return `${TOUCH ? 'Double-tap' : 'Right-click'} to look through it. Stargazers would give a great deal for it.`;
@@ -906,16 +1046,20 @@ function packUse(kind){
 // the line under the grid for a box: what it's good for, then where it came from (its
 // oldest lot; how many other gatherings are mixed in with it)
 function packSays(box){
+  if (box.kind === 'letter'){ const l = mail.letterIn(box); if (l) return mail.says(l); }
   const lots = box.lots || [], more = lots.length - 1;
   return `${packUse(box.kind)} ${describeProv(lots[0] && lots[0].prov)}${more > 0 ? ` (With ${more} other ${more === 1 ? 'gathering' : 'gatherings'}.)` : ''}`;
 }
+const potFill = q => q == null ? 1 : 0.55 + 0.45 * q;   // a botched pot fills you less (as agents.js STEW_SATIETY)
 function eatFromPack(box){
   const e = ingredient(box.kind) || {}, name = e.label || box.kind;
   if (e.use === 'sight') return useSalve(box);
+  if (e.use === 'letter'){ const l = mail.letterIn(box); if (l) mail.lookAt(l); return ''; }
   if (e.use === 'look') return raiseGlass();
   if (e.use === 'play') return playFromPack(box);
+  if (e.use === 'fire') return startPlacing();
   if (!edible(box.kind)) return packUse(box.kind);
-  const g = eat(me, box.kind, agents.time);
+  const g = eat(me, box.kind, agents.time, potFill(box.lots?.[0]?.prov?.q));
   myPack.takeFrom(box.id);
   return `You eat some ${name}: ${giveWords(g) || "you're as full of it as you'll get"}.`;
 }
@@ -1003,7 +1147,8 @@ function scopeHover(){
 addEventListener('wheel', e => { if (scope) setScopeMag(scope.i + (e.deltaY < 0 ? 1 : -1)); }, { passive: true });
 // the fairy salve (stillroom.js): touched to one eye after dark at a thin place, it
 // shows what's in the Lea under glamour (faerie-view.js), the whole Lea over, until first
-// light: the portals to the Gentry's palaces, and the Gentry walking between them. An
+// light: the portals to the Gentry's palaces, the Gentry and their lights going between the
+// thin places, and the whole of it in Faerie's own purple light. An
 // ordinary crypt or cave puts it out; inside a palace it holds (docs/magic.md).
 // Puck has something to say about it, and more the second time (the midwife's tale,
 // docs/texts/magic-traditions.md §4: they take the eye that sees them).
@@ -1028,7 +1173,7 @@ function doors(){
     .map(t => extraDoor(t, portals(), { walkable, height })).filter(Boolean)]);
 }
 function openSight(){
-  if (!_faerieSet){ faerie.setWorld(doors(), portalPaths(portals(), (a, b, c, d) => planRoute(a, b, c, d, 'scenic'))); _faerieSet = true; }
+  if (!_faerieSet){ faerie.setWorld(doors(), portalPaths(doors(), (a, b, c, d) => planRoute(a, b, c, d, 'scenic'))); _faerieSet = true; }
   faerie.start();
 }
 const inPalace = () => !!down && !!down.L.faerie;           // a palace, the grounds or the stair: anywhere in Faerie
@@ -1063,27 +1208,40 @@ function tickSight(){
     setForageMsg(away ? 'The salve has worn off.' : 'First light. The salve has worn off, and the place is only a place.', 4000);
   }
 }
-// spell points and stamina, as two upright bars beside the minimap (health isn't drawn
-// until something can hurt you: docs/magic.md)
-const vitalsEl = document.createElement('div');
-vitalsEl.id = 'vitals'; vitalsEl.className = 'hide';
-vitalsEl.innerHTML = '<div class="bar sp" title="Spell points"><i></i></div><div class="bar st" title="Stamina"><i></i></div>';
+// spell points and stamina, as the arcs round the minimap (health isn't drawn until something
+// can hurt you: docs/magic.md)
+const vitalsUI = vitalsView();
+const vitalsEl = vitalsUI.el;
+vitalsEl.classList.add('hide');
 document.body.appendChild(vitalsEl);
-const [_spFill, _stFill] = vitalsEl.querySelectorAll('i');
 function drawVitals(){
   vitalsEl.classList.remove('hide');
-  _spFill.style.height = `${(me.sp / SP_MAX * 100).toFixed(1)}%`;
-  _stFill.style.height = `${(me.st / ST_MAX * 100).toFixed(1)}%`;
-  vitalsEl.classList.toggle('winded', me.winded);
+  bag.el.classList.remove('hide');
+  vitalsUI.draw(me.sp / SP_MAX, me.st / ST_MAX, me.winded);
 }
-const packUI = packView(invPanel, myPack, { onEat: eatFromPack, says: packSays });
+const packUI = packView(invPanel, myPack, { onEat: eatFromPack, says: packSays, onClose: () => sat ? getUp() : closeInventory(true), onDropOut: (box, ev) => !!sat && cook.drop(box, ev) });
 // opening the pack frees the mouse (to drag and eat); closing it takes the look back
 function openInventory(){
   packUI.render();
   invPanel.classList.remove('hide');
+  bag.placeCard(invPanel);
+  if (!invOpen) bag.openInto(invPanel);   // (this also runs to refresh a card that's already up)
   invOpen = true;
+  if (sat) seatPack();
 }
-function closeInventory(relockAfter = false){ invPanel.classList.add('hide'); invOpen = false; if (relockAfter) relock(); }
+function closeInventory(relockAfter = false){ if (invOpen) bag.closeFrom(invPanel); invOpen = false; if (relockAfter) relock(); }
+const togglePack = () => { if (sat) return; invOpen ? closeInventory(true) : openInventory(); };
+const bag = bagView({ onClick: togglePack });
+addEventListener('resize', () => { if (invOpen) openInventory(); });
+// what's just been got flies from what you were looking at, or else from where you aim, to the bag
+const _flyFrom = new THREE.Vector3();
+function flyToBag(kind, n){
+  const q = glance.at, r = canvas.getBoundingClientRect();
+  if (q) _flyFrom.set(q.x, q.top ?? q.y, q.z).project(camera);
+  const seen = q && _flyFrom.z < 1 && Math.abs(_flyFrom.x) < 1 && Math.abs(_flyFrom.y) < 1;
+  bag.receive(kind, n, seen ? { x: r.left + (_flyFrom.x + 1) / 2 * r.width, y: r.top + (1 - _flyFrom.y) / 2 * r.height }
+                            : { x: r.left + r.width / 2, y: r.top + r.height / 2 });
+}
 // put n of kind in the pack: true if any went in; says so if some or all didn't fit
 function stow(kind, n, prov){
   const got = myPack.add(kind, n, prov);
@@ -1091,16 +1249,16 @@ function stow(kind, n, prov){
   else if (ingredient(kind)?.use === 'play') setForageMsg(`You take the ${ingredient(kind).label}. Click it in your pack (I) to play it.`, 4000);
   else setForageMsg(`+${n} ${kind}`);
   if (invOpen) openInventory();
+  if (got > 0) flyToBag(kind, got);
   if (got > 0 && (prov?.how === 'picked' || prov?.how === 'found')) jot(prov.how, (ingredient(kind) || {}).label || kind);
   return got;
 }
 
 // ---------- the journal (J): what came of the day, as a diary (js/journal.js) ----------
 const journal = makeJournal(() => ({ t: agents.time, hour: (((sky.time ?? 0) % 1) + 1) % 1 * 24 }));
-const journalBtn = document.getElementById('journal-btn');
-const markJournal = () => journalBtn.classList.toggle('new', journal.unread);
+// something new in the Log: a dot on the book by the map (book.css)
+const markJournal = () => document.body.classList.toggle('log-unread', journal.unread);
 function openJournal(){ openBook('journal', { at: 'end' }); }     // a page of your own book, at its latest spread
-journalBtn.addEventListener('click', e => { e.stopPropagation(); myBook.isOpen && myBook.section === 'journal' ? myBook.close() : openJournal(); });
 // where something happened, as the journal names it: underground, the cave, or the ruin
 // over the crypt; above, a ruin you're among, a settlement you're in, else the region
 const SETTLE_R = 45;
@@ -1151,10 +1309,6 @@ function tickJournal(dt){
   if ((L.halls || []).some(h => Math.hypot(upos.x - h.x, upos.z - h.z) < h.R)) jot('found', 'a hall of dripstone');
 }
 
-invBtn.addEventListener('click', e => {
-  e.stopPropagation();
-  invOpen ? closeInventory(true) : openInventory();
-});
 invPanel.addEventListener('click', e => e.stopPropagation());
 
 document.getElementById('look-btn').addEventListener('click', () => {
@@ -1208,8 +1362,7 @@ if (params.has('talk')) talk(params.get('talk') || 'claude', { actions: weatherA
 spawnNamedNPC(scene, {
   slug: 'male-peasant-elf',
   x: +(params.get('cx') ?? 3), z: +(params.get('cz') ?? 14),
-  name: params.get('name') ?? 'Claude Opus 4.8', labelColor: '#9fd0ff',
-}).then(a => { avatar = a; registerTag(a?.label); });
+}).then(a => { avatar = a; talkView.name(a, params.get('name') ?? 'Claude Opus 4.8', 'claude'); });
 
 // Puck — a magical hopping creature who travels in winking-in-and-out bands.
 // The leader is persistent and talkable; the band is ephemeral. See js/puck.js.
@@ -1226,10 +1379,11 @@ function roarAt(T){
   shove = { dx, dz, dist: 3 + 2.5 * T.scale, hop: 0.9, t: 0, dur: 0.5 };
 }
 new PuckFlock(scene, { x: -4, z: 13 }).load().then(f => {
-  pucks = f; puck = f.leader; registerTag(f.leader?.label);
+  pucks = f; puck = f.leader; talkView.name(puck, 'Puck', 'puck');
   // Puck as a guide: "Where am I?" → somewhere to go → he leads you there (js/puck-guide.js)
   puckGuide = makePuckGuide({ flock: f, player: pos, say: line => talkView.say(puck, { who: puck, key: 'guide', icon: 'place', line, lilt: 'puck', hand: 'puck' }), finder: { kinds: findKinds, where: whereFound, thin: thinPlaces, salve: () => salveHeard }, friends: puckFriends,
-    onArrive: d => { journal.arrive(destPlace(d), 'puck'); markJournal(); } });
+    onArrive: d => { journal.arrive(destPlace(d), 'puck'); markJournal(); },
+    onSetOff: () => { watchPuck = WATCH_PUCK; glance.startTurn(); } });
 });
 // what Puck knows of where things are found (puck-guide.js "Where would I find…?"): the
 // kinds worth asking about, what your recipes want first (then the old books, where the
@@ -1245,7 +1399,7 @@ const nearestOf = (list, x, z) => { let b = null, bd = Infinity; for (const q of
 function findKinds(){
   const wanted = new Set();
   for (const id of recipesRead){
-    if (PREPARATIONS[id]) for (const w of PREPARATIONS[id].wants) wanted.add(w.kind);
+    if (PREPARATIONS[id]) for (const w of prepWants(id, madeOnce.has(id))) wanted.add(w.kind);
     else for (const alts of recipeWants(id)) for (const k of alts) wanted.add(k);
   }
   const others = Object.keys(INGREDIENTS).filter(k => !wanted.has(k) && INGREDIENTS[k].group !== 'dish' && !INGREDIENTS[k].use);
@@ -1341,14 +1495,16 @@ function openTalk(name, opts){
 // what's drawn on them (people, faced trees, a kin marker) is drawn here, through
 // toScreen, so the same marks land right on either map whichever way it's turned.
 const MAP = document.getElementById('map');
-function drawMarks(ctx, toScreen){
+// `seen`: land you haven't seen shows nobody on it. Only mapMark ignores it: someone told you.
+function drawMarks(ctx, toScreen, seen){
   ctx.fillStyle = '#fd4';
-  for (const n of npcApi.npcs){ if (n._indoors) continue; const [mx,my] = toScreen(n.x, n.z); ctx.fillRect(mx-1.5, my-1.5, 3, 3); }
-  if (avatar){ const [ax,ay] = toScreen(avatar.x, avatar.z); ctx.fillStyle = '#6cf'; ctx.fillRect(ax-2, ay-2, 4, 4); }
+  for (const n of npcApi.npcs){ if (n._indoors || !seen(n.x, n.z)) continue; const [mx,my] = toScreen(n.x, n.z); ctx.fillRect(mx-1.5, my-1.5, 3, 3); }
+  if (avatar && seen(avatar.x, avatar.z)){ const [ax,ay] = toScreen(avatar.x, avatar.z); ctx.fillStyle = '#6cf'; ctx.fillRect(ax-2, ay-2, 4, 4); }
   if (pucks){ ctx.fillStyle = '#e8c75a';
-    for (const p of pucks.members){ const [px2,py2] = toScreen(p.x, p.z); const s = (p === pucks.leader) ? 4 : 2; ctx.fillRect(px2-s/2, py2-s/2, s, s); } }
+    for (const p of pucks.members){ if (!seen(p.x, p.z)) continue; const [px2,py2] = toScreen(p.x, p.z); const s = (p === pucks.leader) ? 4 : 2; ctx.fillRect(px2-s/2, py2-s/2, s, s); } }
   // faced trees — the speaking ones, marked as a small cross echoing their eyes
   for (const n of facedTrees){
+    if (!seen(n.x, n.z)) continue;
     const [fx, fy] = toScreen(n.x, n.z);
     ctx.lineWidth = 1.5; ctx.lineCap = 'round';
     ctx.strokeStyle = '#000';
@@ -1369,12 +1525,16 @@ function closeBigMap(){
   maps.closeBig();
   if (playing && !document.body.classList.contains('cursor-mode')){ try { canvas.requestPointerLock(); } catch (_){} }
 }
+document.getElementById('bigmap').append(closeX(closeBigMap, 'Close (M or Esc)'));
 
 // ---------- first-person controls ----------
 const start = document.getElementById('start');
 
 const hud = document.getElementById('hud');
 let yaw = 0, pitch = 0;
+const WATCH_PUCK = 1.5;                            // s you're turned to follow Puck as he sets off, once the talk is over
+let watchPuck = 0;
+const glance = createGlance();                     // an offset on the camera, on top of yaw and pitch (js/glance.js)
 const keys = {};
 
 const fireworks = new Fireworks(scene);
@@ -1514,6 +1674,18 @@ let cullOn = true;
 window.leaPlaces = () => ({ here: placeAt(pos.x, pos.z).name, shown: document.getElementById('place').textContent,
   count: places().length, sample: places().slice(0, 8).map(g => g.name) });
 // settlements (js/gen/settle.js): list them, or leaSettlements(i) to stand at one's gate
+// what a villager says they're up to in their croft (docs/farming.md)
+function fieldTalk(npc, f, v){
+  const c = f.crop;
+  if (npc.actionLabel === 'reap') return v('d-reap', [`Getting the ${c} in. They're ready.`, `Bringing in the ${c}. Come back in an hour and it'll be bare earth.`, `Lifting the ${c}. A good year for them.`]);
+  const job = f.job;
+  if (job === 'sow') return v('d-sow', [`Sowing ${c}. It was something else here last year.`, `Getting the ${c} in. You don't put the same thing in the same ground twice running.`, `Sowing. ${c[0].toUpperCase() + c.slice(1)} this time.`]);
+  if (job === 'stake') return f.needs === 'trellis'
+    ? v('d-poles', ['Setting the bean poles. They need something to climb.', "Putting up poles. Beans won't get anywhere without them.", 'Poles for the beans. Hazel, off the woodpile.'])
+    : v('d-sticks', ['Pushing in sticks for the peas.', "Peas'll lie in the mud without a bit of brush to climb.", 'Brush for the peas to hold on to.']);
+  if (f.needs && f.supports < 1) return v('d-nopoles', [`Hoeing. I can't pole the ${c} till there's wood, and they've stopped growing.`, `The ${c} want poles and the stack's bare. I need to cut some.`]);
+  return v('d-hoe', [`Hoeing the ${c}. The weeds don't stop.`, `Keeping the weeds off the ${c}.`, 'Hoeing. It never ends, this.']);
+}
 window.leaSettlements = i => {
   const S = settlements().places;
   if (i != null && S[i | 0]){ const [x, z] = S[i | 0].gate; pos.x = x; pos.z = z; pos.y = height(x, z) + EYE; }
@@ -1521,6 +1693,12 @@ window.leaSettlements = i => {
   return S.map((p, k) => ({ i: k, name: names[k].name, kind: p.kind, at: `${Math.round(p.x)},${Math.round(p.z)}`, buildings: p.buildings.length,
     households: agents.houses.filter(h => p.buildings.includes(h.b)).map(h => ({
       family: h.household[0]?.group?.name, people: h.household.map(n => `${n.name || '?'}${n._indoors === h ? ' (in)' : ''}${n.sleeping ? ' zz' : ''}`) })) }));
+};
+// the flocks (js/sheep.js): list them, or leaFlocks(i) to stand a little way off one
+window.leaFlocks = i => {
+  const F = agents.flocks, f = i != null && F[i | 0];
+  if (f){ const x = f.anchor.x - 26, z = f.anchor.z; pos.x = x; pos.z = z; pos.y = height(x, z) + EYE; }
+  return F.map((q, k) => ({ i: k, name: q.name, sheep: q.sheep.length, fold: q.fold ? `${Math.round(q.fold.x)},${Math.round(q.fold.z)} ${q.fold.open ? 'open' : 'shut'}, ${q.inside || 0} in` : null, shepherd: q.fold?.keeper ? `${q.fold.keeper.name}, ${q.fold.keeper.actionLabel || ''} at ${Math.round(q.fold.keeper.x)},${Math.round(q.fold.keeper.z)}` : null, hut: q.common ? `${Math.round(q.common.hut.x)},${Math.round(q.common.hut.z)}` : null, wool: { len: +(q.sheep.reduce((a, s) => a + s.len, 0) / q.sheep.length).toFixed(2), dirt: +(q.sheep.reduce((a, s) => a + s.dirt, 0) / q.sheep.length).toFixed(2), wet: +(q.sheep.reduce((a, s) => a + s.wet, 0) / q.sheep.length).toFixed(2) }, at: `${Math.round(q.cx)},${Math.round(q.cz)}`, home: `${Math.round(q.home.x)},${Math.round(q.home.z)}`, awake: q.awake, spread: +q.spread.toFixed(1), running: +q.runningShare.toFixed(2) }));
 };
 // the ruins (js/gen/ruins.js): list them, or leaRuins(i) to stand just outside one, facing it
 window.leaRuins = i => {
@@ -1575,10 +1753,12 @@ window.leaMarket = () => ({ trades: agents.market.trades.slice(-15).map(r => `${
   talks: agents.market.talks || 0, miss: agents.market.miss,
   plans: agents.npcs.flatMap(n => (n.plans || []).filter(p => p.kind === 'trade').map(p => `${n.name}: ${p.item} for ${villageOf(p.house)}`)), spare: agents.houses.map(h => `${villageOf(h)} ${h.household[0]?.group?.name || ''}: ${Object.entries(h.spare).map(([k, n]) => n + ' ' + k).join(', ') || 'nothing'}`) });
 window.leaMap = on => { if (on === false) closeBigMap(); else openBigMap(); return maps.bigOpen; };
+window.leaSeen = () => maps.seenShare;               // how much of the land you've seen, 0..1
 // what folk say about places: the i-th peasant's "Where are we?" answer and news
 window.leaAsk = (i = 0) => { const n = agents.npcs[i | 0]; if (!n) return null;
   return { at: placeAt(n.x, n.z).name, where: whereAreWe(n, (k, a) => voicePick(n, k, a)), news: newsReport(n, sky?.time ?? 0) }; };
 window.leaCull = v => (cullOn = v !== false);   // leaCull(false) draws the whole world's flora — for measuring
+window.leaGlance = handsOn => { if (handsOn) glance.handsOn(); return { locked: document.pointerLockElement === canvas, log: glance.log, handsOff: glance.handsOff, y: glance.y, p: glance.p, target: glance.target, yaw, pitch }; };   // the glance: `log` says what each stop did; leaGlance(true) forgets the mouse, for testing
 window.leaWorld = () => ({ scene, camera, forage, agents, trail });   // debug handle on the live world
 function pacing(iv){
   if (!iv.length) return {};
@@ -1655,13 +1835,15 @@ canvas.addEventListener('click', e => {
 start.addEventListener('click',  () => { if (_worldReady) canvas.requestPointerLock(); });
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
+  document.body.classList.toggle('mouselook', locked);
+  document.getElementById('look-btn').textContent = locked ? 'Esc to Click' : 'L to Look';
   if (locked) {
+    glance.settle();
     document.body.classList.remove('cursor-mode');
     if (!playing) {
       // First entry into the game world
       playing = true;
       start.classList.add('hide');
-      for (const t of nameTags) t.visible = true;
       window.Leaves?.stop();
       footsteps.init(); ambience.init(); instruments.init();
     }
@@ -1671,6 +1853,7 @@ document.addEventListener('pointerlockchange', () => {
     if (!playing) return;
     // Player pressed Escape — enter cursor mode (world keeps running)
     document.body.classList.add('cursor-mode');
+    glance.handsOn();                                  // the mouse is a pointer now; it says nothing about how you look
   }
 });
 
@@ -1711,7 +1894,6 @@ function applyGfx(){
   grassDetail.mesh.visible = gfx.grass;
   grassDetail.swayOn = gfx.sway;   // not .sway: that's the blade buffer
   MAP.style.display = gfx.map ? '' : 'none';
-  document.body.classList.toggle('no-minimap', !gfx.map);
   meterEl.classList.toggle('hide', !gfx.meter);
 }
 const saveGfx = () => { try { localStorage.setItem('lea.gfx', JSON.stringify(gfx)); } catch (_){} };
@@ -1746,6 +1928,8 @@ document.getElementById('settings-done').addEventListener('click', closeSettings
 
 // dx, dy in radians, from the mouse or a thumb
 function turnView(dx, dy){
+  const _took = glance.manual(Math.hypot(dx, dy));   // really looking: the glance's offset becomes your own view
+  if (_took){ yaw += _took.y; pitch += _took.p; watchPuck = 0; }   // (and it's yours again)
   const _slow = scope ? 1 / SCOPE_MAG[scope.i] : 1, _top = scope ? SCOPE_PITCH : 1.3;   // through a telescope a small move is a long way, and you can look straight up
   yaw -= dx*_slow;
   pitch = Math.max(-_top, Math.min(_top, pitch - dy*_slow));
@@ -1766,9 +1950,17 @@ const pos = new THREE.Vector3(0, 0, 20);
 pos.y = height(pos.x, pos.z) + EYE;
 let fly = params.has('fly');
 const DEBUG = params.has('debug');
+// ?perflog: record how the game runs on this machine, and send it home (js/perf-log.js)
+let perfLog = null;
+if (params.has('perflog')){
+  let sendTo = null;
+  perfLog = makePerfLog({ perf, renderer, send: (d, why) => sendTo?.(d, why), state: () => ({ ready: _worldReady, playing, level: down ? down.name : null, folk: npcApi ? npcApi.npcs.length : 0 }) });
+  sendTo = sendPerfLog(perfLog);
+}
 if (params.has('x') || params.has('debug')){
   document.getElementById('start')?.classList.add('hide'); window.Leaves?.stop();
-  playing = true; for (const t of nameTags) t.visible = true;
+  playing = true;
+  document.body.classList.add('cursor-mode');
 }
 if (params.has('x'))     pos.x = +params.get('x');
 if (params.has('z'))     pos.z = +params.get('z');
@@ -1830,6 +2022,7 @@ function tickFishing(dt){
     if (!myPack.add(k, n, provHere('fished'))) return reelIn('No room in your pack. You let it go.');
     jot('caught', (ingredient(k) || {}).label || k);
     if (invOpen) openInventory();
+    flyToBag(k, n);
     const names = f.sp.boat ? DEEP_NAMES : FISH_NAMES;
     const name = k === 'eels' ? (n === 1 ? 'An eel' : 'Two eels') : `${n === 1 ? 'A' : 'Two'} ${names[(Math.random() * (n === 1 ? names.length : names.length - 1)) | 0]}`;
     return reelIn(`${name}, into the basket.`);
@@ -1852,6 +2045,9 @@ function fishersNear(){
   return out;
 }
 let nearFruit = null;      // nearest ripe forageable plant within reach
+let nearSign = null, nearMailbox = null;   // where a lane meets the road: read it, open it
+let nearShrub = null;      // a shrub you could cut for firewood, with E
+let nearSheep = null;      // a sheep with enough wool on it to shear, with E
 let nearObject = null;     // a non-pickable thing you can inspect with E (e.g. a campfire/pot)
 let nearBoat = null;       // a moored boat within reach to climb into with E
 let nearTree = null;       // a tree within reach to listen to with E
@@ -2053,8 +2249,8 @@ function callName(sp, o, to){
     if (PARENT[rel] || rel === 'wife' || rel === 'husband') return 'my ' + rel;
     return rel === 'companion' ? given : `${rel.startsWith('our') ? rel : 'my ' + rel} ${given}`;
   }
-  if (kin && to.group === sp.group) return PARENT[rel] || given;
-  const knows = (to.group && to.group === o.group) || (to.ties?.get(o)?.fam || 0) > 0.15;
+  if (kin && to?.group === sp.group) return PARENT[rel] || given;
+  const knows = (to?.group && to.group === o.group) || (to?.ties?.get(o)?.fam || 0) > 0.15;   // (no `to`: a letter to Faerie, a stranger to all of them)
   return knows ? given : (o.name || given);         // the full name introduces someone
 }
 
@@ -2248,14 +2444,23 @@ function qty(n, kind){
   if (kind === 'trinket') return n === 1 ? 'a pretty thing' : `${num(n)} pretty things`;
   if (kind === 'amber' || kind === 'quartz') return n === 1 ? `a piece of ${kind}` : `${num(n)} pieces of ${kind}`;
   if (kind === 'cave salt') return n === 1 ? 'a lump of cave salt' : `${num(n)} lumps of cave salt`;
+  if (kind === 'salt') return n === 1 ? 'a measure of salt' : `${num(n)} measures of salt`;
+  if (kind === 'wire') return n === 1 ? 'a coil of wire' : `${num(n)} coils of wire`;
+  if (kind === 'gut') return n === 1 ? 'a length of gut' : `${num(n)} lengths of gut`;
+  if (kind === 'iron') return n === 1 ? 'an iron blade' : `${num(n)} iron blades`;
+  if (kind === 'board') return n === 1 ? 'a seasoned board' : `${num(n)} seasoned boards`;
   const one = kind === 'berries' ? 'berry' : kind === 'cattail root' ? kind : kind.replace(/s$/, '');
   return n === 1 ? `${/^[aeiou]/.test(one) ? 'an' : 'a'} ${one}` : `${num(n)} ${goods(kind)}`;
 }
 // the kind said as goods: "acorns", "cattail roots", "pretty things"
-const goods = kind => kind === 'trinket' ? 'pretty things' : kind === 'cattail root' || kind === 'shell' || kind === 'stone' ? kind + 's' : kind;
+const goods = kind => isCraft(kind) ? ingredient(kind)?.label || kind : kind === 'trinket' ? 'pretty things' : kind === 'iron' ? 'iron blades' : kind === 'board' ? 'seasoned boards' : kind === 'hide' ? 'hides' : kind === 'cattail root' || kind === 'shell' || kind === 'stone' ? kind + 's' : kind;
 function tradeLine(m, sp){
   const v = (k, arr) => voicePick(sp, k, arr), N = n => cap(num(n));
   switch (m.key){
+    case 'tr-cry':     { const [a, b] = (m.wares || []).map(goods), w = a ? cap(a) + (b ? ` and ${b}` : '') : null;
+      return w ? v('tr-cry', [`${w}! Who's short?`, `${w}, here at the well!`, `${w}! Come and see!`]) : 'Come and see!'; }
+    case 'tr-wares-ask': return v('tr-wares-ask', ["What've you got?", 'What are you selling?', "What's in the pack?"]);
+    case 'tr-wares':   return m.item ? v('tr-wares', [`${cap(goods(m.item))}, if you're short.`, `I've ${goods(m.item)}, just off the road.`, `${cap(goods(m.item))}, and a fair price.`]) : 'Not much left, truth be told.';
     case 'tr-ask':     return v('tr-ask', [`Any ${m.item} to spare?`, `Have you ${m.item} to trade?`, `I'm after ${m.item}. Got any?`]);
     case 'tr-what':    return v('tr-what', ['Some. What have you brought?', "Might have. What've you got?", 'Could be. What are you offering?']);
     case 'tr-bid':     return `${cap(qty(m.gn, m.give))} for ${qty(m.qn, m.get)}?`;
@@ -2427,6 +2632,13 @@ const SAY = {
   'praise-cook':   ['That {dish} was good.', 'Good {dish}, that.'],
   'praise-other':  ["{who}'s {dish} was good.", "{who} makes a good {dish}."],
   'praise-thanks': ['Glad you liked it.', 'Thanks.'],
+  'crown-nice':    ["That's a lovely crown.", 'Nice flowers.', 'I like your crown.', 'Those flowers suit you.'],
+  'crown-thanks':  ['Thank you.', 'Thanks. I made it myself.', 'Thanks. Seven flowers, it took.'],
+  'crown-wilting': ["Thanks. It's starting to wilt.", "Thanks. It won't last much longer."],
+  'crown-yours':   ['Yours too.', "So's yours."],
+  'q-crown-where': ['Where did you get those flowers?', 'Where did you find those flowers?'],
+  'crown-pretty':  ["They're lovely.", 'Pretty things.'],
+  's-crown':       ['I made this crown myself.', 'Seven flowers, this crown took.'],
   'praise-agree':  ['It was.', 'It was good.'],
   'praise-try':    ["I'll have to try it.", 'I missed it.'],
   'story-react':   ['Huh.', 'Is that so.', 'Good to hear.'],
@@ -2459,6 +2671,7 @@ function moveLine(m){
     const actual = placeAt(m.x, m.z);
     return 'Not that far.' + (actual !== placeAt(sp.x, sp.z) ? ` ${cap(placePhrase(actual))}.` : '');
   }
+  if (m.key === 'a-crown-where') return `I picked them ${whereSaid(sp, m.x, m.z)}.`;
   if (m.key === 'omen-mean') return cap(m.tenor || 'who knows') + '.';
   if (m.key.startsWith('tr-') || m.key.startsWith('mk-')) return tradeLine(m, sp);
   if (m.key === 'saying') return SAYINGS.get(m.saying)?.parts[m.part] || '';
@@ -2542,6 +2755,47 @@ const voicePick = (npc, key, arr) => arr[voiceHash(npc, key) % arr.length];
 const voiceHas  = (npc, key, p) => (voiceHash(npc, key) % 1000) / 1000 < p;
 
 // the settlement a house stands in, by name ("Thornwick")
+// the post (js/mail.js, docs/letters.md)
+loadSkull();
+const mail = makeMail({ regardOfMe: n => regard(n, PLAYER), markBackdrop, crypts: () => under().levels.filter(l => l.kind === 'crypt').map(l => ({ id: l.id, floors: l.floors, name: underNames()[l.id].name, x: l.mouths[0].x, z: l.mouths[0].z })), level: id => { if (!levels.has(id)) levels.set(id, buildLevel(under().levels[id])); return levels.get(id); },
+  seed: WORLD_SEED, settlements, settlementNames, farNames, road, walkable, npcs: () => npcApi?.npcs || [], villageOf: h => villageOf(h), portals: () => portals(), houses: () => agents.houses,
+  now: () => agents.time, pack: myPack, stow, jot, journal, provHere, displayName: n => displayName(n), whereWord: (a, b, c, d) => whereWord(a, b, c, d),
+  factLine: (a, b, c, d) => factLine(a, b, c, d), addNews, nudge, markAlbum: () => markJournal(), refreshBook: () => myBook.refresh(), setMsg: t => setForageMsg(t, 4000), touch: TOUCH });
+agents.post = mail.folk;                               // the folk work the boxes too (js/mailboxes.js)
+// each settlement's handiwork: its name, and its picture (js/craft-view.js, docs/economy.md)
+for (const s of agents.crafts){ nameCraft(s, settlementNames()[s.place]?.name || 'village', designOf(s)); craftPic(s, url => { ingredient(s.kind).pic = [url]; }); }
+// the traders (js/traders.js, docs/economy.md): a few of the folk work the road for what they can make on it
+agents.startTraders({ seed: WORLD_SEED, count: traderCount(SIZE), musicians: 1, road: road(), keepOf: k => ingredient(k)?.keep ?? 3,
+  sites: traderSites({ S: settlements(), road: road(), walkable, radius: WORLD_R, houses: () => agents.houses, placeNames: settlementNames(), farNames: farNames() }),
+  // leaving, they say where for, to whoever's near enough to hear (as a shepherd speaks first)
+  setOff: (n, q) => {
+    if (down || document.getElementById('dlg-overlay') || n.convo || n._indoors || Math.hypot(n.x - pos.x, n.z - pos.z) > 35) return;
+    talkView.say(n, { who: n, to: PLAYER, key: 'trader-off', icon: 'hello', line: `Well, I'm off to ${q.name}!` });
+  } });
+window.leaTraders = () => agents.traders.list.map(t => ({ name: t.who.name, at: t.at, bound: t.bound, x: Math.round(t.who.x), z: Math.round(t.who.z), stock: t.stock, deals: t.deals,
+  gain: +t.gain.toFixed(1), wealth: [+t.wealth0.toFixed(1), +agents.traders.wealth(t, agents.time).toFixed(1)], places: t.seen.size, doing: t.who.actionLabel }));
+window.leaEconomy = () => ({ traders: agents.traders.stats, last: (agents.traders.log || []).slice(-10).map(r => `${r.folk.name} ${r.house ? 'at ' + villageOf(r.house) : 'on the road'}: ${qty(r.gn, r.gave)} for ${qty(r.qn, r.got)}`),
+  shelfEaten: agents.market.eaten || 0, trades: agents.market.trades.length, houses: agents.houses.map(h => `${villageOf(h)}: ${Object.entries(h.spare).filter(([, n]) => n > 0).map(([k, n]) => n + ' ' + k).join(', ') || 'nothing'}${Object.keys(h.goods).length ? ' + ' + JSON.stringify(h.goods) : ''}`) });
+window.leaPost = () => ({ ...mail.folk.stats, time: agents.time, day: agents.day, evening: agents.evening, carrier: mail.folk.ride.who?.name, at: mail.folk.ride.who && [Math.round(mail.folk.ride.who.x), Math.round(mail.folk.ride.who.z)], bag: mail.folk.ride.bag.length, jobs: [...mail.folk.jobs].map(([n, j]) => `${n.name}: ${j.kind}`) });
+// debug: leaMail() the state; leaMailTalk(npc) opens a real talk with them; leaMailNpcs() who has a home
+window.leaMailNpcs = () => agents.npcs.filter(n => n.home);
+window.leaMailTalk = n => { inDialog = true; talkTree(peasantTree(n, sky), { onClose: () => { inDialog = false; } }); };
+window.leaWarden = () => talkToWarden();
+// debug: leaDeadLetter() takes one from the Warden's real talk; leaFaceTomb(right) stands you at its tomb (or the wrong one) in its crypt
+window.leaDeadLetter = () => { for (let i = 0; i < 3; i++){ const t = mail.wardenTree(), c = t.nodes.root.choices[0]; if (!c) break; c.run?.(); const o = t.nodes[c.next], y = o.choices?.[0]; if (!y) return o.text; y.run?.(); const l = [...mail.post.letters.values()].find(x => x.state === 'carried' && x.to.dead); if (l) return { to: l.to.name, where: l.to.cryptName, stamps: l.stamps.map(q => `${q.realmName} ${q.value}`), says: o.text }; } return null; };
+window.leaFaceTomb = (right = true) => { const l = [...mail.post.letters.values()].find(x => x.state === 'carried' && x.to.dead), id = +l.to.realm.slice(5); goDown({ level: id, mouth: 0 }); const L = down.L, tombs = L.props.filter(p => p.kind === 'coffin'), p = tombs.find(q => !!mail.letterAt(L, q) === right); upos.set(p.x + Math.sin(p.a) * 3, L.floorAt(p.x + Math.sin(p.a) * 3, p.z - Math.cos(p.a) * 3) + EYE, p.z - Math.cos(p.a) * 3); yaw = Math.atan2(-(p.x - upos.x), -(p.z - upos.z)); pitch = -0.2; window.leaTombP = p; return { at: [p.x, p.z], walk: L.walkable(upos.x, upos.z) }; };
+window.leaUseTomb = () => { useTomb(window.leaTombP); return { msg: document.getElementById('forage-msg')?.textContent, busy: tombRite?.busy, inDialog }; };
+window.leaUseTombBusy = () => !!tombRite?.busy;
+window.leaKin = () => ({ lines: mail.kin().lineages.map(L => `${L.surname}: ${L.people.length}`), trees: mail.kinTrees() });
+window.leaPackOpen = () => { document.exitPointerLock?.(); openInventory(); };
+window.leaWardenAt = () => ({ at: WARDEN_AT, placed: !!wardenSprite?.parent, near: nearWarden, here: down?.L.id });
+window.leaFaceWarden = () => { const { x, z } = WARDEN_AT; upos.set(x, down.L.floorAt(x, z + 3) + EYE, z + 3); yaw = Math.atan2(-(x - upos.x), -(z - upos.z)); pitch = 0; };
+window.leaBook = id => openBook(id);
+window.leaFaceJunction = (i, what = 'mailbox') => { const q = junctionView.list[i], t = what === 'sign' ? q.j : q.j.box, a = what === 'sign' ? SIGN_AIM : BOX_AIM, d = 3; pos.x = t.x + Math.cos(q.j.box.a) * d; pos.z = t.z + Math.sin(q.j.box.a) * d; pos.y = height(pos.x, pos.z) + EYE; yaw = Math.atan2(-(t.x - pos.x), -(t.z - pos.z)); pitch = Math.atan2(height(t.x, t.z) + a - pos.y, d); };
+window.leaAfar = (far = 'far0') => { const n = agents.houses.find(h => h.household.length)?.household[0], l = n && mail.fromAfar(far, n); if (l) mail.lookAt(l); return l && { id: l.id, from: l.from.name, fromLine: l.fromLine, to: l.toLines, stamps: l.stamps.map(s => `${s.realmName} ${s.value} ${s.design}`), body: l.body }; };
+window.leaBoxes = () => junctionView.list.map((q, i) => ({ name: q.name, at: [Math.round(q.j.x), Math.round(q.j.z)], pop: mail.population(q.j), flag: q.up, letters: mail.boxes[i].letters.map(l => `${l.from.name} → ${l.to.name}`) }));
+window.leaMail = () => ({ letters: [...mail.post.letters.values()].map(l => `${l.id} ${l.state}: ${l.from.name} → ${l.to.name}, ${l.stamps.map(s => `${s.realmName} ${s.value}`).join(' + ')}`),
+  stock: [...mail.post.issues.values()].map(s => `${s.id} ${s.left}/${s.printed} ${s.design}`), album: mail.album.length });
 function villageOf(h){
   const S = settlements().places, k = h ? S.findIndex(p => p.buildings.includes(h.b)) : -1;
   return k >= 0 ? settlementNames()[k].name : 'the village';
@@ -2554,6 +2808,18 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
   const v = (key, arr) => voicePick(npc, key, arr);     // pick this NPC's phrasing
   const fem = npc.gender === 'female';
   const Pron = fem ? 'She' : 'He', pron = fem ? 'she' : 'he', their = fem ? 'her' : 'his';
+  const T = agents.traders, tr = npc.trader;
+  const stockList = () => Object.entries(tr.stock).filter(([k, m]) => m > 0).map(([k, m]) => `${num(m)} ${goods(k)}`).join(', ');
+  const placeName = id => T.stops.find(q => q.id === id)?.name;
+  // what they're up to, in a word (the "What are you doing?" line)
+  const traderSays = () => {
+    const to = placeName(tr.bound), at = placeName(tr.at), far = T.stops.find(q => q.id === tr.bound)?.far;
+    if (tr.kind === 'music') return tr.crying ? v('d-busk', [`Playing, here by the well. Folk give what they can.`, `Playing for my supper. ${at ? `${at} hasn't` : "They haven't"} had a tune in a while.`])
+      : to ? v('d-busk-go', [`On to ${to}, to play.`, `Walking to ${to}. They'll want a tune there, I should think.`]) : v('d-busk-idle', ["Resting my fingers.", 'Between places.']);
+    if (tr.crying) return v('d-trader-cry', [`Selling, here at the well. I've ${stockList() || 'not much left'}.`, `Crying my wares. Folk come over if they're short of something.`]);
+    return to ? v('d-trader-go', [far ? `On down the road, to ${to}. They'll give me a good deal more for this lot there.` : `On to ${to}. There's folk there short of what I've got.`, `${to} next. I've ${stockList() || 'not much left'} to shift.`])
+      : v('d-trader-at', [`Trading. I've ${stockList() || 'not much left'}.`, `Calling at a few doors${at ? ` round ${at}` : ''}. Not everyone hears me at the well.`]);
+  };
   // the market (agents.js callAt, docs/trade.md): where they're bound, or the swap just made
   const mh = npc.brain?.target?.kind === 'market' ? npc.brain.target.house : null;
   const mkt = mh ? { at: villageOf(mh), crop: Object.entries(mh.spare).sort((a, b) => b[1] - a[1])[0]?.[0] || 'greens' } : null;
@@ -2565,19 +2831,22 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
     : lt.folk === npc ? v('d-traded', [`Just back from ${villageOf(lt.house)}. ${cap(qty(lt.gn, lt.gave))} got me ${qty(lt.qn, lt.got)}.`, `I've been trading at ${villageOf(lt.house)}. ${cap(qty(lt.qn, lt.got))}, for ${qty(lt.gn, lt.gave)}.`])
     : v('d-traded-v', [`${lt.folk.player ? 'You' : lt.folk.name || 'One of the folk'} came to the door. ${cap(qty(lt.gn, lt.gave))} for ${qty(lt.qn, lt.got)}.`, `Had a trade at the door. ${cap(qty(lt.qn, lt.got))} went for ${qty(lt.gn, lt.gave)}.`]);
   const fr = npc.actionLabel === 'rite' && npc.brain?._rite;
-  const doing = npc.actionLabel === 'practice' ? v('d-practice', [npc.practice ? `Working at ${npc.practice.id}. I come out here so nobody has to hear it.` : "Going off to practice. Nobody wants to hear that by the fire.", npc.practice ? `Practicing ${npc.practice.id}. It doesn't go right yet.` : "Off to practice, where it's quiet."])
+  const onRound = agents.rounds?.find(r => r.holders.has(npc))?.says(npc);   // a day's round says what it's for (plans.js dayRound)
+  const doing = onRound ? v(onRound.key, onRound.lines) : npc.actionLabel === 'practice' ? v('d-practice', [npc.practice ? `Working at ${npc.practice.id}. I come out here so nobody has to hear it.` : "Going off to practice. Nobody wants to hear that by the fire.", npc.practice ? `Practicing ${npc.practice.id}. It doesn't go right yet.` : "Off to practice, where it's quiet."])
     : npc.actionLabel === 'observe' ? v('d-observe', ["Up at the sky with my telescope. Don't jog my arm.", 'Looking. It takes hours, and the night is short enough.', 'Counting stars. There are more of them than you would think.'])
     : fr && fr.F.id === 'fiddlers' ? (fr.sat ? v('d-fiddlers', ["It's the fiddlers' meet. Full moon, and everyone's brought something to play.", "The fiddlers' meet. We play the night through, when the moon's full."])
                                                        : v('d-fiddlers-go', ["Off to the fiddlers' meet. It's the full moon.", "Going to the fiddlers' meet. Come and listen, if you like."]))
     : npc.actionLabel === 'canoe-work' ? v('d-canoe', ["Making a canoe. The bark's on. Now it's the ribs and the seams.", "Sewing the canoe. It goes quicker with two.", "Working on the canoe. It takes days."])
     : npc.actionLabel === 'peel-bark'  ? v('d-bark', ["Peeling birch bark. It's for a canoe.", "Getting bark off this birch, for the canoe.", "Bark for a canoe. It comes away in a sheet if you're careful."])
     : npc.actionLabel === 'canoe-bring'? v('d-cbring', ["Taking this to the canoe.", "This is for the canoe down by the water."])
+    : (npc.actionLabel === 'farm' || npc.actionLabel === 'reap') && npc.home?.field ? fieldTalk(npc, npc.home.field, v)
     : npc.chopping              ? v('d-chop', ["Cutting firewood — the woodpile's run low.", "Felling a shrub for the fire. Hungry work.", "Wood for the hearth. It never stops needing it."])
     : npc.sitting && npc.atGathering ? v('d-gather', ["Sitting at the night fire with the others — there's a song going, and old talk.", "By the fire with my people — songs and stories till the dark wears thin.", "Round the night fire. This is the best of the day, if you ask me."])
     : npc.sitting                  ? v('d-sit', ["Sitting by the fire, warming my hands.", "Resting by the hearth a while.", "Just warming myself — the cold gets in the bones."])
     : npc.actionLabel === 'chop'   ? v('d-gochop', ["Off to cut some wood for the fire.", "Going to fell a shrub — the fire's hungry.", "After firewood."])
     : npc.actionLabel === 'stack'  ? v('d-stack', ["Stacking firewood by the hearth for us all.", "Building up the woodpile — it's everyone's.", "Laying in wood by the fire."])
     : npc.actionLabel === 'build'  ? v('d-build', ["Laying a fire here — no camp's near enough for nightfall.", "Making my own hearth. Naught else within reach.", "Setting a fire before the dark catches me out."])
+    : npc.actionLabel === 'post'   ? v('d-post', ["There's a letter wants seeing to.", "Off with the post. It won't take long."])
     : npc.actionLabel === 'fire'   ? ((sky?.evening ?? 0) > 0.3 ? v('d-fire-e', ["Heading back to camp before the dark sets in.", "Making for home — night's coming.", "Back to the fire before dusk's done."]) : v('d-fire-d', ["Making for the fire — I want to be warm.", "Off to the hearth. I'm chilled.", "Toward the fire — the cold's got me."]))
     : npc.actionLabel === 'food'   ? v('d-food', ["Gathering food to carry back.", "Foraging — filling my pack.", "Out after berries and roots."])
     : npc.actionLabel === 'getfood'? v('d-getfood', ["Fetching a bite from the camp stores.", "To the basket for a meal.", "Drawing some food from the common store."])
@@ -2593,6 +2862,8 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
         : v('d-goboat', ["Taking a canoe out to fish.", "Off out on the water after fish.", "Going out in the canoe. The deep water's less fished."]))
     : npc.actionLabel === 'fish'   ? v('d-gofish', ["Off to the water to fish.", "Going to try my luck at the water.", "Down to the bank with a line."])
     : caught                       ? caught
+    : npc.actionLabel === 'listen' && npc._listenGo ? v('d-listen', ["Listening. There's someone playing by the well.", "Stopped to hear the music. It's not often there's any."])
+    : npc.trader ? traderSays()
     : npc.actionLabel === 'market' && mkt ? v('d-market', [`Off to ${mkt.at} to trade. I've not had anything from a garden in days.`, `Taking this lot to ${mkt.at}. They grow ${mkt.crop} there.`, `Going to ${mkt.at} for ${mkt.crop}, if they'll swap.`])
     : traded                       ? traded
     : npc.actionLabel === 'ask'    ? v('d-ask', ["Going to ask a neighbour for a bite — they'll not see me go hungry.", "Off to beg a meal from kin. That's what they're for.", "Asking round for food. No shame in it."])
@@ -2740,11 +3011,11 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
   const glassPrice = () => [...(npc.trinkets > 0 ? [[npc.trinketKind || 'shell', npc.trinkets]] : []), ...spare(), ['gold', glassHoard(npc)]];
   const held = g => g === 'trinket' ? (npc.trinkets || 0) : countOf(npc, g) + rawOf(npc, g);
   const isInst = k => ingredient(k)?.use === 'play';
-  const tradeable = () => Object.keys(basket).filter(k => basket[k] > 0 && (isWild(k) || VALUABLES.has(k) || (isInst(k) && !instrumentOf(npc))));
+  const tradeable = () => Object.keys(basket).filter(k => basket[k] > 0 && (isWild(k) || isCrop(k) || ROAD_GOODS.has(k) || isCraft(k) || VALUABLES.has(k) || (isInst(k) && !instrumentOf(npc))));
   let deal = null, dealt = '';
   const offerOf = k => {
     const gn = isInst(k) ? 1 : Math.min(basket[k] || 0, 3), g = asKind(k), now = agents.time;
-    const gb = worth(npc, g, held(g), now);
+    const gb = ROAD_GOODS.has(g) || isCraft(g) ? agents.traderWorth(npc, house, g) : worth(npc, g, held(g) + (house.spare[g] || 0), now);
     let best = null;
     for (const [c, have] of spare()){
       const cb = worth(npc, c, have + countOf(npc, c), now);
@@ -2761,8 +3032,11 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
     myPack.take(d.give, d.gn);
     house.spare[d.get] -= d.qn;
     myPack.add(d.get, d.qn, provHere('traded', displayName(npc)));
+    flyToBag(d.get, d.qn);
     jot('traded', `${d.give} for ${d.get} with ${displayName(npc)}`);
     if (isInst(g)) giveInstrument(npc, g);
+    else if (g === 'salt' || g === 'iron') house.goods[g] = (house.goods[g] || 0) + d.gn;
+    else if (ROAD_GOODS.has(g) || isCraft(g)) addGoods(npc, g, d.gn);
     else if (g === 'trinket'){ npc.trinkets = (npc.trinkets || 0) + d.gn; if (!npc.trinketKind) npc.trinketKind = d.give; }
     else if (RAW_KINDS.has(g)) addRaw(npc, g, d.gn);
     else addFood(npc, g, d.gn, now);
@@ -2772,6 +3046,70 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
     dealt = `"${v('t-done', ['Done.', 'Done. Here you are.', 'Fair enough. Done.'])}" ${Pron} counts ${qty(d.qn, d.get)} into your basket.`;
     deal = null;
     if (invOpen) openInventory();
+  };
+  // ---- a trader (js/traders.js, docs/economy.md): you pick what you're after, then what you'll give. They
+  // value both by what they'd fetch up the road, so they'll give more of what's cheap to them. ----
+  let trWant = null, trDeal = null, trSaid = '';
+  const trOffer = (give, want) => {
+    const gn = Math.min(basket[give] || 0, 3), now = agents.time, gb = T.resale(tr, asKind(give), now), cb = T.resale(tr, want, now) / 0.8;   // (they count their own at what it'd really fetch)
+    let max = 0; while (max < tr.stock[want] && gn * gb - (max + 1) * cb > 0) max++;
+    return max > 0 ? { give, gn, get: want, max, qn: Math.ceil(max / 2), asked: false } : null;
+  };
+  const trDo = d => {
+    if ((basket[d.give] || 0) < d.gn || (tr.stock[d.get] || 0) < d.qn){ trSaid = `"${v('t-gone', ["You've not got them now.", 'Seems that went somewhere.'])}"`; return; }
+    if (myPack.room(d.get, d.qn) < d.qn){ trSaid = `"${v('t-full', ["You've no room for them.", "Where would you put them?"])}"`; return; }
+    myPack.take(d.give, d.gn); T.put(tr, asKind(d.give), d.gn);
+    tr.stock[d.get] -= d.qn; if (tr.stock[d.get] <= 0) delete tr.stock[d.get];
+    myPack.add(d.get, d.qn, provHere('traded', displayName(npc))); flyToBag(d.get, d.qn);
+    jot('traded', `${d.give} for ${d.get} with ${displayName(npc)}`);
+    tr.deals++; T.stats.deals++;
+    (T.log ??= []).push({ t: agents.time, folk: npc, villager: PLAYER, house: null, gave: d.get, gn: d.qn, got: d.give, qn: d.gn, trader: true });
+    trSaid = `"${v('t-done', ['Done.', 'Done. Here you are.', 'Fair enough. Done.'])}" ${Pron} counts ${qty(d.qn, d.get)} into your basket.`;
+    if (invOpen) openInventory();
+  };
+  const traderNodes = !tr ? {} : {
+    get trStock(){
+      const list = Object.entries(tr.stock).filter(([, m]) => m > 0);
+      if (!list.length) return { text: `"${v('tr-empty', ['Sold out. Catch me when I come back up the road.', "There's nothing left in the pack, I'm afraid."])}"` };
+      return { text: `"I've ${stockList()}. What are you after?"`,
+        choices: list.map(([k]) => ({ label: cap(goods(k)) + '.', next: 'trGive', run: () => { trWant = k; } })) };
+    },
+    get trGive(){
+      const mine = Object.keys(basket).filter(k => basket[k] > 0 && k !== trWant && T.resale(tr, asKind(k), agents.time) > 0.05 && (isWild(k) || isCrop(k) || VALUABLES.has(k) || k === 'hide' || k === 'gut' || k === 'cave salt'));
+      if (!mine.length) return { text: `"You've nothing I could sell on, by the look of it."`, choices: [{ label: 'Something else, then.', next: 'trStock' }] };
+      return { text: `"${cap(goods(trWant))}. What'll you give for them?"`,
+        choices: mine.map(k => ({ label: cap(qty(Math.min(basket[k], 3), k)) + '.', next: 'trOffer', run: () => { trDeal = trOffer(k, trWant); } })) };
+    },
+    get trOffer(){
+      const d = trDeal;
+      if (!d) return { text: `"${v('tr-nouse', ["There's no money in that for me, not for this.", "I'd lose on that. Not for this."])}"`, choices: [{ label: 'Something else, then.', next: 'trGive' }] };
+      const say = !d.asked ? `"For ${qty(d.gn, d.give)}? ${cap(qty(d.qn, d.get))}."` : d.bumped ? `"${cap(num(d.qn))}, then. That's as far as I go."` : `"No. ${cap(qty(d.qn, d.get))} is fair."`;
+      const c = [{ label: 'Done.', next: 'trDone', run: () => trDo(d) }];
+      if (!d.asked) c.push({ label: v('t-push', ['Can you do better?', "That's a bit thin.", 'Make it a few more?']), next: 'trOffer',
+        run: () => { d.asked = true; const up = Math.ceil((d.qn + d.max) / 2); d.bumped = up > d.qn; d.qn = up; } });
+      c.push({ label: 'No, thanks.', next: 'trStock', run: () => { trDeal = null; } });
+      return { text: say, choices: c };
+    },
+    get trDone(){ return { text: trSaid }; },
+    // where they're bound (js/traders.js t.bound), how far it is on the road, and what takes them there. Not chosen yet
+    // while they're still selling at a place: they'll go where it pays once they're done
+    get trWhere(){
+      const q = T.stops.find(s => s.id === tr.bound), here = placeName(tr.at);
+      if (!q) return { text: `"${tr.crying || here ? v('tr-where-here', [`Nowhere yet. I'm ${tr.kind === 'music' ? 'playing' : 'selling'}${here ? ` here at ${here}` : ''} a while, then wherever it pays.`, `I've not made up my mind. When I'm done${here ? ` at ${here}` : ' here'}, I'll go where it'll pay.`])
+                                                    : v('tr-where-none', ["Wherever it pays. I've not worked out where yet.", "I'll know when I've had a think."])}"` };
+      const days = Math.abs(q.s - tr.s) / TRADE.WALK_DAY;   // tr.s: how far along the road they've got (traders.js done)
+      const far = days < 0.35 ? 'not far' : days < 0.75 ? "half a day's walk" : days < 1.4 ? "a day's walk" : `${num(Math.round(days))} days' walk`;
+      const why = tr.kind === 'music' ? v('tr-where-music', ["They've not had music there in a while. They'll feed me for a tune.", "Nobody's played there lately. A place like that's glad of you."])
+        : q.far ? `It's past the end of the road. They make ${words(Object.keys(q.f.sells).map(goods))} there, and pay well for what we've got here.`
+        : stockList() ? `I've ${stockList()} to shift, and there'll be someone there short of it.` : "There's sure to be something worth having there.";
+      return { text: `"${q.name}. It's ${far} down the road. ${why}"` };
+    },
+    // what they know that you might use: the widest gap they've seen, between two places they've been
+    get trTip(){
+      const g = T.tip(tr, agents.time);
+      if (!g) return { text: `"${v('tr-notip', ["I've not been round enough lately to say.", 'Ask me when I have been up and down the road a bit.'])}"` };
+      return { text: `"${cap(goods(g.kind))}. They'll let them go for next to nothing at ${g.cheap.name}, and you'd get a good deal more for them at ${g.dear.name}."` };
+    },
   };
   const tradeNodes = !house ? {} : {
     get trade(){
@@ -2897,30 +3235,34 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
                choices: PT.reactions() };
     },
     // the still-room (stillroom.js): a stargazer makes the fairy salve, if what you bring
-    // was rightly got and the moon is new
+    // was rightly got and the moon is new. Once it's been made, any stargazer has the rest
+    // put by: it only wants the clover, and no moon
     get salve(){
-      const met = wantsMet(myPack, 'fairy salve'), short = met.filter(m => !m.ok);
+      const again = madeOnce.has('fairy salve'), met = wantsMet(myPack, 'fairy salve', again), short = met.filter(m => !m.ok);
       if (short.length){
         const lacks = short.filter(m => !(m.want.test && m.have >= m.want.n)).map(m => m.want.say), wrong = short.filter(m => m.want.test && m.have >= m.want.n).map(m => m.want.wrong);
         const wrongKinds = short.filter(m => m.want.test && m.have >= m.want.n).map(m => m.want.kind);
         journal.task('salve', `The fairy salve: ${whoAt(npc)} will make it${lacks.length ? `, but wants ${lacks.join(', and ')}` : ''}.${wrongKinds.length ? ` The ${wrongKinds.join(' and ')} I have wasn't rightly got.` : ''}`);
         jot('asked', `${displayName(npc)} to make the fairy salve`);
-        return { text: `"${v('sv-know', ['The green salve? I know how it goes.', 'The salve for the eye. My gran made it once.'])}${lacks.length ? ` ${v('sv-lack', ["But I'd want {l}, and you've not got {it}.", "Bring me {l} first."]).replace('{l}', lacks.join(', and ')).replace('{it}', lacks.length > 1 ? 'them' : 'it')}` : ''}${wrong.length ? ' ' + wrong.join(' ') : ''}"` };
+        return { text: `"${again ? v('sv-again', ['The green salve again? The wax is put by.', "I've the wax put by for that."]) : v('sv-know', ['The green salve? I know how it goes.', 'The salve for the eye. My gran made it once.'])}${lacks.length ? ` ${v('sv-lack', ["But I'd want {l}, and you've not got {it}.", "Bring me {l} first."]).replace('{l}', lacks.join(', and ')).replace('{it}', lacks.length > 1 ? 'them' : 'it')}` : ''}${wrong.length ? ' ' + wrong.join(' ') : ''}"` };
       }
-      if ((sky.moonIllum ?? 1) >= NEW_MOON){
+      if (!again && (sky.moonIllum ?? 1) >= NEW_MOON){
         const d = daysToNewMoon(sky.moonLon ?? 0, sky.sunLon ?? 0), when = d < 1 ? 'before tomorrow' : d < 1.5 ? 'tomorrow' : `in ${Math.round(d)} days`;
         journal.task('salve', `The fairy salve: I have all it wants. ${whoAt(npc)} will make it at the dark of the moon, ${when}.`);
         jot('asked', `${displayName(npc)} to make the fairy salve`);
         return { text: `"${v('sv-moon', ["You've all of it. But it's made at the dark of the moon, and there's moon up there yet. Come back {w}.", 'Not with that moon. When it goes dark, {w}, bring it all back to me.']).replace('{w}', when)}"` };
       }
-      return { text: `"${v('sv-now', ['You have it all, and the moon is dark. Now, then?', "Everything, and no moon. It's tonight or not for a month."])}"`,
+      return { text: `"${again ? v('sv-leaf', ["That's the leaf. Shall I work it in?", "You've the leaf, and I've the rest. Now, then?"]) : v('sv-now', ['You have it all, and the moon is dark. Now, then?', "Everything, and no moon. It's tonight or not for a month."])}"`,
         choices: [{ label: v('q-sv-make', ['Make it, please.', 'Yes. Make it.']), next: 'salveMade', run: () => {
           if (!myPack.room('fairy salve', 1) && !(basket['fairy salve'] > 0)){ cookSaid = `"${v('sv-full', ["You've nowhere to carry it. Make room first.", 'Your pack is full; I would only spill it.'])}"`; return; }
-          for (const w of PREPARATIONS['fairy salve'].wants) myPack.take(w.kind, w.n, w.test || null);
+          for (const w of prepWants('fairy salve', again)) myPack.take(w.kind, w.n, w.test || null);
+          madeOnce.add('fairy salve');
           stow('fairy salve', 1, provHere('given', displayName(npc)));
           journal.done('salve'); journal.done('recipe:fairy salve');
           jot('had', `${displayName(npc)} make me the fairy salve`);
-          cookSaid = `${fem ? 'She' : 'He'} warms the wax over a candle and works the leaf and the caps into it with a thumb, under the breath counting something. "${v('sv-done', ['There. One eye only, mind, and after dark.', "Touch it to one eye, after dark. Not both. Never both."])}"`;
+          const told = v('sv-done', ['There. One eye only, mind, and after dark.', "Touch it to one eye, after dark. Not both. Never both."]);
+          cookSaid = again ? `${fem ? 'She' : 'He'} takes down a small pot of green wax and works the leaf into it with a thumb. "${told}"`
+            : `${fem ? 'She' : 'He'} warms the wax over a candle and works the leaf and the caps into it with a thumb, under the breath counting something. "${told} I've made up more wax than that wants, and it keeps. Next time, just bring me the leaf, any day. I'll tell the others who read the stars."`;
         } }] };
     },
     get salveMade(){ return { text: cookSaid }; },
@@ -2946,10 +3288,14 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
       surly: v('door-surly', [`The door opens a hand's width. "Do you know what hour it is?"`, `${Pron} glares out at you, half asleep. "You've woken the house. What do you want?"`, `"Who's that? Do you know how late it is?"`]),
     })[door.mood];
   // what you can say to someone you've heard play (play-talk.js)
+  const mailTalk = mail.talk(npc, v, Pron);
   const PT = playTalk({ npc, now: () => agents.time, v, Pron, their, cap, name: displayName(npc), label: k => ingredient(k).label, carried: carriedInstrument, known: () => [...tunesRead],
     heard: () => heardOf(npc), forget: () => heardPlaying.delete(npc), jot,
     playMine: (id, kind) => playTune(id, kind, excerpt(partNotes(id, DRUMS.has(kind) ? 'drum' : 'melody', null, kind))),
     playTheirs: (id, kind, k) => { playForYou(npc, id, kind, k); noteHeard(npc, id); } });
+  // her flower crown, if she's wearing one as the talk opens (docs/crowns.md)
+  const crown = npc.crown || null, crownLate = () => npc.crownUntil - agents.time < 0.5;
+  const crownWhere = { label: v('q-crown-where', ['Where did you get those flowers?', 'Where did you find those flowers?']), next: 'crownWhere' };
   const tree = { speaker: displayName(npc), portrait: npc.portrait, portraitBg: markBackdrop(npc.group?.id), hand: npc, root: 'hi', farewell, nodes: {
     get keepAt(){ return PT.nodes.keepAt; }, get better(){ return PT.nodes.better; }, get tryIt(){ return PT.nodes.tryIt; }, get noSong(){ return PT.nodes.noSong; }, get praise(){ return PT.nodes.praise; },
     get hi(){
@@ -2971,6 +3317,13 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
         c.push({ label: v('q-plans', ["What are you planning?", "What's ahead for you?", "Any plans?", "What are you up to later?"]), next: 'plans' });
         if (voiceHas(npc, 'has-pack', 0.8))  c.push({ label: v('q-pack', ["What's in thy pack?", "What are you carrying?", "What's in your bag?", "What do you bear?", "Anything in that pack?", "What have you on you?"]), next: 'pack' });
       }
+      if (crown){
+        c.push({ label: v('q-crown', ["That's a lovely crown.", 'I like your flowers.', 'Those flowers suit you.']), next: 'crown', run: () => { if (!crown.praised){ crown.praised = true; nudge(npc, PLAYER, 0.03, 0.08); } } });
+        c.push(crownWhere);
+      }
+      if (tr){ if (tr.kind !== 'music') c.push({ label: v('q-trader', ['What are you carrying?', 'What have you got?', "What's in the pack?"]), next: 'trStock' });
+        c.push({ label: v('q-trader-where', ['Where are you headed?', 'Where are you off to next?']), next: 'trWhere' });
+        if (tr.kind !== 'music') c.push({ label: v('q-trader-tip', ["What's cheap where, these days?", "Where's the good trade?"]), next: 'trTip' }); }
       if (house && (sky?.day ?? 1) > 0.3) c.push({ label: v('q-trade', ['Got anything to trade?', 'Anything put by to trade?', 'Will you trade?']), next: 'trade' });
       if (unknownTo().length) c.push({ label: v('q-teach-them', ['I found an old recipe…', "I've a recipe from an old book…"]), next: 'teach' });
       if (carriedInstrument() && untaughtTunes().length) c.push({ label: v('q-tune-teach', ["I've a tune for you…", 'Want to learn a tune?']), next: 'tuneTeach' });
@@ -2978,6 +3331,7 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
       if (!npc.home && (goodsOf(npc, 'hide') || goodsOf(npc, 'gut'))) c.push({ label: v('q-ask-goods', ['Have you a hide or any gut to spare?', 'Any hide or gut going spare?']), next: 'askGoods' });
       if (!instrumentOf(npc) && carriedInstrument()) c.push({ label: v('q-give-inst', ["I've brought you something to play.", 'Would you like an instrument?']), next: 'instGive' });
       if (instrumentOf(npc) && tunesOf(npc, agents.time).length) c.push({ label: v('q-play', ['Will you play something?', 'Play me a tune?']), next: 'playMe' });
+      c.push(...mailTalk.choices());
       if (givable().length) c.push({ label: v('q-give-cook', ["I've brought something for your cooking.", 'Here, for your cooking.']), next: 'give' });
       // a portion they've put by for you, from a pot of a book dish (recipes.js putBy)
       let greetAll = door ? doorGreet() : greet;
@@ -3007,6 +3361,8 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
     get where(){ return { text: whereAreWe(npc, v) }; },
     get plans(){ return { text: plansReport(npc, v) }; },
     name:  { text: nameLine, choices: [ { label: v('q-kin', ["Who are your people?", "Who do you call kin?", "Who are your folk?", "Tell me of your people.", "Have you family hereabouts?", "Who do you travel with?"]), next: 'kin' } ] },
+    crown: { text: crown && crownLate() ? v('crown-wilting', ["Thanks. It's starting to wilt.", "Thanks. It won't last much longer."]) : v('crown-thanks', ['Thank you.', 'Thanks. I made it myself.', 'Thanks. Seven flowers, it took.']), choices: crown ? [crownWhere] : [] },
+    crownWhere: { text: crown ? `I picked them ${whereSaid(npc, crown.x, crown.z)}.${crownLate() ? ' They don\'t last, mind.' : ''}` : '' },
     doing: { text: door?.woken ? v('d-woken', ['"Sleeping, until you knocked."', '"I was asleep. Now I\'m standing at the door."']) : doing },
     feel:  { text: feel },
     self:  { text: selfLine },
@@ -3038,33 +3394,214 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
     ...kinNodes,
   }};
   Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(tradeNodes));   // getters, so the offer re-reads live
+  Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(traderNodes));
   Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(cookNodes));
+  Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(mailTalk.nodes));
   tree.doctorMark = doctorMark;
   return tree;
 }
 
-// Inspecting a campfire/pot (E on it). It doesn't "talk" — you examine it — but it
-// rides the same dialogue UI. Nodes are getters so each re-reads the fire's live
-// state (the stew cooks on while you look). The pot report says what's in it and
-// how many it can feed; the fire and basket each get their own line.
-function fireTree(fire){
-  const has = () => (fire.pot.raw + fire.pot.ready) > 0;
-  const speaker = has() ? 'The cooking pot' : (fire.lit ? 'The campfire' : 'Cold ashes');
-  return { speaker, portrait: null, root: 'look', farewell: 'Step away.', nodes: {
-    get look(){
-      return { text: has() ? fire.potReport() : fire.fireReport(), choices: (() => {
-        const c = [];
-        if (has()) c.push({ label: 'What’s in the pot?', next: 'pot' });
-        c.push({ label: 'How fares the fire?', next: 'fire' });
-        if ((fire.foodStore | 0) > 0) c.push({ label: 'What’s in the food basket?', next: 'store' });
-        return c;
-      })() };
-    },
-    get pot(){ return { text: fire.potReport() }; },
-    get fire(){ return { text: fire.fireReport() }; },
-    get store(){ return { text: fire.foodReport() }; },
-  }};
+// Sitting at a fire (E on it; docs/cooking.md): the view lowers and turns to the pot, the cursor
+// comes free, the pack opens, and js/cook-view.js draws the rest. The world keeps running. A step,
+// E or Esc gets you up. The pot is kept in the gap between the leaf and the pack.
+let sat = null;
+const SEAT_R = 1.75, SEAT_DROP = 0.65, SEAT_EASE = 4;
+const potTop = f => height(f.x, f.z) + (f.view?._brothY ?? 0.5);
+function sitAt(fire){
+  if (!fire.done){ setForageMsg(fire.fireReport(), 3500); return; }
+  if (!fire.lit){
+    if (!(myPack.counts.wood > 0)){ setForageMsg('Cold ashes. It wants wood.', 3500); return; }
+    if (rain.intensity > RAIN_NO_FIRE){ setForageMsg('The rain will not let it catch.', 3500); return; }
+    myPack.take('wood', 1); fire.addWood(1); fire.rekindle();
+    setForageMsg('You lay a log on the ashes, and it catches.', 3500);
+    return;
+  }
+  const d = Math.hypot(pos.x - fire.x, pos.z - fire.z) || 1, k = SEAT_R / d, sx = fire.x + (pos.x - fire.x) * k, sz = fire.z + (pos.z - fire.z) * k;
+  inDialog = true; document.exitPointerLock?.();
+  sat = { fire, x: walkable(sx, sz) ? sx : pos.x, z: walkable(sx, sz) ? sz : pos.z, drop: 0 };
+  glance.reset();
+  openInventory();
+  cook.open(fire);
+  document.body.classList.add('sat');
 }
+// The leaf, the pot and the pack all want room. Beside the leaf if the pack fits there with a gap
+// for the pot; if not, a smaller pack; if still not, along the bottom, with the pot above it.
+const POT_GAP = 160;
+function seatPack(){
+  const leafR = 16 + Math.min(330, innerWidth * 0.34);
+  const place = n => { packUI.maxCell = n; packUI.render(); bag.placeBeside(invPanel); return invPanel.getBoundingClientRect(); };
+  let r = place(52);
+  if (r.left - leafR < POT_GAP) r = place(40);
+  if (r.left - leafR < POT_GAP && innerHeight - r.height > 200) invPanel.style.top = `${innerHeight - r.height - 8}px`;
+}
+function getUp(){
+  if (!sat) return;
+  sat = null;
+  packUI.maxCell = 52;
+  cook.close();
+  closeInventory();
+  document.body.classList.remove('sat');
+  inDialog = false; relock();
+}
+function satFrame(dt){
+  const f = sat.fire, e = Math.min(1, dt * SEAT_EASE);
+  if (!f.lit && !f.pot.raw && !f.pot.ready){ getUp(); return; }
+  pos.x += (sat.x - pos.x) * e; pos.z += (sat.z - pos.z) * e;
+  sat.drop += (SEAT_DROP - sat.drop) * e;
+  camera.position.set(pos.x, pos.y - sat.drop, pos.z);
+  // aim so the pot lands in the gap
+  const leaf = document.querySelector('.cook-paper')?.getBoundingClientRect(), pk = invPanel.getBoundingClientRect();
+  const left = leaf?.width ? leaf.right : 0, stacked = pk.width && pk.left < left + 120;
+  const right = stacked ? Math.min(innerWidth, document.getElementById('vitals')?.getBoundingClientRect().left || innerWidth) : pk.width ? pk.left : innerWidth;
+  sat.stacked = stacked;
+  const mid = (left + right) / 2 - (stacked ? 90 : 0), midY = stacked ? pk.top / 2 : innerHeight * 0.4;   // (stacked: room for the board beside it)
+  const css = document.getElementById('cook').style;
+  css.setProperty('--cook-mid', `${mid}px`);
+  css.setProperty('--cook-foot', `${stacked ? innerHeight - pk.top + 8 : 24}px`);
+  if (leaf) document.querySelector('.cook-paper').style.maxHeight = stacked ? `${pk.top - 24}px` : '';
+  const tanV = Math.tan(camera.fov * Math.PI / 360), ndc = mid / innerWidth * 2 - 1, ndcY = 1 - midY / innerHeight * 2;
+  const dx = f.x - pos.x, dz = f.z - pos.z, wantY = Math.atan2(-dx, -dz) + Math.atan(ndc * tanV * camera.aspect);
+  const wantP = Math.atan2(potTop(f) - camera.position.y, Math.hypot(dx, dz)) - Math.atan(ndcY * tanV);
+  let dy = (wantY - yaw) % (Math.PI * 2); if (dy > Math.PI) dy -= Math.PI * 2; if (dy < -Math.PI) dy += Math.PI * 2;
+  yaw += dy * e; pitch += (wantP - pitch) * e;
+}
+const _potAt = new THREE.Vector3(), _potRim = new THREE.Vector3();
+function potOnScreen(f){
+  _potAt.set(f.x, potTop(f), f.z).project(camera);
+  _potRim.set(f.x + 0.32, potTop(f), f.z).project(camera);
+  const r = canvas.getBoundingClientRect();
+  const rad = Math.hypot((_potRim.x - _potAt.x) * r.width, (_potRim.y - _potAt.y) * r.height) / 2;
+  return { x: r.left + (_potAt.x + 1) / 2 * r.width, y: r.top + (1 - _potAt.y) / 2 * r.height, r: Math.max(56, rad * 1.5), stacked: sat.stacked };
+}
+// Shearing (docs/sheep.md): E on a sheep with its wool on. js/shear-hands.js has the view and the drag, and this the before and after.
+// For now anyone may shear any sheep, with no shears to carry, and the fleece is yours: to be settled with the shepherds.
+const shearHands = new ShearHands({ canvas, camera, view: sheepView, ground: height, snip: () => footsteps.snip(), onEnd: ({ fleece, dirt, at }) => {
+  inDialog = false; relock();
+  if (at && walkable(at.x, at.z)){ pos.x = at.x; pos.z = at.z; }   // you're where the view is
+  if (fleece){ myPack.add('fleece', 1, { ...provHere('shorn'), dirt }); flyToBag('fleece', 1); setForageMsg('The fleece comes away, and the sheep bolts, pale and light.', 4000); }
+  else setForageMsg('You let it go, with the job half done.', 3500);
+} });
+function startShearing(s){
+  inDialog = true; document.exitPointerLock?.();
+  glance.reset();
+  shearHands.begin(s, pos);
+}
+window.leaShear = { hands: shearHands, start: startShearing };
+
+// Stuck, measured (js/stuck.js, docs/npc-behavior.md "Stuck"): the folk on their way somewhere, and the sheep, who walk and get
+// nowhere, or can't walk. Always counting, as it's cheap; leaStuck() in the console says what's been found. With ?stucklog it
+// also goes to bub every minute, as a ?perflog recording does (logs/perf/<id>.json, kind 'stuck').
+// (var, and checked: the world can tick before this line has run, while the game is still loading)
+var stuckWatch = new StuckWatch(), _stuckId = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14);
+function watchStuck(dt){ if (stuckWatch) watchWorld(stuckWatch, dt, agents, habitatAt); }
+window.leaStuck = (all = false) => all ? stuckWatch.events : stuckWatch.summary();
+if (params.has('stucklog')) setInterval(() => {
+  if (!stuckWatch.events.length) return;
+  const body = JSON.stringify({ meta: { id: _stuckId, kind: 'stuck', ua: navigator.userAgent, world: WORLD_SEED }, summary: stuckWatch.summary(), events: stuckWatch.events });
+  fetch('/api/perflog', { method: 'POST', body }).catch(() => {});
+}, 60000);
+// ---- firewood, and laying a fire (docs/cooking.md) -------------------------------------------------
+// Work with your hands (cutting a shrub, the fire's rite) takes a moment and holds you: walk off
+// and it stops. A fire is placed like this: use wood from the pack, a ring on the ground ahead
+// says whether it can go there, E lays it (agents.fireSpotWhy; Campfire.raise is the same rite the
+// folk use). No flint or tinder; the rain stops it.
+const FIRE_LOGS = 3, FIRE_SPARE = 2, CUT_TIME = 2.6, CUT_LOGS = 3, RAIN_NO_FIRE = 0.35, PLACE_AHEAD = 3, LAY_TIME = 6;
+let job = null, placing = null;
+const jobBar = document.createElement('div');
+jobBar.style.cssText = 'position:fixed;left:50%;bottom:22%;width:170px;height:7px;margin-left:-85px;background:#000a;border:1px solid #e3d09f88;border-radius:3px;display:none;z-index:30;pointer-events:none';
+jobBar.innerHTML = '<div style="height:100%;width:0;background:#e3d09f;border-radius:2px"></div>';
+document.body.appendChild(jobBar);
+function startJob(time, { step, done, stopped }){
+  job = { t: 0, time, x: pos.x, z: pos.z, step, done, stopped };
+  jobBar.style.display = 'block';
+}
+function endJob(){ job = null; jobBar.style.display = 'none'; }
+function tickHands(dt){
+  if (job){
+    if (down || inDialog || Math.hypot(pos.x - job.x, pos.z - job.z) > 0.6){ const j = job; endJob(); j.stopped?.(); }
+    else {
+      job.t += dt; job.step?.(dt);
+      jobBar.firstChild.style.width = `${Math.min(100, job.t / job.time * 100)}%`;
+      if (job.t >= job.time){ const j = job; endJob(); j.done(); }
+    }
+  }
+  if (placing) placeFrame();
+}
+function cutShrub(s){
+  if (job) return;
+  if (!myPack.room('wood', 1)){ setForageMsg('No room in your pack.', 2600); return; }
+  setForageMsg('You cut at the shrub.', 1500);
+  startJob(CUT_TIME, { done: () => { if (s.alive === false) return; s.chop(); stow('wood', CUT_LOGS, provHere('found')); } });
+}
+const _ghost = new THREE.Mesh(new THREE.RingGeometry(0.75, 1.0, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x9fe08a, transparent: true, opacity: 0.55, depthWrite: false }));
+_ghost.visible = false; scene.add(_ghost);
+function startPlacing(){
+  if (sat) return 'Drag it onto the fire to feed it.';
+  if (down) return 'Not down here. There is nowhere for the smoke to go.';
+  if (boating) return 'Not in a boat.';
+  if ((myPack.counts.wood || 0) < FIRE_LOGS) return `A fire wants ${FIRE_LOGS} logs.`;
+  if (invOpen) closeInventory(true);
+  placing = { why: null, shown: null, x: 0, z: 0 };
+  _ghost.visible = true;
+  setForageMsg('Find a clear spot, and press E to lay a fire. Esc to think better of it.', 4000);
+  return null;
+}
+function stopPlacing(){ placing = null; _ghost.visible = false; }
+function placeFrame(){
+  if (down || boating || !inWorld() || (myPack.counts.wood || 0) < FIRE_LOGS){ stopPlacing(); return; }
+  const x = pos.x - Math.sin(yaw) * PLACE_AHEAD, z = pos.z - Math.cos(yaw) * PLACE_AHEAD;
+  placing.x = x; placing.z = z;
+  placing.why = agents.fireSpotWhy(x, z) || (rain.intensity > RAIN_NO_FIRE ? 'The rain will not let it catch.' : null);
+  _ghost.position.set(x, height(x, z) + 0.06, z);
+  _ghost.material.color.setHex(placing.why ? 0xe0705a : 0x9fe08a);
+  if (placing.why && placing.why !== placing.shown) setForageMsg(placing.why, 2000);
+  placing.shown = placing.why;
+}
+function layFire(){
+  const { x, z, why } = placing;
+  if (why){ setForageMsg(why, 2000); return; }
+  stopPlacing();
+  myPack.take('wood', FIRE_LOGS);
+  const f = agents.addCampfire(x, z, { exact: true, built: false });
+  setForageMsg('You ring the stones, and lay the wood.', LAY_TIME * 1000);
+  startJob(LAY_TIME, { step: dt => f.raise(dt),
+    done: () => { f.raise(1e6); f.addWood(FIRE_SPARE); setForageMsg('It catches. E to sit at it.', 3500); jot('lit', 'a fire'); },
+    stopped: () => { agents.removeFire(f); myPack.add('wood', FIRE_LOGS, null); setForageMsg('You leave it unlaid, and take your wood back.', 3000); } });
+}
+// what comes out of the pot: a dish you can name, or a plain boil
+const potItem = f => (f.pot.recipe && ingredient(f.pot.recipe)) ? f.pot.recipe : 'plain boil';
+function notePot(f){ if (!f.pot.noted){ f.pot.noted = true; jot('cooked', f.pot.recipe || `some ${f.pot.kind}`); } }
+const cook = makeCookView({ world: agents, pack: myPack, book: { receive: el => myBook.receive(el) }, say: m => setForageMsg(m, 2600),
+  known: () => [...recipesRead].filter(id => RECIPES[id]),
+  onFeed: f => { if (f.woodpile >= 12){ setForageMsg('The pile is as high as it will go.', 2600); return false; } f.addWood(1); return true; },
+  mayDouse: f => {
+    if (f.pot.raw + f.pot.ready > 0) return 'Not with food over it.';
+    return agents.near(f.x, f.z, 5).length ? 'Not with folk sat at it.' : null;
+  },
+  onDouse: f => {
+    const logs = f.douse(), back = Math.min(logs, myPack.room('wood', logs));
+    getUp();
+    if (back) myPack.add('wood', back, null);
+    setForageMsg(`You kick the fire apart.${back ? ` You take back ${back} ${back === 1 ? 'log' : 'logs'}.` : ''}`, 3500);
+    jot('put out', 'a fire');
+  },
+  cookOf: f => { const c = f.potCook(); return c ? displayName(c) : null; },
+  onLadle: f => {
+    const kind = potItem(f);
+    if (!myPack.room(kind, 1)){ setForageMsg('No room in your pack.', 2600); return; }
+    notePot(f);
+    stow(kind, 1, { ...provHere('cooked'), q: f.takeStew() });
+    packUI.render();
+  },
+  onEat: f => {
+    const kind = potItem(f);
+    notePot(f);
+    const g = eat(me, kind, agents.time, potFill(f.takeStew()));
+    setForageMsg(`You eat a bowl of ${(ingredient(kind) || {}).label || kind}: ${giveWords(g) || "you're as full of it as you'll get"}.`, 3500);
+  },
+});
+// debug: sit at the nearest lit fire, for driving this without pointer lock
+window.leaCook = { sit(){ const lit = agents.openFires.filter(f => f.lit && f.done); sitAt(lit.reduce((a, b) => Math.hypot(b.x - pos.x, b.z - pos.z) < Math.hypot(a.x - pos.x, a.z - pos.z) ? b : a)); return sat?.fire; }, up: getUp, cheat(){ CHEATS.CHEF(); }, get fire(){ return sat?.fire; }, get pack(){ return myPack; }, get playing(){ return playing; }, get job(){ return job; }, get placing(){ return placing; }, get shrubs(){ return forage.shrubs; }, cut: cutShrub, pos, world: agents, me };
 // climb into a moored boat: snap onto it and switch to paddling
 function board(b){
   boating = b; b.aboard = true;
@@ -3102,6 +3639,7 @@ const levels = new Map();               // levels built this session: what you'v
 const views = new Map();
 let down = null;                        // { L, view, name } while you're underground
 const upos = new THREE.Vector3();
+let nearTomb = null;   // a coffin you can read, or bring a letter to
 let nearEntrance = null, nearFind = null, nearExit = -1, nearSconce = null, nearShelf = null, nearDoor = null, nearChest = null;
 const fadeEl = document.createElement('div');
 fadeEl.style.cssText = 'position:fixed;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .35s;z-index:40';
@@ -3171,7 +3709,7 @@ function leavePalace(){
 }
 function askPortal(p){
   inDialog = true; document.exitPointerLock?.();
-  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
+  const onClose = () => { inDialog = false; relock(); };
   talkTree({ speaker: cap(p.name), root: 'ask', farewell: 'Stay in the Lea.', nodes: { ask: {
     text: `An oval of black hangs in the air, a door into nothing. Lights spiral into it, and out again. Go through into ${p.name}?`,
     choices: [{ label: 'Go through.', next: null, run: () => fade(() => { cameBy = p; goDown({ level: p.level, mouth: 0 }); }) }] } } }, { onClose });
@@ -3179,14 +3717,14 @@ function askPortal(p){
 function askDown(e){
   const name = underNames()[e.level].name;
   inDialog = true; document.exitPointerLock?.();
-  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
+  const onClose = () => { inDialog = false; relock(); };
   talkTree({ speaker: name, root: 'ask', farewell: 'Stay above.', nodes: { ask: {
     text: (e.kind === 'cave' ? 'A cave mouth in the hillside. Cold air breathes out of the dark.' : `Worn steps go down ${STAIR_WHERE[e.site] || STAIR_WHERE.chapel}, into the dark.`) + ` Go down into ${name}?`,
     choices: [{ label: 'Go down.', next: null, run: () => fade(() => goDown(e)) }] } } }, { onClose });
 }
 function askUp(k){
   inDialog = true; document.exitPointerLock?.();
-  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
+  const onClose = () => { inDialog = false; relock(); };
   const m = down.L.mouths[k];
   talkTree({ speaker: down.name, root: 'ask', farewell: m.to ? 'Stay here.' : 'Stay below.', nodes: { ask: {
     text: m.ask ? m.ask : down.L.site === 'palace' ? 'The door you came in by. Beyond it, the Lea. Go back through?' : down.L.kind === 'cave' ? 'Daylight, up ahead. Climb out?' : `The stair climbs ${STAIR_UP[down.L.site] || STAIR_UP.chapel}. Go back up?`,
@@ -3226,6 +3764,7 @@ const FIND_LABEL = LOOKS;   // what a find says when you aim at it (ingredients.
 // ingredient says, in a margin note, where that's found. A mouldy shelf in a chapter house
 // holds a still-room book instead (stillroom.js shelfBook): a preparation, not a dish.
 const recipesRead = new Set();   // kitchen recipes and preparations alike, by id
+const madeOnce = new Set();      // preparations a stargazer has made for you: what they want from then on is less (stillroom.js)
 // A Faerie palace's shelves hold the Gentry's library instead (faerie-books.js): real
 // recipes out of mortal books, read and copied but not yet made. Kept apart from
 // recipesRead, which the folk's cooking and Puck's finding read as things to make.
@@ -3257,13 +3796,18 @@ function prepPage(id){
   return { body: [P.intro, `Take ${wants.slice(0, -1).join(', ')} and ${wants.at(-1)}; ${P.method}.`, P.use],
            margins: rare.map(k => `${cap(k)}: only ${RARE_WHERE[RARE[k]]}.`) };
 }
+// where a shelf is on the screen, by the middle you aim at it by; what a page flies out of (page.js)
+function shelfOnScreen(sh){
+  const p = new THREE.Vector3(sh.x, sh.y + sh.h * 0.55, sh.z).project(camera), r = canvas.getBoundingClientRect();
+  return { x: Math.min(r.right, Math.max(r.left, r.left + (p.x + 1) / 2 * r.width)), y: Math.min(r.bottom, Math.max(r.top, r.top + (1 - p.y) / 2 * r.height)) };
+}
 function readShelf(sh){
-  const mb = shelfMusic(sh), cr = !mb && shelfCraft(sh);
+  const mb = shelfMusic(sh), cr = !mb && shelfCraft(sh), from = shelfOnScreen(sh);
   if (mb || cr) disturb();
-  if (mb){ readMusic(mb, shelfTune(sh)); return; }
-  if (cr){ readCraft(cr); return; }
+  if (mb){ readMusic(mb, shelfTune(sh), from); return; }
+  if (cr){ readCraft(cr, from); return; }
   const id = bookRecipe(sh);
-  if (id && FAERIE_BOOKS[id]){ readFaerieBook(id); return; }
+  if (id && FAERIE_BOOKS[id]){ readFaerieBook(id, from); return; }
   if (id) disturb();
   if (!id){ setForageMsg(SHELF_LABEL[sh.state][1], 3000); return; }
   const fresh = !recipesRead.has(id), prep = !!PREPARATIONS[id];
@@ -3273,12 +3817,12 @@ function readShelf(sh){
     journal.task(`recipe:${id}`, prep ? `The ${id}: a stargazer could make it, from ${PREPARATIONS[id].wants.map(w => w.say).join(', ')}.` : `A recipe for ${id}, to teach to a cook. It wants ${wantsWords(id)}.`);
   }
   inDialog = true; document.exitPointerLock?.();
-  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
-  readPage({ book: prep ? 'A book kept dry in its case' : SHELF_BOOK[sh.room] || 'An old book', title: cap(id), ...(prep ? prepPage(id) : recipePage(id)),
-             aside: fresh ? 'You copy it into your book of recipes.' : null, onClose });
+  const onClose = () => { inDialog = false; relock(); };
+  readPage({ from, book: prep ? 'A book kept dry in its case' : SHELF_BOOK[sh.room] || 'An old book', title: cap(id), ...(prep ? prepPage(id) : recipePage(id)),
+             into: fresh && intoBook, onClose });
 }
 // a book of the Gentry's: on vellum, in their own type (page.js `paper`)
-function readFaerieBook(id){
+function readFaerieBook(id, from){
   const B = FAERIE_BOOKS[id], fresh = !faerieRead.has(id);
   faerieRead.add(id);
   if (fresh){
@@ -3286,9 +3830,9 @@ function readFaerieBook(id){
     journal.task(`recipe:${id}`, `${cap(id)}, out of ${B.from.charAt(0).toLowerCase() + B.from.slice(1)}. It wants ${B.wants.join(', ')}.`);
   }
   inDialog = true; document.exitPointerLock?.();
-  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
-  readPage({ paper: 'vellum', book: B.from, title: cap(id), body: [B.intro, ...B.body], margins: B.margins || [],
-             aside: fresh ? 'You copy it into your book of recipes.' : null, onClose });
+  const onClose = () => { inDialog = false; relock(); };
+  readPage({ paper: 'vellum', book: B.from, from, title: cap(id), body: [B.intro, ...B.body], margins: B.margins || [],
+             into: fresh && intoBook, onClose });
 }
 // Music books (docs/music.md; tunes.js): the one dry book on a mouldy shelf, a choir book in
 // a cloister or a songbook in an undercroft, or one of the Gentry's on a palace shelf.
@@ -3296,10 +3840,11 @@ function readFaerieBook(id){
 // in the pack you can play one there and then.
 const tunesRead = new Set();
 // Maker's books (making.js): one on a shelf of its own in each crypt. Reading one copies the
-// making into your book (the Crafts page); with what it wants in your pack you make the
-// instrument there and then, and you can show the folk how (talk).
+// making into your book (the Crafts page), which is where you make the instrument, with what
+// it wants in your pack; you can show the folk how, too (talk).
 const craftsRead = new Set();
-function readCraft(kind){
+const intoBook = el => myBook.receive(el);    // a page you've copied, on its way into your book, once shut
+function readCraft(kind, from){
   const C = CRAFTS[kind], name = ingredient(kind).label, fresh = !craftsRead.has(kind);
   craftsRead.add(kind);
   if (fresh){
@@ -3307,11 +3852,10 @@ function readCraft(kind){
     journal.task(`craft:${kind}`, `How to make a ${name}. It wants ${needsText(kind)}.`);
   }
   inDialog = true; document.exitPointerLock?.();
-  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
-  const make = { label: `Make a ${name}.`, run: el => { el.textContent = makeCraft(kind); } };
+  const onClose = () => { inDialog = false; relock(); };
   readPage({ book: C.book, title: cap(name), ...(C.verse ? { verse: C.verse } : { body: [C.about, `It wants ${needsText(kind)}.`] }),
              margins: [...(C.margin ? [C.margin] : []), ...C.needs.filter(([m]) => ingredient(m)?.from === 'nowhere yet').map(([m]) => `${cap(ingredient(m).label)}: none to be had yet.`)],
-             aside: fresh ? 'You copy it into your book.' : null, actions: [make], onClose });
+             from, into: fresh && intoBook, onClose });
 }
 // make one now, if you've what it wants (instant): what happened, in a line
 function makeCraft(kind){
@@ -3320,22 +3864,23 @@ function makeCraft(kind){
   if (myPack.room(kind, 1) < 1) return `No room in your pack for a ${name}.`;
   for (const [m, k] of CRAFTS[kind].needs) myPack.take(m, k);
   myPack.add(kind, 1, provHere('made'));
+  flyToBag(kind, 1);
   jot('made', `a ${name}`);
   if (invOpen) openInventory();
   return `You make a ${name}. It's in your pack.`;
 }
 const words = a => a.length < 2 ? a.join('') : `${a.slice(0, -1).join(', ')} and ${a.at(-1)}`;
-function readMusic(bookId, tune){
+function readMusic(bookId, tune, from){
   const B = MUSIC_BOOKS[bookId], fresh = tunesRead.has(tune) ? [] : [tune];   // one tune to a shelf (tunes.js shelfTune)
   fresh.forEach(t => tunesRead.add(t));
   if (fresh.length) jot('found', `${B.from.charAt(0).toLowerCase() + B.from.slice(1)}, with ${words(fresh)} in it`);
   inDialog = true; document.exitPointerLock?.();
-  const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
+  const onClose = () => { inDialog = false; relock(); };
   const kind = carriedInstrument();
-  readPage({ paper: B.paper, book: B.from,
+  readPage({ paper: B.paper, book: B.from, from,
              tunes: [tune].map(id => ({ title: cap(id), about: TUNES[id].about, svg: staffSvg(id, { square: B.head === 'square' }),
                                         play: kind ? playNote(kind, liftFor(schedule(id).notes, kind)) : null })),
-             aside: fresh.length ? 'You copy it into your book.' : null,
+             into: fresh.length > 0 && intoBook,
              actions: kind ? [tune].map(id => ({ label: `Play ${id} on your ${ingredient(kind).label}.`,
                run: el => { if (tunePlaying?.id === id){ stopTune(); el.textContent = `Play ${id} on your ${ingredient(kind).label}.`; } else { playTune(id, kind); el.textContent = 'Stop playing.'; } } })) : [],
              onClose });
@@ -3350,13 +3895,14 @@ const carriedInstrument = () => Object.keys(myPack.counts).find(k => myPack.coun
 async function playTune(id, kind, sched = id ? partNotes(id, DRUMS.has(kind) ? 'drum' : 'melody', null, kind) : null){
   stopTune();
   const p = tunePlaying = { id, kind, perf: null };
+  stopTuneBtn.classList.remove('hide');
   const perf = await instruments.play(kind, sched).catch(e => { console.warn('instruments:', e); return null; });
   if (tunePlaying !== p){ perf?.stop(); return; }
-  if (!perf){ tunePlaying = null; return; }
+  if (!perf){ stopTune(); return; }
   p.perf = perf;
-  perf.done.then(() => { if (tunePlaying === p) tunePlaying = null; });
+  perf.done.then(() => { if (tunePlaying === p) stopTune(); });
 }
-function stopTune(){ if (!tunePlaying) return; tunePlaying.perf?.stop(); tunePlaying = null; }
+function stopTune(){ stopTuneBtn.classList.add('hide'); if (!tunePlaying) return; tunePlaying.perf?.stop(); tunePlaying = null; }
 // the first `secs` of a part (partNotes), dying away over its last `fade`: a taste of a tune,
 // as you play a villager the start of it (the whole thing ran on too long)
 function excerpt({ notes }, secs = 6, fade = 2){
@@ -3433,7 +3979,7 @@ const heardOf = npc => { const h = heardPlaying.get(npc); return h && agents.tim
 const heardPractice = new Map();  // npc → { go, r }
 function practiceTick(){
   for (const n of npcApi.npcs){
-    const go = n.practice ? practiceGo(n, agents.time) : null, d = Math.hypot(n.x - pos.x, n.z - pos.z);
+    const go = n.practice ? practiceGo(n, agents.time) : n.piping?.go ?? null, d = Math.hypot(n.x - pos.x, n.z - pos.z);   // (or a shepherd on their pipe, js/shepherd.js)
     let h = heardPractice.get(n);
     if (h && (h.go !== go || down || d > HEAR_R + 10)){ h.r.perf?.stop(); heardPractice.delete(n); h = null; }
     if (!h && go && !down && d < HEAR_R){
@@ -3443,7 +3989,7 @@ function practiceTick(){
       heardPractice.set(n, h);
       instruments.play(go.kind, { notes, length: go.length - at }, { gain: 0 }).then(perf => { if (heardPractice.get(n) === hh) r.perf = perf; else perf?.stop(); });
     }
-    if (h && placeSound(h.r) > HEARD_MIN) noteHeard(n, n.practice.id);
+    if (h && placeSound(h.r) > HEARD_MIN && (n.practice || n.piping)) noteHeard(n, n.practice?.id ?? n.piping.id);
   }
 }
 function listenTick(){
@@ -3462,6 +4008,7 @@ function listenTick(){
   practiceTick();
   for (const r of playedForYou || []) placeSound(r);
   palaceBandTick();
+  wardenTick();
 }
 // The Gentry's musicians (docs/music.md "The Gentry's way"): in a palace's great halls (its
 // rooms of kind 'hall' or 'crossing', the biggest four), four of them in a ring in the middle,
@@ -3469,7 +4016,7 @@ function listenTick(){
 // band nearest you plays; walk to another hall and that one starts up. Elf billboards, unlit.
 const BAND_KINDS = ['silver pipes', 'vielle', 'harp', 'harp'], PALACE_HEAR = 45, BANDS_MAX = 4;
 const GENTRY_TUNES = Object.keys(TUNES).filter(id => TUNES[id].style === 'gentry');
-const elfTex = ['male', 'female'].map(g => { const t = new THREE.TextureLoader().load(`sprites/billboards/${g}-peasant-elf.png`); t.colorSpace = THREE.SRGBColorSpace; return t; });
+const elfTex = ['male', 'female'].map(g => { const t = crisp(new THREE.TextureLoader().load(`sprites/billboards/${g}-peasant-elf.png`)); t.colorSpace = THREE.SRGBColorSpace; return t; });
 let palaceBand = null;   // { L, bands: [{ x, y, z, sprites, players: [{ npc, kind, part }] }], at: the band playing, perfs, next, tune }
 function makePalaceBands(L){
   const big = R => R.kind === 'hall' || R.kind === 'crossing';
@@ -3496,6 +4043,25 @@ function makePalaceBands(L){
 }
 const stopBandMusic = P => { for (const r of P.perfs) r.perf?.stop(); P.perfs = []; };
 function stopPalaceBand(){ if (!palaceBand) return; stopBandMusic(palaceBand); for (const b of palaceBand.bands) for (const s of b.sprites) s.removeFromParent(); palaceBand = null; }
+// The Post-Warden (js/mail.js): one of the fae, at a desk by the water in the Grounds. One for now;
+// Faerie will be peopled as the Lea is, so nothing else may rely on there being only this.
+const WARDEN_AT = { x: 0, z: -14 };
+let wardenSprite = null, nearWarden = false;
+function wardenSpot(L){ for (const r of [14, 16, 12, 18]) for (let a = 0; a < 12; a++){ const x = Math.cos(a * 0.52) * r, z = Math.sin(a * 0.52) * r; if (L.walkable(x, z)) return { x, z }; } return WARDEN_AT; }
+function wardenTick(){
+  const here = down?.L.id === GROUNDS;
+  if (!here){ wardenSprite?.removeFromParent(); return; }
+  if (!wardenSprite){
+    wardenSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: elfTex[1], transparent: true, alphaTest: 0.1, color: 0xd8d0f0 }));
+    wardenSprite.scale.set(1.15, 2.36, 1);
+    Object.assign(WARDEN_AT, wardenSpot(down.L));
+  }
+  if (wardenSprite.parent !== down.view.scene){ wardenSprite.position.set(WARDEN_AT.x, down.L.floorAt(WARDEN_AT.x, WARDEN_AT.z) + 1.18, WARDEN_AT.z); down.view.scene.add(wardenSprite); }
+}
+function talkToWarden(){
+  inDialog = true; document.exitPointerLock?.();
+  talkTree(mail.wardenTree(), { onClose: () => { inDialog = false; relock(); } });
+}
 function palaceBandTick(){
   if (down?.L.site !== 'palace' || !GENTRY_TUNES.length){ stopPalaceBand(); return; }
   if (palaceBand?.L !== down.L){ stopPalaceBand(); palaceBand = makePalaceBands(down.L); }
@@ -3541,6 +4107,16 @@ function playingNow(){
   return out;
 }
 
+// where each thing underground is aimed at
+const underAim = {
+  find: (f, L) => [f.x, (f.view ? f.view.position.y : f.y ?? L.floorAt(f.x, f.z)) + 0.2, f.z],   // (where it's drawn: a key hovers over its chest)
+  sconce: s => [s.x, s.aimY ?? s.y + 0.45, s.z],            // a torch on the wall, by its head
+  shelf: s => [s.x, s.y + s.h * 0.55, s.z],                 // a bookshelf, by its middle
+  door: d => [d.x - Math.cos(d.a) * 0.1, d.y + 1.6, d.z - Math.sin(d.a) * 0.1],   // a locked door, by its lock
+  chest: c => [c.x, c.y + c.h, c.z],                        // a shut chest, by its lid
+  warden: L => [WARDEN_AT.x, L.floorAt(WARDEN_AT.x, WARDEN_AT.z) + 1.6, WARDEN_AT.z],
+};
+
 // underground, what's in front of you: a find to take, or the way out
 function underFocus(){
   camera.getWorldDirection(_fwd);
@@ -3548,7 +4124,7 @@ function underFocus(){
   let best = null, bd = 0.9;
   for (const f of L.finds){
     if (f.taken || (f.chest != null && !L.chests[f.chest].open)) continue;   // (what's in a shut chest can't be seen)
-    const y = (f.view ? f.view.position.y : f.y ?? L.floorAt(f.x, f.z)) + 0.2, dx = f.x - upos.x, dy = y - upos.y, dz = f.z - upos.z, d = Math.hypot(dx, dy, dz);   // (where it's drawn: a key hovers over its chest)
+    const [ax, ay, az] = underAim.find(f, L), dx = ax - upos.x, dy = ay - upos.y, dz = az - upos.z, d = Math.hypot(dx, dy, dz);
     if (d > TALK_RANGE) continue;
     const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / d;
     if (dot > bd){ bd = dot; best = f; }
@@ -3556,7 +4132,7 @@ function underFocus(){
   // a torch on the wall, aimed at by its head
   let sc = null;
   for (const s of L.sconces || []){
-    const dx = s.x - upos.x, dy = (s.aimY ?? s.y + 0.45) - upos.y, dz = s.z - upos.z, d = Math.hypot(dx, dy, dz);
+    const [ax, ay, az] = underAim.sconce(s), dx = ax - upos.x, dy = ay - upos.y, dz = az - upos.z, d = Math.hypot(dx, dy, dz);
     if (d > TALK_RANGE) continue;
     const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / d;
     if (dot > bd){ bd = dot; sc = s; best = null; }
@@ -3564,7 +4140,7 @@ function underFocus(){
   // a bookshelf, aimed at by its middle
   let sh = null;
   for (const s of L.shelves || []){
-    const dx = s.x - upos.x, dy = s.y + s.h * 0.55 - upos.y, dz = s.z - upos.z, d = Math.hypot(dx, dy, dz);
+    const [ax, ay, az] = underAim.shelf(s), dx = ax - upos.x, dy = ay - upos.y, dz = az - upos.z, d = Math.hypot(dx, dy, dz);
     if (d > TALK_RANGE) continue;
     const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / d;
     if (dot > bd){ bd = dot; sh = s; sc = null; best = null; }
@@ -3573,25 +4149,50 @@ function underFocus(){
   let dr = null, ch = null;
   for (const d of L.doors || []){
     if (d.open) continue;
-    const dx = d.x - Math.cos(d.a) * 0.1 - upos.x, dy = d.y + 1.6 - upos.y, dz = d.z - Math.sin(d.a) * 0.1 - upos.z, dd = Math.hypot(dx, dy, dz);
+    const [ax, ay, az] = underAim.door(d), dx = ax - upos.x, dy = ay - upos.y, dz = az - upos.z, dd = Math.hypot(dx, dy, dz);
     if (dd > TALK_RANGE + 1) continue;
     const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / dd;
     if (dot > Math.min(bd, 0.75)){ bd = dot; dr = d; sh = sc = best = null; }            // (a broad thing: a wider cone)
   }
   for (const c of L.chests || []){
     if (c.open) continue;
-    const dx = c.x - upos.x, dy = c.y + c.h - upos.y, dz = c.z - upos.z, dd = Math.hypot(dx, dy, dz);
+    const [ax, ay, az] = underAim.chest(c), dx = ax - upos.x, dy = ay - upos.y, dz = az - upos.z, dd = Math.hypot(dx, dy, dz);
     if (dd > TALK_RANGE) continue;
     const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / dd;
     if (dot > bd){ bd = dot; ch = c; dr = sh = sc = best = null; }
   }
+  nearWarden = false;
+  if (L.id === GROUNDS){
+    const [ax, ay, az] = underAim.warden(L), dx = ax - upos.x, dy = ay - upos.y, dz = az - upos.z, dd = Math.hypot(dx, dy, dz);
+    if (dd < TALK_RANGE && (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / dd > Math.min(bd, 0.75)){ nearWarden = true; dr = sh = sc = ch = best = null; }
+  }
+  // what the glance is on, if it's in reach, wins wherever it is on the screen
+  const t = glance.target, q = t && glance.at;
+  if (q && Math.hypot(q.x - upos.x, q.y - upos.y, q.z - upos.z) <= (q.range ?? TALK_RANGE)){
+    const isFind = L.finds.includes(t), isSc = (L.sconces || []).includes(t), isSh = (L.shelves || []).includes(t), isDr = (L.doors || []).includes(t), isCh = (L.chests || []).includes(t);
+    if (t === WARDEN_AT || isFind || isSc || isSh || isDr || isCh){
+      best = isFind ? t : null; sc = isSc ? t : null; sh = isSh ? t : null; dr = isDr ? t : null; ch = isCh ? t : null; nearWarden = t === WARDEN_AT;
+    }
+  }
   nearFind = best; nearSconce = sc; nearShelf = sh; nearDoor = dr; nearChest = ch;
+  // a tomb, by its slab, when you're looking at nothing else: what's on a lid gets taken first
+  nearTomb = null;
+  if (!best && !sc && !sh && !dr && !ch && !nearWarden && L.kind === 'crypt' && L.site !== 'palace'){
+    let td = 0.8;
+    for (const p of L.props){
+      if (p.kind !== 'coffin') continue;
+      const dx = p.x - upos.x, dy = p.y + p.h - upos.y, dz = p.z - upos.z, d = Math.hypot(dx, dy, dz);
+      if (d > TALK_RANGE + 1) continue;
+      const dot = (dx * _fwd.x + dy * _fwd.y + dz * _fwd.z) / d;
+      if (dot > td){ td = dot; nearTomb = p; }
+    }
+  }
   nearExit = L.mouths.findIndex(m => Math.hypot(m.x - upos.x, m.z - upos.z) < 6 && (m.fy == null || Math.abs(m.fy - (upos.y - EYE)) < 2.5));   // (the stair's doors: only at their own height)
   hoverPanel.style.display = 'flex'; hoverFace.style.display = 'none'; hoverName.style.display = ''; hoverAmbient.style.display = '';
   // the lake's canoe: in it, nothing else is in reach but the water; beside it, it's yours to take
   const canoe = down.view.canoe;
   if (boating){
-    nearFind = nearSconce = nearShelf = nearDoor = nearChest = null; nearExit = -1;
+    nearFind = nearSconce = nearShelf = nearDoor = nearChest = nearTomb = null; nearExit = -1;
     nearFish = L.eelsAt(upos.x, upos.z) ? L.eels : null;
     if (nearFish){ hoverName.textContent = 'Black water'; hoverAmbient.textContent = L.eels.stock < 0.3 ? 'Deep and still. Fished hard, lately.' : 'Deep and still. Eels lie down there in the dark.'; }
     else { hoverName.textContent = 'The lake'; hoverAmbient.textContent = 'Shallow here. Paddle out to the deep water to fish.'; }
@@ -3602,6 +4203,7 @@ function underFocus(){
     hoverName.textContent = 'A bark canoe'; hoverAmbient.textContent = 'Drawn up at the edge of the black water, a paddle across it.';
     return;
   }
+  if (nearWarden){ nearExit = -1; hoverName.textContent = 'The Post-Warden'; hoverAmbient.textContent = 'One of them, at a tall desk. Letters in, letters out.'; return; }
   if (sh){ const [t, d] = sh.lectern ? LECTERN : sh.palace ? PALACE_SHELF : SHELF_LABEL[sh.state]; hoverName.textContent = t; const b = bookRecipe(sh), mb = shelfMusic(sh), cr = shelfCraft(sh);
     hoverAmbient.textContent = cr ? (craftsRead.has(cr) ? `${CRAFTS[cr].book}: copied into your book.` : 'Kept dry: one book, its spine marked with a drawing of an instrument.') : mb ? (tunesRead.has(shelfTune(sh)) ? `${cap(shelfTune(sh))}: copied into your book.` : sh.palace || sh.lectern ? d : 'Mould on all of them but one, in a leather case.')
       : b && (recipesRead.has(b) || faerieRead.has(b)) ? `${cap(b)}: copied into your book.` : b && sh.state !== 'book' ? 'Mould on all of them but one, in a leather case.' : d; }
@@ -3617,7 +4219,8 @@ function underFocus(){
 // C opens it at the spells and J at the journal's latest spread; a tab goes to a section.
 // The spells: click one, or press its number, from any page. Teleport opens the world map to
 // choose a spot, from anywhere, underground included; Fly is the fly camera; Wizard Eye shows
-// the whole of the level you're in. Each costs spell points (vitals.js): Teleport when you land,
+// the whole of the level you're in, or of the Lea; Town Portal opens it to choose among the settlements you've seen.
+// Each costs spell points (vitals.js): Teleport and Town Portal when you land,
 // Fly to rise and then a trickle while you're up (run out and you drift down), Wizard Eye at once.
 // a little pixel sigil for each spell, drawn on a 16px grid, until its plate is drawn (sprites/spells/<id>.png)
 function sigil(kind){
@@ -3635,6 +4238,11 @@ function sigil(kind){
     } else if (kind === 'eye'){                                         // an eye
       const lid = Math.abs(dy) < 4.5 * Math.cos(dx / 8 * Math.PI / 2) && Math.abs(dx) < 7.5;
       if (r < 2.2) px(x, y, '#101010'); else if (r < 3.6) px(x, y, '#8a6a20'); else if (lid) px(x, y, '#c9b48a');
+    } else if (kind === 'town'){                                        // a house, its door lit
+      const door = x >= 7 && x <= 8 && y >= 11 && y <= 14;
+      const roof = y >= 2 && y <= 7 && Math.abs(dx) <= y - 1;
+      const wall = y >= 8 && y <= 14 && Math.abs(dx) <= 5;
+      if (door) px(x, y, '#8a6a20'); else if (roof) px(x, y, '#3a2a14'); else if (wall) px(x, y, '#3a4a78');
     }
   }
   return cv;
@@ -3648,15 +4256,27 @@ const SPELLS = [
       if (fly){ fly = false; flyPaid = false; setForageMsg('You come back down to earth.'); }
       else { spend(me, 2); fly = true; flyPaid = true; setForageMsg('You rise off the ground.'); }
       relock(); } },
-  { id: 'eye', name: 'Wizard Eye', cost: 5, desc: 'See the whole shape of the place you are under.', can: () => !!down, why: 'Only underground, where the dark hides it.',
-    cast(){ spend(me, 5); maps.revealAll(); setForageMsg(`The whole of ${down.name} opens in your mind.`, 3000); relock(); } },
+  { id: 'eye', name: 'Wizard Eye', cost: 5, desc: 'See the whole shape of the place you are in.', can: () => true,
+    cast(){
+      spend(me, 5);
+      if (down) maps.revealAll(); else maps.revealLand();
+      setForageMsg(`The whole of ${down ? down.name : 'the Lea'} opens in your mind.`, 3000); relock(); } },
+  { id: 'town', name: 'Town Portal', cost: 6, desc: 'Step through to any town you have seen.', can: () => knownTowns().length > 0, why: 'You have not seen a town yet.', cast: castTownPortal },
 ];
+const spellsKnown = new Set();     // none to begin with (the GRIMOIRE cheat teaches them all)
+const knownSpells = () => SPELLS.filter(sp => spellsKnown.has(sp.id));
 const affords = sp => (sp.free && sp.free()) || me.sp >= sp.cost;
 const POOR = 'Not enough strength left in you.';
 function relock(){ if (playing && !document.body.classList.contains('cursor-mode')){ try { canvas.requestPointerLock(); } catch (_){} } }
 const bookEsc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const entryEl = (html, cls = 'entry') => { const e = document.createElement('div'); e.className = cls; e.innerHTML = html; return e; };
 const plateMissing = new Set();     // plates not drawn yet: asked for once, then the sigil
+function stampPlate(rec){
+  const e = entryEl(`<div class="pic">${rec.url ? `<img src="${rec.url}" alt="" draggable="false">` : ''}</div><div class="name">${bookEsc(rec.stamp.realmName)}, ${rec.stamp.value}${rec.stamp.kind === 'faerie' ? '' : 'd'}</div>`, 'plate stamp-plate');
+  e.dataset.desc = `No. ${rec.stamp.copy}. Came on a letter from ${rec.from}.`;
+  e.onclick = () => mail.loupe(rec);
+  return e;
+}
 function spellPlate(sp, i){
   const can = sp.can(), ok = can && affords(sp);
   const el = entryEl(`<div class="pic"></div><span class="key">${i + 1}</span><div class="name">${bookEsc(sp.name)}</div><div class="cost">${bookEsc(sp.costNote || sp.cost)} spell points</div>`, 'plate' + (ok ? '' : ' off'));
@@ -3676,8 +4296,8 @@ function spellPlate(sp, i){
 function recipeBlocks(){
   const rows = [...recipesRead].map(id => {
     if (PREPARATIONS[id]){                     // a preparation: each want marked only if got rightly
-      const wants = wantsMet(myPack, id).map(m => `<span class="${m.ok ? 'have' : ''}${RARE[m.want.kind] ? ' rare' : ''}">${bookEsc(m.want.n > 1 ? `${m.want.n} ${m.want.kind}` : m.want.kind)}${m.want.test && m.have >= m.want.n && !m.ok ? ' (not rightly got)' : ''}</span>`).join(' · ');
-      return entryEl(`<div class="name">${bookEsc(cap(id))}</div><div class="wants">${wants} — made by a stargazer, at the new moon</div>`);
+      const again = madeOnce.has(id), wants = wantsMet(myPack, id, again).map(m => `<span class="${m.ok ? 'have' : ''}${RARE[m.want.kind] ? ' rare' : ''}">${bookEsc(m.want.n > 1 ? `${m.want.n} ${m.want.kind}` : m.want.kind)}${m.want.test && m.have >= m.want.n && !m.ok ? ' (not rightly got)' : ''}</span>`).join(' · ');
+      return entryEl(`<div class="name">${bookEsc(cap(id))}</div><div class="wants">${wants} — ${again ? 'any stargazer has the rest put by, any day' : 'made by a stargazer, at the new moon'}</div>`);
     }
     const wants = recipeWants(id).map(alts => {
       const have = alts.some(k => (basket[k] || 0) > 0), rare = alts.some(k => RARE[k]);
@@ -3715,44 +4335,84 @@ let bookRelocks = true;      // shutting the book takes the look back, unless a 
 const myBook = makeBook({
   onClose: () => { if (bookRelocks) relock(); },
   onSection: id => { if (id === 'journal'){ journal.read(); markJournal(); } },
+  onIcon: () => journal.unread ? openJournal() : openBook(),     // the dot says the Log's new: that's where it opens
   sections: [
-    { id: 'journal', title: 'Log', tab: 'log', empty: 'Nothing written yet. What I find, and who I meet that comes to anything, goes here.', blocks: () => journalBlocks(journal) },
-    { id: 'recipes', title: 'Food', tab: 'food', sub: 'Copied from the old books. Ticked: what you carry; starred: found only in hard places.', empty: 'Nothing copied here yet. What you read in the old books goes here.', blocks: recipeBlocks },
-    { id: 'crafts', title: 'Making Things', tab: 'making', sub: "Copied from the makers' books. Ticked: what you carry.", empty: "Nothing copied here yet. What you read in the makers' books goes here.", blocks: craftBlocks },
-    { id: 'tunes', title: 'Song', tab: 'song', sub: 'Copied from the music books. Play one on an instrument from your pack.', empty: 'Nothing copied here yet. What you read in the music books goes here.', blocks: tuneBlocks },
-    { id: 'spells', title: 'Spells', tab: 'spells', bare: true, blocks: () => SPELLS.map(spellPlate) },
+    { id: 'journal', title: 'Log', tab: 'log', always: true, empty: 'Nothing written yet. What I find, and who I meet that comes to anything, goes here.', blocks: () => journalBlocks(journal, mail.linkNames) },
+    { id: 'recipes', title: 'Food', tab: 'food', sub: 'Copied from the old books. Ticked: what you carry; starred: found only in hard places.', blocks: recipeBlocks },
+    { id: 'crafts', title: 'Making Things', tab: 'making', sub: "Copied from the makers' books. Ticked: what you carry.", blocks: craftBlocks },
+    { id: 'tunes', title: 'Song', tab: 'song', sub: 'Copied from the music books. Play one on an instrument from your pack.', blocks: tuneBlocks },
+    { id: 'folk', title: 'Folk', tab: 'folk', sub: 'Everyone I know of, and whose people they are. A name turns to their page.', blocks: kinBlocks },
+    { id: 'stamps', title: 'Stamps', tab: 'stamps', bare: true, empty: 'No stamps yet.', blocks: () => mail.album.map(stampPlate) },
+    { id: 'spells', title: 'Spells', tab: 'spells', bare: true, empty: "You don't know any spells.", blocks: () => knownSpells().map(spellPlate) },
   ],
 });
+// a lineage as you know it, drawn by the Bub's own bub-lineage (js/kit/, a link to the kit's file)
+function kinBlocks(){
+  const block = (cls, fill) => { const e = document.createElement('div'); e.className = cls; fill(e); return e; };
+  return mail.kinTrees().filter(t => t.data).flatMap(t => [
+    block('kin-name keep', e => { e.textContent = t.surname; e.dataset.anchor = `line:${t.surname}`; }),      // (`keep`: goes over the page with what it heads)
+    ...treePieces(t.data.tree).map(q => block(`kin-line${q.head ? ' keep' : ''}`, e => {
+      e.style.marginLeft = `${q.depth * 0.9}em`;
+      window.bubLineage.tree(e, { tree: q.tree });
+    })),
+  ]).concat(mail.peopleKnown().flatMap(q => personBlocks(mail.personRecord(q), mail.linkNames)));
+}
 function openBook(id, how){
   if (invOpen) closeInventory();
   myBook.open(id, how);
   document.exitPointerLock?.();
 }
-window.leaBook = () => ({ book: myBook, open: openBook, recipesRead, tunesRead, craftsRead, faerieRead, basket, journal });
 function castSpell(i){
-  const sp = SPELLS[i];
+  const sp = knownSpells()[i];
   if (!sp || !sp.can()) return;
   if (!affords(sp)){ setForageMsg(POOR, 2500); return; }
   bookRelocks = false; myBook.close(); bookRelocks = true;
   sp.cast();
 }
+// the nearest dry ground to a spot, within 24u, or null
+function dryGroundNear(x, z){
+  for (let r = 0; r <= 24; r += 1.5) for (let q = 0; q < 16; q++){
+    const a = q / 16 * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+    if (Math.hypot(px, pz) < WORLD_R && walkable(px, pz)) return [px, pz];
+  }
+  return null;
+}
+// a spell puts you down at a spot: out of any level you were in, out of any boat (it stays where it was)
+function arriveBySpell(spot, then){
+  fade(() => {
+    if (down){ down = null; nearFind = null; nearExit = -1; nearSconce = null; maps.setLevel(null); }
+    if (boating){ boating.aboard = false; boating = null; }
+    pos.x = spot[0]; pos.z = spot[1]; pos.y = height(pos.x, pos.z) + EYE;
+    then();
+  });
+}
 // Teleport: choose on the world map, then stand on the nearest dry ground to it.
 // From underground you come up out of the level wherever you chose.
 function castTeleport(){
   maps.pick((x, z) => {
-    let spot = null;
-    for (let r = 0; r <= 24 && !spot; r += 1.5) for (let q = 0; q < 16 && !spot; q++){
-      const a = q / 16 * Math.PI * 2, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
-      if (Math.hypot(px, pz) < WORLD_R && walkable(px, pz)) spot = [px, pz];
-    }
+    const spot = dryGroundNear(x, z);
     relock();
     if (!spot){ setForageMsg('There is nothing to stand on there.'); return; }
     if (!spend(me, 8)){ setForageMsg(POOR, 2500); return; }
-    fade(() => {
-      if (down){ down = null; nearFind = null; nearExit = -1; nearSconce = null; maps.setLevel(null); }
-      if (boating){ boating.aboard = false; boating = null; }
-      pos.x = spot[0]; pos.z = spot[1]; pos.y = height(pos.x, pos.z) + EYE;
-      setForageMsg(`You step out of the air ${placePhrase(placeAt(pos.x, pos.z))}.`, 3500);
+    arriveBySpell(spot, () => setForageMsg(`You step out of the air ${placePhrase(placeAt(pos.x, pos.z))}.`, 3500));
+  }, down ? upos.x : pos.x, down ? upos.z : pos.z, yaw);
+}
+// Town Portal: the settlements you've seen, farmsteads too. They are the same ones the map
+// names, so the spell can't give away a place still in the dark.
+function knownTowns(){
+  const names = settlementNames();
+  return settlements().places.flatMap((p, i) => maps.seen(p.x, p.z) ? [{ x: p.x, z: p.z, gate: p.gate, kind: p.kind, name: names[i].name }] : []);
+}
+// You choose a town on the world map and come out at its gate, facing in.
+function castTownPortal(){
+  maps.pickPlace(knownTowns(), t => {
+    const spot = dryGroundNear(t.gate[0], t.gate[1]);
+    relock();
+    if (!spot){ setForageMsg('There is nothing to stand on there.'); return; }
+    if (!spend(me, 6)){ setForageMsg(POOR, 2500); return; }
+    arriveBySpell(spot, () => {
+      yaw = Math.atan2(-(t.x - spot[0]), -(t.z - spot[1]));
+      setForageMsg(`You step through to ${t.name}.`, 3500);
     });
   }, down ? upos.x : pos.x, down ? upos.z : pos.z, yaw);
 }
@@ -3802,7 +4462,40 @@ function seaProx(){
 // cheats: Enter opens a line to type one into (Enter runs it, Esc drops it); its keys
 // stop at the box, so typing doesn't walk you about or open panels
 const cheatEl = document.getElementById('cheat');
-const CHEATS = { SALVEMEUP: () => stow('fairy salve', 1, null), STARGAZE: () => stow('telescope', 1, null), MUSICAL: musical, BONES: bones };
+const CHEATS = { CHEF: () => chef(), TPTOTRADER: () => toTrader(), GENEALOGICAL: () => { const n = mail.learnKin(); setForageMsg(`Every family tree is in your book: ${n} lineages.`, 4000); }, GRIMOIRE: () => { for (const sp of SPELLS) spellsKnown.add(sp.id); setForageMsg('You know every spell. They are in your book.'); }, SALVEMEUP: () => { stow('fairy salve', 1, null); stow('four-leaf clover', 1, { ...provHere('picked'), hour: 5.2, thin: ['fairy ring'] }); recipesRead.add('fairy salve'); madeOnce.add('fairy salve'); }, STARGAZE: () => stow('telescope', 1, null), MUSICAL: musical, BONES: bones };
+// TPTOTRADER: stood a few steps from a trader, facing them; again for the next one
+let traderTp = 0;
+function toTrader(){
+  const list = agents.traders?.list || [];
+  if (down || boating) return setForageMsg('Not from here.');
+  if (!list.length) return setForageMsg('There are no traders on the road.');
+  const t = list[traderTp++ % list.length], n = t.who;
+  if (n._indoors) return setForageMsg(`${displayName(n)} is indoors.`);
+  for (let i = 0; i < 12; i++){
+    const a = i * 0.52 + 0.3, x = n.x + Math.cos(a) * 4, z = n.z + Math.sin(a) * 4;
+    if (!walkable(x, z) && i < 11) continue;
+    pos.x = x; pos.z = z; pos.y = height(x, z) + EYE;
+    yaw = Math.atan2(-(n.x - x), -(n.z - z)); pitch = -0.1;
+    break;
+  }
+  setForageMsg(`${displayName(n)}${list.length > 1 ? ` (${(traderTp - 1) % list.length + 1} of ${list.length}; again for the next)` : ''}.`, 4000);
+}
+// CHEF: every dish in your book, firewood, two of everything they want, as far as the pack holds them, and you stood at a lit fire
+function chef(){
+  const ids = Object.keys(RECIPES), kinds = [...new Set(ids.flatMap(id => recipeWants(id).flat()))];
+  for (const id of ids) recipesRead.add(id);
+  myPack.add('wood', 8, null);
+  const missed = kinds.filter(k => !myPack.add(k, 2, null));
+  const f = !down && !boating && agents.addCampfire(pos.x + 2.5, pos.z, { refine: false });   // (or the one already near: it won't lay two close together)
+  if (f){
+    f.raise(1e6); f.fuel = Math.max(f.fuel, 0.7); f.addWood(6);
+    const d = Math.hypot(pos.x - f.x, pos.z - f.z) || 1;
+    pos.x = f.x + (pos.x - f.x) / d * 3; pos.z = f.z + (pos.z - f.z) / d * 3; pos.y = height(pos.x, pos.z) + EYE;
+    yaw = Math.atan2(-(f.x - pos.x), -(f.z - pos.z)); pitch = -0.25;
+  }
+  setForageMsg(`You know every dish.${f ? ' A fire burns before you: E to sit at it.' : ''}${missed.length ? ` No room in your pack for the ${words(missed)}.` : ''}`, 5000);
+  if (invOpen) openInventory();
+}
 // MUSICAL: every tune and every maker's book copied into your book, and one of each instrument you aren't carrying, as far as the pack holds them
 function musical(){
   for (const id of Object.keys(TUNES)) tunesRead.add(id);
@@ -3834,11 +4527,26 @@ loadSkeletonKit().then(k => { skelKit = k; });
 // you took something down here (a find, a book, a chest opened, a door unlocked): the
 // crypt's bones grow restless, and rise when you walk into their room (skeleton-guards.js)
 function disturb(){ if (down?.L.skel) down.L.skel.disturb(); }
+// a tomb (docs/skeletons.md): E reads it. With its letter in your pack, the slab slides off and its dead get up for it
+let tombRite = null;
+function useTomb(p){
+  const L = down.L, letter = mail.letterAt(L, p);
+  setForageMsg(mail.readTomb(L, p), 6000);
+  if (!letter || !skelKit) return;
+  tombRite ||= makeTombRite(skelKit);
+  if (tombRite.busy) return;
+  inDialog = true;
+  tombRite.open({ L, view: down.view, p, x: upos.x, z: upos.z, onUp: () => {
+    document.exitPointerLock?.();
+    talkTree(mail.tombTree(letter), { onClose: () => { inDialog = false; tombRite.done(); relock(); } });
+  } });
+}
 function tickBones(dt, tint){
   const where = down ? down.L.id : null, here = down ? upos : pos, sc = down ? down.view.scene : scene;
   const L = down?.L, G = L?.guards?.length && skelKit ? (L.skel ||= makeGuards(L, skelKit)) : null;
   if (G !== guardsHere){ guardsHere?.leave(); guardsHere = G; }
   if (G) G.update(dt, { x: upos.x, z: upos.z, camera, scene: sc });
+  tombRite?.update(dt, L, camera);
   if (sc !== boltScene){ bolts.clear(); boltScene = sc; }
   bolts.update(dt);
   for (const H of heaps){
@@ -3921,6 +4629,11 @@ cheatEl.addEventListener('blur', () => cheatEl.classList.add('hide'));
 addEventListener('keydown', e => {
   if (scope && /^(Key[WASDE]|Arrow(Up|Down))$/.test(e.code)){ lowerGlass(); return; }   // a step, or E, lowers the telescope
   if (scope && e.code === 'Escape') lowerGlass();     // (and the browser frees the mouse, below, as for any Esc)
+  if (sat && /^(Key[WASDE]|Arrow(Up|Down)|Escape)$/.test(e.code)){ getUp(); return; }   // a step, E or Esc: you get up
+  if (shearHands.on && /^(KeyE|Escape)$/.test(e.code)){ shearHands.letGo(); return; }
+  if (sat && e.code === 'KeyI') return;
+  if (placing && e.code === 'Escape') stopPlacing();   // (and the browser frees the mouse, as for any Esc)
+  if (placing && e.code === 'KeyE' && inWorld()){ layFire(); return; }
   if (myBook.isOpen){                                 // your book takes the keys while it's open
     if (e.code === 'Escape' || (e.code === 'KeyC' && myBook.section === 'spells') || (e.code === 'KeyJ' && myBook.section === 'journal')) myBook.close();
     else if (e.code === 'KeyC') myBook.open('spells');      // it turns there
@@ -3942,8 +4655,10 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyJ' && playing && !inDialog && !settingsOpen && !skyPicker._open){ openJournal(); return; }
   if (e.code === 'KeyR' && playing && !inDialog && !settingsOpen && !skyPicker._open){ if (invOpen) closeInventory(); openRest(); return; }
   if (e.code === 'KeyM' && playing && !inDialog && !settingsOpen && !skyPicker._open){ openBigMap(); return; }
+  if (e.code === 'KeyT' && tunePlaying){ stopTune(); return; }
   if (e.key === 'Enter' && playing && !inDialog && !settingsOpen && !skyPicker._open && !invOpen){ e.preventDefault(); openCheat(); return; }
   if (e.code === 'KeyO'){ settingsOpen ? closeSettings() : openSettings(); return; }
+  if (e.code === 'KeyL' && document.body.classList.contains('cursor-mode') && !inDialog && !settingsOpen && !skyPicker._open && !invOpen && !maps.bigOpen){ try { canvas.requestPointerLock(); } catch (_){} return; }
   if (e.code === 'Escape' && settingsOpen){ closeSettings(); return; }
   if (e.code === 'Escape' && playing && !inDialog){
     if (document.pointerLockElement !== canvas){
@@ -3961,13 +4676,16 @@ addEventListener('keydown', e => {
     navigator.clipboard?.writeText(u).catch(()=>{});
     setPoseMsg('pose copied'); console.log('POSE', u);
   }
-  const _inLook = document.pointerLockElement === canvas;
+  const _inLook = inWorld();                            // (E aims at the middle of the screen, cursor free or not)
+  if (e.code === 'KeyE' && _inLook && !inDialog) glance.rearm();   // if that uses it up, the eye may go on to the next
   if (e.code === 'KeyE' && _inLook && !inDialog && down){
     if (boating){ if (playerFish) reelIn('You reel in.'); else if (nearFish) castLine(nearFish); else disembark(); }
+    else if (nearWarden) talkToWarden();
     else if (nearBoat) board(nearBoat);
     else if (nearShelf) readShelf(nearShelf);
     else if (nearDoor) tryDoor(nearDoor);
     else if (nearChest) openChest(nearChest);
+    else if (nearTomb) useTomb(nearTomb);
     else if (nearSconce){ nearSconce.lit = !nearSconce.lit; setForageMsg(nearSconce.lit ? 'You light it from your own torch.' : 'You put it out.'); }
     else if (nearFind) takeFind(nearFind); else if (nearExit >= 0) askUp(nearExit);
   } else if (e.code === 'KeyE' && _inLook && !inDialog && playerFish){
@@ -3990,7 +4708,7 @@ addEventListener('keydown', e => {
     const onClose = () => {
       mapMark = null;                                     // clear any kin marker on leaving
       npc.talking = false; inDialog = false;
-      try { canvas.requestPointerLock(); } catch (_){}
+      relock();
     };
     if (nearTalker.peasant){
       const tree = peasantTree(npc, sky);
@@ -4014,20 +4732,26 @@ addEventListener('keydown', e => {
     }
   } else if (e.code === 'KeyE' && _inLook && !inDialog && nearHouseDoor){
     knockAt(nearHouseDoor);
+  } else if (e.code === 'KeyE' && _inLook && !inDialog && nearSign){
+    readSign(nearSign);
+  } else if (e.code === 'KeyE' && _inLook && !inDialog && nearMailbox){
+    openMailbox(nearMailbox);
   } else if (e.code === 'KeyE' && _inLook && !inDialog && nearObject){
-    inDialog = true; document.exitPointerLock?.();         // examine the fire/pot
-    const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
-    talkTree(fireTree(nearObject), { onClose });
+    sitAt(nearObject);
+  } else if (e.code === 'KeyE' && _inLook && !inDialog && nearShrub){
+    cutShrub(nearShrub);
+  } else if (e.code === 'KeyE' && _inLook && !inDialog && nearSheep){
+    startShearing(nearSheep);
   } else if (e.code === 'KeyE' && _inLook && !inDialog && nearTree){
     inDialog = true; document.exitPointerLock?.();          // examine a tree / speak with a faced one
     const node = nearTree;
-    const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
+    const onClose = () => { inDialog = false; relock(); };
     // faced trees actually talk (first person); the rest are examined by sensation
     talkTree(node.faced ? facedTreeVoice(node, woodCtx()) : treeVoice(node, woodCtx()), { onClose });
   } else if (e.code === 'KeyE' && _inLook && !inDialog && nearRing){
     inDialog = true; document.exitPointerLock?.();          // the fungus itself
     const ring = nearRing;
-    const onClose = () => { inDialog = false; try { canvas.requestPointerLock(); } catch (_){} };
+    const onClose = () => { inDialog = false; relock(); };
     talkTree(ringTree(ring.ringNode, woodCtx(), { onTake: () => gather(ring), clover: () => searchClover(ring) }), { onClose });
   } else if (e.code === 'KeyE' && _inLook && !inDialog && nearFruit){
     gather(nearFruit);
@@ -4046,10 +4770,90 @@ const FIRE_LIGHT_RANGE = 10;
 
 let last = performance.now(), _bigT = 0, walkPace = 1, _wearT = 0;
 
+// ---------- the glance (js/glance.js): for walking with the keys alone ----------
+// What can draw the eye: what E can act on, in the places updateFocus and underFocus aim at it.
+// rank is a handicap against the angle in radians: furniture gives way to what you came for.
+// Trees, rabbits and fishing water aren't here: they're everywhere, or nothing to take.
+const GLANCE_RANK = { fire: 0.2, door: 0.35, sign: 0.2, mailbox: 0.1, shrub: 0.6, sheep: 0.3 };   // (shrubs are everywhere: anything else near first)
+const glanceRef = d => d.c || d.item || d.fire || d.boat || d.house || d.sign || d.mailbox || d.shrub || d.wool;
+function glanceThings(cb){
+  if (down){
+    const L = down.L, put = (ref, [x, y, z], o) => cb({ ref, x, y, z, ...o });
+    for (const f of L.finds) if (!f.taken && !(f.chest != null && !L.chests[f.chest].open)) put(f, underAim.find(f, L));
+    for (const s of L.shelves || []) put(s, underAim.shelf(s));
+    for (const c of L.chests || []) if (!c.open) put(c, underAim.chest(c));
+    for (const d of L.doors || []) if (!d.open) put(d, underAim.door(d), { rank: 0.15, range: TALK_RANGE + 1 });
+    for (const s of L.sconces || []) put(s, underAim.sconce(s), { rank: 0.4 });
+    if (L.id === GROUNDS) put(WARDEN_AT, underAim.warden(L));
+    return;
+  }
+  focusables((x, z, y, _, d) => {
+    const ref = glanceRef(d);
+    if (ref && !(d.kind === 'door' && boating)) cb({ ref, x, y, z, rank: GLANCE_RANK[d.kind], range: d.reach, los: d.kind === 'boat' ? false : undefined,
+      top: d.kind === 'person' ? y + (d.c.h ? d.c.h * 0.42 : 0.9) : undefined });   // (a person's aimed at by the chest: the box goes over the head)
+  });
+  for (const en of under().entrances)
+    if (!en.troll && Math.hypot(en.x - pos.x, en.z - pos.z) < 16) cb({ ref: en, ...entranceAim(en), range: 7, los: false });
+  if (sight) for (const pt of doors()) if (Math.hypot(pt.x - pos.x, pt.z - pos.z) < 16) cb({ ref: pt, x: pt.x, y: pt.y + OVAL[1], z: pt.z, range: TALK_RANGE });
+}
+// no wall in the way. It stops a metre short, because a shelf or a door is in a wall
+function glanceClear(x, z){
+  const here = down ? upos : pos, blocked = down ? (a, b) => !down.L.walkable(a, b) : (a, b) => solidAt(a, b, 0.2);
+  const dx = x - here.x, dz = z - here.z, d = Math.hypot(dx, dz);
+  for (let t = 0.3; t < d - 1; t += 0.3) if (blocked(here.x + dx / d * t, here.z + dz / d * t)) return false;
+  return true;
+}
+// what E would do just now, in words, in the order E's handler tries things
+const pickWords = p => p.valuable ? `pick up the ${p.kind}` : `pick ${p.kind}`;
+function useWords(){
+  return playerFish ? 'reel in' : boating ? (nearFish ? 'fish here' : 'step ashore') : nearBoat ? 'board the boat'
+    : down ? (nearWarden ? 'talk to the Post-Warden' : nearShelf ? (bookRecipe(nearShelf) || shelfMusic(nearShelf) || shelfCraft(nearShelf) ? 'read the book' : 'look at the shelf')
+      : nearDoor ? ((basket[nearDoor.key] || 0) > 0 ? `unlock it with the ${nearDoor.key}` : 'try the door') : nearChest ? 'open the chest'
+      : nearTomb ? (mail.letterAt(down.L, nearTomb) ? 'give the letter' : 'read the tomb')
+      : nearSconce ? `${nearSconce.lit ? 'put out' : 'light'} ${LIGHT_VERB[nearSconce.kind || 'torch']}` : nearFind ? `take the ${nearFind.kind}` : nearExit >= 0 ? 'climb out' : '')
+    : nearPortal ? 'go through' : nearEntrance ? 'go down' : nearTalker ? `talk to ${nearTalker.peasant ? displayName(nearTalker.npc) : nearTalker.name}` : nearHouseDoor && !knock ? 'knock'
+    : nearSign ? 'read the sign' : nearMailbox ? 'open the mailbox' : placing ? (placing.why ? '' : 'lay a fire') : nearObject ? (nearObject.lit ? 'sit at the fire' : 'light the fire') : nearShrub ? 'cut firewood' : nearSheep ? 'shear' : nearTree ? (nearTree.faced ? 'speak' : 'examine') : nearRing ? 'listen' : nearFruit ? pickWords(nearFruit) : nearFish ? 'fish here' : '';
+}
+
+// the box over what the glance is on: what E will do to it
+const glanceBox = document.createElement('div');
+glanceBox.id = 'glance-box';
+glanceBox.style.cssText = 'position:fixed;left:0;top:0;pointer-events:none;white-space:nowrap;box-sizing:border-box;'
+  + "border:10px solid;border-image:url('thin_dark_frame.png') 10 round;background:#1d1a14;padding:0 4px;"
+  + "font:13px/1.35 Georgia,'Times New Roman',serif;color:#efe6cf;z-index:35;opacity:0;visibility:hidden;"
+  + 'transition:opacity .2s,visibility .2s;';
+const glanceKey = document.createElement('b'), glanceWords = document.createElement('span');
+glanceKey.style.color = '#e8c75a';
+glanceBox.append(glanceKey, glanceWords);
+document.body.appendChild(glanceBox);
+const _boxAt = new THREE.Vector3();
+let _boxSays = '';
+function drawGlanceBox(){
+  const q = glance.at, c = camera.position;
+  const inReach = q && Math.hypot(q.x - c.x, q.y - c.y, q.z - c.z) <= (q.range ?? TALK_RANGE);   // (the eyes hold on a little past where E stops)
+  const says = inReach && inWorld() ? useWords() : '';
+  if (says) _boxAt.set(q.x, q.top ?? q.y + 0.25, q.z).project(camera);
+  if (!says || _boxAt.z > 1){ if (_boxSays){ _boxSays = ''; glanceBox.style.opacity = 0; glanceBox.style.visibility = 'hidden'; } return; }
+  if (says !== _boxSays){
+    if (!_boxSays){ glanceBox.style.opacity = 1; glanceBox.style.visibility = 'visible'; }
+    _boxSays = says;
+    glanceKey.textContent = TOUCH ? '' : 'E';
+    glanceWords.textContent = TOUCH ? cap(says) : ` to ${says}`;
+  }
+  // above it, and kept on the screen if it's right at your feet
+  const w = glanceBox.offsetWidth, h = glanceBox.offsetHeight, x = (_boxAt.x + 1) / 2 * innerWidth, y = (1 - _boxAt.y) / 2 * innerHeight;
+  const bx = Math.max(8, Math.min(innerWidth - w - 8, x - w / 2)), by = Math.max(8, Math.min(innerHeight - h - 8, y - h - 12));
+  glanceBox.style.transform = `translate(${bx.toFixed(0)}px,${by.toFixed(0)}px)`;
+}
+
+let _posePitch = params.has('pitch');
+let _glanceWhere = null, _glanceX = 0, _glanceZ = 0;
+
 // one tick of the world's own life: the folk, the beasts, the paths, the wood. Each frame
 // runs it once; passing time runs it many times a frame. `walking`: you tread the path too
 function worldTick(simDt, tint, walking){
   agents.syncSky(sky); agents.rain = rain.intensity; agents.update(simDt);
+  watchStuck(simDt);
   npcApi.update(camera, simDt, tint);
   tosses.update(simDt, tint);
   agents.separate(simDt);                          // keep NPCs from overlapping / crowding
@@ -4072,6 +4876,11 @@ function worldTick(simDt, tint, walking){
   tickJournal(simDt);                                  // what comes of walking about, for the journal
   if (puckGuide) puckGuide.tick(simDt);                // and, on a trip, what he says along the way
   if (warren) warren.update(camera, simDt, tint);      // draw the rabbits
+  drawSheep(tint);                                     // and the sheep
+  sward.now = agents.time;
+  sward.paintSlice(pos.x, pos.z, 200, (x, z, h) => trail.setLawn(x, z, Math.min(1, (1 - h) / 0.7)));   // eaten ground goes pale
+  foldView?.update(simDt);
+  for (const f of agents.flocks) if (f.awake) for (const s of f.sheep) if (s.mode === 'walk') trail.deposit(s.x, s.z, simDt * 0.2);   // the droveways tread themselves
   forage.update(simDt);
   if (down){ const g = down.L.eels; if (g && g.stock < 1) g.stock = Math.min(1, g.stock + simDt / sky.dayLength); }   // the eels come back
 }
@@ -4196,11 +5005,12 @@ const JUMP_V = 6.8, JUMP_G = 22, HEAD_GAP = 0.3;   // take-off speed, gravity, e
 let jumpH = 0, jumpV = 0;                          // height above your feet's walking height, and its speed
 function loop(now){
   meter.frameMs = now - last;
+  perfLog?.frame(meter.frameMs);
   if (perf.iv.length < 20000) perf.iv.push(meter.frameMs);   // frame intervals, for leaPerf's pacing
-  const dt = Math.min(0.05, (now - last)/1000); last = now;
+  const dt = Math.max(0, Math.min(0.05, (now - last)/1000)); last = now;   // (on a busy Pi the first frame's stamp can predate setup)
   // The arrow keys drive you as in Doom, alongside WASD and the mouse: up/down walk,
   // left/right turn. While a panel is up the arrows are the panel's (a book's pages, a scrolling list).
-  const _arrows = playing && !inDialog && !settingsOpen && !invOpen && !restOpen && !myBook.isOpen && !maps.bigOpen && !skyPicker._open;
+  const _arrows = inWorld();
   touchUI.setFree(_arrows);
   const _ahead = keys.KeyW || (_arrows && keys.ArrowUp), _back = keys.KeyS || (_arrows && keys.ArrowDown);
   const _shift = keys.ShiftLeft || keys.ShiftRight, _walking = _ahead || _back || keys.KeyA || keys.KeyD;
@@ -4209,11 +5019,14 @@ function loop(now){
     tickVitals(me, dt, { running: running && _walking, flying: fly && flyPaid && !down });
     if (fly && flyPaid && me.sp <= 0){ fly = false; flyPaid = false; setForageMsg('Your strength fails. You drift down.', 3500); }
     drawVitals();
+    myBook.dock();     // closed, the book sits by the map (it's a no-op once made)
   }
   const speed = (running || (_shift && fly) ? 16 : 8) * dt;
   const _turn = _arrows ? (keys.ArrowLeft ? 1 : 0) - (keys.ArrowRight ? 1 : 0) : 0;
   turnHeld = _turn ? turnHeld + dt : 0;
   // Doom's rates: 123 deg/s, double when running, half for the first moment so a tap can aim
+  if (_turn) watchPuck = 0;
+  if (_turn) yaw += glance.takeYaw();              // turning carries on from what you're looking at
   if (_turn) yaw += _turn * 2.15 * (running || (_shift && fly) ? 2 : 1) * (turnHeld < 0.17 ? 0.5 : 1) * dt / (scope ? SCOPE_MAG[scope.i] : 1);
   if (scope){
     if (down || boating || inDialog || settingsOpen || invOpen || myBook.isOpen || restOpen || maps.bigOpen) lowerGlass();   // anything else that wants you takes it from your eye
@@ -4229,7 +5042,7 @@ function loop(now){
   const len = Math.hypot(dx, dz) || 1;
   const _lean = stick.mag ? 0.3 + 0.7*stick.mag : 1;     // and leaning a little walks slowly
   dx = dx/len*speed*_lean; dz = dz/len*speed*_lean;
-  if (rest || shove) dx = dz = 0;                 // passing time: you stay put; jumping back from a troll, you're not steering
+  if (rest || shove || shearHands.on) dx = dz = 0;                 // passing time: you stay put; jumping back from a troll, you're not steering
   if (fly || boating) jumpH = jumpV = 0;          // (taking to the air or a canoe mid-jump)
   else {
     if (keys.Space && _arrows && !rest && !shove && !jumpH && !jumpV) jumpV = JUMP_V;
@@ -4308,8 +5121,26 @@ function loop(now){
     else pos.y = gfx.smooth && Number.isFinite(pos.y) ? pos.y + (groundY - pos.y) * Math.min(1, dt * 8) : groundY;
     camera.position.set(pos.x, pos.y + hop + jumpH, pos.z);
   }
+  // the glance: stopped near something, walking with the keys alone
+  const _gHere = down ? upos : pos;
+  if (_glanceWhere !== (down ? down.L : null) || Math.hypot(_gHere.x - _glanceX, _gHere.z - _glanceZ) > 2) glance.reset();   // a stair, a door, a fade: the view was set outright
+  _glanceWhere = down ? down.L : null; _glanceX = _gHere.x; _glanceZ = _gHere.z;
+  if (_posePitch && (_walking || _turn || document.pointerLockElement === canvas)) _posePitch = false;
+  // the cursor free, you look straight ahead (a pose URL's pitch stands until you move: it's a picture)
+  if (_arrows && !rest && !scope && !fly && !TOUCH && !_posePitch && document.body.classList.contains('cursor-mode')) pitch = glance.level(dt, pitch);
+  if (fly || boating || scope){ const b = glance.bake(); yaw += b.y; pitch += b.p; }
+  else if (watchPuck > 0 && _arrows && !rest && !down && puck?.guide){   // he's setting off: a real turn, kept after
+    watchPuck -= dt;
+    const b = glance.bake(); yaw += b.y; pitch += b.p;   // what the view's on now is where it turns from
+    yaw = glance.turnTo(dt, yaw, Math.atan2(-(puck.x - pos.x), -(puck.z - pos.z)));
+  }
+  else glance.tick(dt, { free: _arrows && !rest,
+    moving: !!(_walking || stick.mag || shove), turning: !!_turn, yaw, pitch, eye: camera.position, things: glanceThings, clear: glanceClear });
+  if (sat) satFrame(dt);
+  if (shearHands.on){ const a = shearHands.frame(dt, (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0)); if (a){ yaw = a.yaw; pitch = a.pitch; } }
   camera.rotation.set(0, 0, 0, 'YXZ');
-  camera.rotateY(yaw); camera.rotateX(pitch);
+  camera.rotateY(yaw + glance.y); camera.rotateX(pitch + glance.p);
+  if (sat) cook.tick(dt, potOnScreen(sat.fire));
 
   waterTex.offset.x = (now*0.000015) % 1;
   waterTex.offset.y = (now*0.00001) % 1;
@@ -4321,6 +5152,7 @@ function loop(now){
   const _ri = rain.intensity;
   sky.domeU.uHorizon.value.copy(_skyHorizBase).lerp(_rainSkyHoriz, _ri);
   sky.domeU.uZenith.value.copy(_skyZenBase).lerp(_rainSkyZen,   _ri);
+  sky.setGlamour(faerie.k, FAERIE_LIGHT);          // the salve's sight: Faerie's purple over the Lea
   sky.update(dt, camera);
   rain.update(pos.x, pos.y, pos.z, dt, sky.cloudCover, sky.wind);
   if (rain.intensity > 0 && sky.domeU) {           // darken clouds — rainclouds absorb light
@@ -4334,6 +5166,8 @@ function loop(now){
 
   const simDt = playing ? dt : 0;                  // world is paused on the splash
   agents.threat = playing && !fly && !down ? { x: pos.x, z: pos.z } : null;   // rabbits flee the player too
+  agents.viewer = down ? null : pos;                                          // sheep out of anyone's sight sleep
+  lantern.update(dt, pos, down ? 0 : sky.night ?? 0);
   const _tAgents = performance.now();
   worldTick(simDt, tint, (dx || dz) && !fly && !down);
   perf.sim += performance.now() - _tAgents;
@@ -4353,8 +5187,9 @@ function loop(now){
   });
   // faced trees: eyes glow in while the tree is the examine target, coloured by its state
   treeFaces.update(dt, now, { examined: nearTree, night: sky.night ?? 0, tint: sky.spriteTint });
-  if (gfx.grass && !down) grassDetail.update(pos.x, pos.z, now * 0.001, sky.groundTint);   // blades follow the viewer, sway, lit like the turf
+  if (gfx.grass && !down) grassDetail.update(pos.x, pos.z, now * 0.001, sky.groundTint, lantern);   // blades follow the viewer, sway, lit like the turf
   updateFocus();                                     // cursor-aimed: sets nearTalker / nearFruit + the box
+  if (puck) puck.held = nearTalker?.c === puck;      // E would talk to him: he stays for it
   // hands tint: base sky tint darkened at night, then warmed by nearby lit fires
   let fireGlow = 0;
   for (const f of agents.openFires){
@@ -4364,7 +5199,7 @@ function loop(now){
     if (s * s > fireGlow) fireGlow = s * s;
   }
   if (down) _handsTint.copy(_torchTint);           // underground: only the torch lights them
-  else _handsTint.copy(sky.spriteTint).lerp(_fireWarm, fireGlow * 0.88);
+  else _handsTint.copy(sky.spriteTint).lerp(_torchTint, sky.night ?? 0).lerp(_fireWarm, fireGlow * 0.88);   // after dark, the lantern's
   hands.update(dt, { moving: !!(dx || dz) && !fly, running,
                      visible: playing && !fly && !scope && gfx.hands, tint: _handsTint });
   if (!down){                                         // the land's draw, skipped underground
@@ -4378,6 +5213,7 @@ function loop(now){
     cullFlora(camera, FOG_FAR + 20, cullOn);
     fireLights.update(agents.openFires, camera, FOG_FAR + 20);
     settleView.update(dt, { houses: agents.houses, night: agents.night, wind: sky.wind });   // lamplit windows, chimney smoke, woodpiles, crops   // also hides hearths lost in the fog
+    junctionView.update(dt, mail.boxes.map(b => b.letters.length > 0));
     ground.lod(camera, FOG_FAR + 20);                  // ground tiles past the fog draw coarse
   }
   if (down) down.view.update(dt, camera);            // the torch goes with you
@@ -4392,15 +5228,16 @@ function loop(now){
   // desaturate the canvas when it rains — muted, wet-day look
   const _sat = down ? 1 : 1 - rain.intensity * 0.38;
   canvas.style.filter = _sat < 0.995 ? `saturate(${_sat.toFixed(3)})` : '';
-  if (playing && !down) maps.updatePlace(pos.x, pos.z);
+  if (playing && !down){ maps.updatePlace(pos.x, pos.z); maps.see(pos.x, pos.z, camera.position.y); }   // the map opens as you see the land
   if (down) maps.reveal(upos.x, upos.z);              // the automap fills in as you go
-  talkView.update(simDt, pos.x, pos.z, playingNow());              // after the camera moved this frame
+  talkView.update(simDt, pos.x, pos.z, playingNow(), playing && !down, _boxSays.startsWith('talk to') ? nearTalker?.c : null);              // after the camera moved this frame
   if (playing && down) tickFishing(dt);
+  if (playing) tickHands(dt);
   if (playing && !down){ tickFishing(dt); fishView.update(fishersNear(), agents.fishingWater || (agents.fishingWater = [...agents.fishing, ...agents.grounds]), pos.x, pos.z, dt, sky?.evening ?? 0); }
   if (playing && !down) maybeRemark(dt);
   if (playing) tickKnock(dt);
   const _me = down ? upos : pos;
-  if (gfx.map) maps.drawMini(_me.x, _me.z, yaw);
+  if (gfx.map) maps.drawMini(_me.x, _me.z, yaw + glance.y);
   if (maps.bigOpen && now - _bigT > 150){ _bigT = now; maps.tickBig(_me.x, _me.z, yaw); }   // people move on the big map too
   tickMeter(meter.frameMs);
   if (showNpcDbg) npcDbg.textContent = agents.debugText(pos.x, pos.z);
@@ -4411,14 +5248,20 @@ function loop(now){
     nearFind    && `E: take the ${nearFind.kind}`,
     nearShelf   && (bookRecipe(nearShelf) || shelfMusic(nearShelf) || shelfCraft(nearShelf) ? 'E: read the book' : 'E: look at the shelf'),
     nearDoor    && ((basket[nearDoor.key] || 0) > 0 ? `E: unlock it with the ${nearDoor.key}` : 'E: try the door'),
+    nearWarden  && 'E: talk to the Post-Warden',
     nearChest   && 'E: open the chest',
+    nearTomb    && (mail.letterAt(down.L, nearTomb) ? 'E: give the letter' : 'E: read the tomb'),
     nearSconce  && `E: ${nearSconce.lit ? 'put out' : 'light'} ${LIGHT_VERB[nearSconce.kind || 'torch']}`,
-    nearExit >= 0 && !nearFind && !nearSconce && !nearShelf && !nearDoor && !nearChest && `E: climb out`,
+    nearExit >= 0 && !nearFind && !nearSconce && !nearShelf && !nearDoor && !nearChest && !nearTomb && `E: climb out`,
     nearEntrance && `E: go down`,
     nearTalker  && `E: talk to ${nearTalker.name}`,
     nearHouseDoor && !knock && `E: knock`,
-    nearFruit   && `E: gather ${nearFruit.kind}`,
-    nearObject  && `E: examine`,
+    nearSign    && `E: read the sign`,
+    nearMailbox && `E: open the mailbox`,
+    nearFruit   && `E: ${pickWords(nearFruit)}`,
+    nearObject  && `E: sit`,
+    nearShrub   && `E: cut firewood`,
+    nearSheep   && `E: shear`,
     nearTree    && (nearTree.faced ? `E: speak` : `E: examine`),
     nearRing    && `E: listen`,
     playerFish  ? `E: reel in` : nearFish && `E: fish here`,
@@ -4429,15 +5272,13 @@ function loop(now){
   // tries things, and the top line keeps only what's being said and what you carry.
   if (TOUCH){
     touchUI.setScope(!!scope);
-    const _use = !_arrows ? '' : scope ? 'lower the glass' : playerFish ? 'reel in' : boating ? (nearFish ? 'fish here' : 'step ashore') : nearBoat ? 'board the boat'
-      : down ? (nearShelf ? 'read' : nearDoor ? 'try the door' : nearChest ? 'open the chest' : nearSconce ? (nearSconce.lit ? 'put it out' : 'light it') : nearFind ? `take the ${nearFind.kind}` : nearExit >= 0 ? 'climb out' : '')
-      : nearPortal ? 'go through' : nearEntrance ? 'go down' : nearTalker ? `talk to ${nearTalker.name}` : nearHouseDoor && !knock ? 'knock'
-      : nearObject ? 'examine' : nearTree ? (nearTree.faced ? 'speak' : 'examine') : nearRing ? 'listen' : nearFruit ? `gather ${nearFruit.kind}` : nearFish ? 'fish here' : '';
+    const _use = !_arrows ? '' : scope ? 'lower the glass' : useWords();
     touchUI.setUse(_use);
     _hudParts.splice(0, _hudParts.length, ..._hudParts.filter(p => p.startsWith('basket:')));
   }
   const _hudMsgs = [poseMsg && `— ${poseMsg}`, forageMsg && `— ${forageMsg}`].filter(Boolean).join('  ');
   hud.textContent = _hudParts.join('  ·  ') + (_hudMsgs ? `  ${_hudMsgs}` : '');
+  drawGlanceBox();
   requestAnimationFrame(loop);
 }
 resize();

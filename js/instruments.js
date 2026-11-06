@@ -18,6 +18,9 @@
 
 const BANK = 'instruments/';
 const LEAD = 0.08;          // seconds between asking and the first note
+// Tunes against the world's sounds. Samples are normalised, so a tune ran about 20 dB over the
+// leaves at the default slider (too loud); this takes 10 dB off. Speech skips it (voice).
+const MUSIC_LEVEL = 0.32;
 // decay: seconds for the tail to die away (−60 dB); wet: how much of it you hear; tone: how
 // bright the tail is (0 dark .. 1 bright); echoes: [seconds, loudness] off far walls
 export const ROOMS = {
@@ -39,6 +42,7 @@ export class Instruments {
       this.master.gain.value = 0.9 * this._vol;
       // dry straight out; wet through the room's reverb
       this.dry = this.ctx.createGain(); this.wet = this.ctx.createGain(); this.verb = this.ctx.createConvolver();
+      this.music = this.ctx.createGain(); this.music.gain.value = MUSIC_LEVEL; this.music.connect(this.master);
       this.master.connect(this.dry); this.dry.connect(this.ctx.destination);
       this.master.connect(this.verb); this.verb.connect(this.wet); this.wet.connect(this.ctx.destination);
       const room = this._room; this._room = null; this.setRoom(room);
@@ -96,13 +100,13 @@ export class Instruments {
 
   // play notes ([{ t, dur, midi }], from tunes.js schedule) on an instrument. A little
   // unevenness in time and loudness, so it sounds played rather than printed.
-  async play(name, { notes, length }, { gain = 1, pan = 0 } = {}){
+  async play(name, { notes, length }, { gain = 1, pan = 0, voice = false } = {}){
     this.init();
     if (!this.ctx) return null;
     const I = await this._load(name);
     const ctx = this.ctx, out = ctx.createGain(), panner = ctx.createStereoPanner();
     out.gain.value = gain; panner.pan.value = pan;
-    out.connect(panner); panner.connect(this.master);
+    out.connect(panner); panner.connect(voice ? this.master : this.music);
     const t0 = ctx.currentTime + LEAD, srcs = [];
     for (const n of notes){
       const jitter = (Math.random() - 0.5) * 0.012;
