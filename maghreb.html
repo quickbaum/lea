@@ -1,0 +1,1226 @@
+<!doctype html>
+<!-- a music bench for the Maghrebi realm (Faerie first)
+     Rhythm: chaabi and its relatives, and the common beats of other meters, as a grid you can hear, edit, re-time and re-start
+       (the patterns are my reading of what's written about these grooves, to be corrected by ear;
+       the drums are synthesised here, not samples).
+     Melody: one of the Lea's tunes (tunes.js), round and round, fitted onto the rhythm.
+     Arrangement: who plays what over it. Plain is the tune alone; Faerean is the Gentry's way
+       (arrange.js) visiting the Maghreb: its drone, broken chords and bells take their pitches from
+       arrange.js and their rhythm from a drum. The drummer sets the rhythm.
+     Room: the reverb the game hears it in (instruments.js ROOMS).
+     Everything is live: one clock, a pulse at a time. -->
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Maghrebi music bench</title>
+<style>
+  :root{--bg:#1d1b18;--fg:#e8e0cf;--dim:#b8ad96;--btn:#3a342b;--line:#6b604c;--gold:#d9c38a;--on:#8a5a2b;--now:#c98a3a}
+  body{margin:0;padding:20px 16px;background:var(--bg);color:var(--fg);font:16px/1.5 Georgia,serif}
+  main{max-width:1400px;margin:0 auto;display:flex;flex-direction:column;align-items:center}
+  .row.center{justify-content:center}
+  .bottom{display:flex;flex-direction:column;align-items:center;gap:6px;margin:18px 0 0}
+  /* hints: a bar docked to the foot of the window, never over the content */
+  body{padding-bottom:44px}
+  #hintbar{position:fixed;left:0;right:0;bottom:0;z-index:10;height:32px;line-height:20px;box-sizing:border-box;padding:6px 16px;
+    background:#24211c;border-top:1px solid var(--line);color:var(--dim);font-size:14px;text-align:center;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #hintbar.on{color:var(--fg)}
+  #where{min-height:1.5em;font-size:14px;color:var(--gold);text-align:center}
+  #pane-tempo{width:auto}
+  .bigplay{width:64px;height:64px;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;border-width:2px}
+  .bigplay svg{width:30px;height:30px} .bigplay .tri{fill:var(--fg)} .bigplay .sq{fill:var(--fg);display:none}
+  .bigplay.playing .tri{display:none} .bigplay.playing .sq{display:block}
+  .bigplay:hover{border-color:var(--gold)} .bigplay:hover .tri,.bigplay:hover .sq{fill:var(--gold)}
+  .seg{display:inline-flex} .seg[hidden]{display:none}
+  .seg button{border-radius:0;margin-left:-1px} .seg button:first-child{border-radius:4px 0 0 4px;margin-left:0} .seg button:last-child{border-radius:0 4px 4px 0}
+  .seg button.sel{position:relative;z-index:1;background:#2c2822}
+  h1{font-size:20px;margin:0 0 4px} h2{font-size:16px;margin:20px 0 6px} p{margin:4px 0 12px;color:var(--dim);max-width:46em}
+  button,select{font:inherit;background:var(--btn);color:var(--fg);border:1px solid var(--line);border-radius:4px;padding:6px 12px;cursor:pointer;max-width:100%}
+  button:hover{background:#4a4237} button.sel{border-color:var(--gold);color:var(--gold)}
+  button:disabled{opacity:.45;cursor:default}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:8px 0}
+  label{color:var(--dim)} input[type=range]{accent-color:var(--gold);width:200px;max-width:60vw;vertical-align:middle}
+  .val{color:var(--gold);min-width:9em;display:inline-block}
+  .dds{display:flex;flex-wrap:wrap;justify-content:center;gap:8px 10px;margin:14px 0 8px;align-items:flex-end}
+  .ctl-label{font-size:13px;color:var(--dim);margin:0 0 3px 2px}
+  .ctl-row{display:flex;gap:0;align-items:stretch}
+  /* the row spans the page: the choosers stretch to share it, Tempo and Room stay their own size */
+  .dds{width:100%;flex-wrap:nowrap}
+  @media (max-width: 600px){ .dds{flex-wrap:wrap} }
+  .dds > .ctl{flex:1 1 auto;min-width:0} .dds > .ctl.small{flex:none}
+  .dds > .ctl > .ctl-row > .dd:first-child{flex:1 1 auto;min-width:0}
+  .dds > .ctl > .ctl-row > .dd:first-child > .dd-btn{width:100%}
+  .dd-btn .sum{flex:1 1 auto;min-width:0;text-align:left}
+  .dd-panel.list{min-width:max(260px,100%)}
+  .ctl-row > .dd{display:flex} .ctl-row > .dd > .dd-btn{align-items:center}
+  .ctl-row .dd + .dd > .dd-btn{border-top-left-radius:0;border-bottom-left-radius:0;margin-left:-1px}
+  .ctl-row .dd:has(+ .dd) > .dd-btn{border-top-right-radius:0;border-bottom-right-radius:0}
+  .ctl-row .dd.open > .dd-btn{position:relative;z-index:1}
+  .dd-btn .sum{color:var(--fg);overflow:hidden;white-space:nowrap;display:grid;grid-template-columns:minmax(0,auto)}
+  .dd-btn .sum > span{grid-area:1/1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .dd-btn .sum > .ghost{visibility:hidden}
+  .roomicon{width:22px;height:22px;display:block;fill:none;stroke:var(--fg);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+  #sum-room{line-height:0;align-self:center}
+  .gearbtn{padding:6px 7px;position:relative}
+  .gear{width:20px;height:20px;display:block} .gear rect{fill:var(--dim)} .gear .ring{fill:none;stroke:var(--dim);stroke-width:2.6} .gear .hole{fill:none;stroke:var(--dim);stroke-width:1.6}
+  .gearbtn:hover .gear rect,.dd.open .gear rect{fill:var(--gold)} .gearbtn:hover .gear circle,.dd.open .gear circle{stroke:var(--gold)}
+  .gearbtn.changed::after{content:"";position:absolute;top:3px;right:3px;width:7px;height:7px;border-radius:50%;background:var(--gold)}
+  .dd-panel.list{width:auto;min-width:260px;max-width:min(440px,calc(100vw - 32px));padding:4px}
+  .opts{display:flex;flex-direction:column;gap:2px}
+  .opt{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:6px 10px;border:1px solid transparent;background:none;text-align:left}
+  .opt:hover,.opt:focus-visible{background:#3a342b}
+  .opt.sel{border-color:var(--gold)} .opt.sel .name{color:var(--gold)}
+  .opt-h{font-size:12px;color:var(--gold);text-transform:uppercase;letter-spacing:.06em;padding:8px 10px 2px}
+  .opt-h:first-child{padding-top:4px}
+  .opt .txt{display:flex;flex-direction:column;align-items:flex-start;min-width:0}
+  .opt .info{font-size:13px;color:var(--dim);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dd{position:relative}
+  .dd-btn{display:flex;align-items:baseline;gap:6px;padding:6px 9px}
+  .dd-btn .caret{color:var(--dim);font-size:12px;transition:transform .15s}
+  .dd.open .dd-btn{border-color:var(--gold);background:#2c2822}
+  .dd.open .dd-btn .caret{transform:rotate(180deg)}
+  .dd-panel{box-sizing:border-box;position:absolute;top:calc(100% + 4px);left:0;z-index:4;width:min(660px,calc(100vw - 32px));max-height:75vh;overflow:auto;
+    padding:6px 16px 10px;background:#24211c;border:1px solid var(--line);border-radius:4px;box-shadow:0 8px 28px #000b}
+  .dd-panel > p:first-child{margin-top:8px}
+  .grid{display:grid;grid-template-columns:max-content repeat(var(--n,12),minmax(22px,40px));justify-content:start;gap:3px;margin:12px 0;max-width:100%;overflow-x:auto}
+  .lab{padding:0 6px 0 0;color:var(--dim);font-size:14px;display:flex;align-items:center;justify-content:flex-end;gap:6px;white-space:nowrap}
+  .lab.rowlab{display:grid;grid-template-columns:18px var(--iconcol,40px) 64px 30px;gap:6px;align-items:center;justify-items:center;position:relative;cursor:default}
+  #grid{--iconcol:min(calc(var(--cell) * .8), 60px)}
+  @media (max-width: 600px){ .lab.rowlab{grid-template-columns:18px var(--iconcol,40px) 30px} .lab.rowlab input[type=range]{display:none} }
+  .lab.rowlab input[type=range]{width:64px;accent-color:var(--gold)}
+  .follow{padding:1px;line-height:0;border:1px solid var(--line);border-radius:3px;background:none;cursor:pointer}
+  .follow:hover,.follow:focus-visible{border-color:var(--gold);background:none}
+  .follow svg.icon,#grid .lab .follow svg.icon{width:24px;height:24px;stroke-width:1.6}
+  #grid .cell.muted{opacity:.35}
+  .iconbtn{padding:0;border:1px solid transparent;background:none;border-radius:3px;line-height:0;cursor:pointer}
+  .iconbtn:hover,.iconbtn:focus-visible{border-color:var(--gold);background:none}
+  #picker{position:absolute;z-index:5;display:flex;flex-direction:column;gap:2px;padding:4px;background:#2c2822;border:1px solid var(--line);border-radius:4px;box-shadow:0 4px 16px #0008}
+  #picker button{display:flex;align-items:center;gap:8px;padding:4px 10px 4px 4px;border:1px solid transparent;background:none;text-align:left;font-size:14px}
+  #picker button:hover,#picker button:focus-visible{background:#3a342b}
+  #picker button.sel{border-color:var(--gold);color:var(--gold)}
+  #picker svg.icon{fill:none;stroke:var(--fg);stroke-width:1.3}
+  #picker .icon{width:28px;height:28px;object-fit:contain;image-rendering:pixelated;flex:none}
+  /* the playing grid: as big as the window allows, its squares square (--cell, set by fitGrid) */
+  #grid{--cell:40px;grid-template-columns:max-content repeat(var(--n,12),var(--cell));overflow:visible;margin:16px 0 8px}
+  #grid .cell{box-sizing:border-box;height:var(--cell);font-size:calc(var(--cell) * .36)}
+  #grid .cell.band{font-size:calc(var(--cell) * .24)}
+  #grid .clap{width:calc(var(--cell) * .66);height:calc(var(--cell) * .6)}
+  #grid .count{font-size:calc(var(--cell) * .28)}
+  #grid .lab .clap.icon{width:calc(var(--cell) * .72);height:calc(var(--cell) * .64);max-width:56px;max-height:50px}
+  #grid .lab .icon{width:calc(var(--cell) * .72);height:calc(var(--cell) * .72);max-width:56px;max-height:56px}
+  .lab .icon{width:28px;height:28px;object-fit:contain;image-rendering:pixelated;flex:none}
+  .lab svg.icon{fill:none;stroke:var(--fg);stroke-width:1.3;stroke-linejoin:round}
+  .lab .clap.icon{width:28px;height:26px}
+  .cell{height:36px;border:1px solid var(--line);border-radius:3px;background:#28241f;color:var(--fg);display:flex;align-items:center;justify-content:center;font:bold 14px ui-monospace,monospace;cursor:pointer;user-select:none}
+  .cell.hit{background:var(--on)} .cell.now{outline:2px solid var(--now)}
+  .cell.beat{box-shadow:inset 3px 0 0 #6b604c} .cell.bar{box-shadow:inset 3px 0 0 var(--gold)}
+  /* a clap: two palms, apart at rest, struck together each time the playhead reaches it */
+  .clap{width:26px;height:24px;display:block;overflow:visible}
+  .key .keyclap{display:inline-block;width:18px;height:16px;vertical-align:-3px}
+  .clap path{fill:var(--fg);stroke:var(--bg);stroke-width:.8}
+  .clap g{transform-box:view-box}
+  .clap path.fing{fill:none;stroke:var(--on);stroke-width:.9}
+  .clap .l{transform-origin:7px 23px;transform:rotate(-16deg)}
+  .clap .r{transform-origin:19px 23px;transform:rotate(16deg)}
+  .clap .spark{stroke:var(--gold);stroke-width:1.4;stroke-linecap:round;opacity:0}
+  .cell.now .clap .l{animation:clapL .14s ease-out}
+  .cell.now .clap .r{animation:clapR .14s ease-out}
+  .cell.now .clap .spark{animation:spark .18s ease-out}
+  @keyframes clapL{0%{transform:rotate(-16deg)} 30%{transform:rotate(3deg)} 100%{transform:rotate(-16deg)}}
+  @keyframes clapR{0%{transform:rotate(16deg)} 30%{transform:rotate(-3deg)} 100%{transform:rotate(16deg)}}
+  @keyframes spark{0%,20%{opacity:0} 35%{opacity:1} 100%{opacity:0}}
+  @media (prefers-reduced-motion: reduce){ .cell.now .clap g, .cell.now .clap .spark{animation:none} .cell.now .clap .spark{opacity:1} }
+  .key .clap{display:inline-block;vertical-align:middle;width:20px;height:18px}
+  .cell.ro{cursor:default;font-weight:normal;font-size:13px}
+  .cell.band{cursor:default;font-weight:normal;font-size:11px;line-height:1.1;text-align:center;background:#24211c}
+  .cell.band.hit{background:#4a3a5a} .cell.band.prev{opacity:.45} .lab.band{color:#c8b8e0}
+  .count{color:var(--dim);text-align:center;font-size:12px} .count.now{color:var(--now)}
+  code{color:var(--gold)} .key{font-size:14px}
+  #about,#fitInfo{min-height:3em}
+  .mixer{display:grid;grid-template-columns:auto auto auto auto;gap:6px 12px;align-items:center;margin:12px 0;max-width:100%;overflow-x:auto}
+  .mixer .h{color:var(--dim);font-size:13px}
+  .mixer input[type=range]{width:120px}
+</style></head>
+<body>
+<main>
+<div class="dds">
+<div class="ctl">
+  <div class="ctl-label" id="lab-rhythm">Rhythm</div>
+  <div class="ctl-row">
+  <div class="dd" data-dd="rhythm">
+    <button class="dd-btn" aria-expanded="false" aria-controls="pane-rhythm" aria-labelledby="lab-rhythm sum-rhythm"><span class="sum" id="sum-rhythm"></span><span class="caret">▾</span></button>
+    <div class="dd-panel list" id="pane-rhythm" hidden><div class="opts" id="pats"></div></div>
+  </div>
+  <div class="dd" data-dd="rhythm-adv">
+    <button class="dd-btn gearbtn" id="gear-rhythm" aria-expanded="false" aria-controls="pane-rhythm-adv" title="Rhythm: details" aria-label="Rhythm details"><svg class="gear" viewBox="0 0 24 24" aria-hidden="true"><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(0 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(45 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(90 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(135 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(180 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(225 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(270 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="6.6" class="ring"/><circle cx="12" cy="12" r="2.6" class="hole"/></svg></button>
+    <div class="dd-panel" id="pane-rhythm-adv" hidden>
+  <p>The drums are synthesised, so judge the rhythm, not the sound.</p>
+  <p class="key" id="strokeKey"></p>
+
+  <p id="about"></p>
+
+  <div class="row">
+    <label><span id="leanL">Timing of the 3 pulses</span> <input id="lean" type="range" min="-100" max="100" value="0"> <span class="val" id="leanV"></span></label>
+    <button data-lean="0" id="lean0">even</button><button data-lean="-100" id="leanM">toward 2/4: short short long</button><button data-lean="100" id="leanP">toward 2/4: long short short</button>
+  </div>
+  <div class="row">
+    <label>Start the cycle on pulse <input id="rot" type="range" min="0" max="11" value="0"> <span class="val" id="rotV"></span></label>
+  </div>
+  <div class="row">
+    <label>Count along</label>
+    <button data-feel="">off</button><button data-feel="3">in 3+3 (two beats a bar)</button><button data-feel="2">in 2+2+2 (three beats a bar)</button><button data-feel="32">both</button>
+  </div>
+  </div>
+  </div>
+  </div>
+</div>
+<div class="ctl small">
+  <div class="ctl-label" id="lab-tempo">Tempo</div>
+  <div class="ctl-row">
+  <div class="dd" data-dd="tempo">
+    <button class="dd-btn" aria-expanded="false" aria-controls="pane-tempo" aria-labelledby="lab-tempo sum-tempo"><span class="sum" id="sum-tempo"></span><span class="caret">▾</span></button>
+    <div class="dd-panel" id="pane-tempo" hidden>
+    <div class="row"><label>Tempo <input id="tempo" type="range" min="50" max="200" value="112"> <span class="val" id="tempoV"></span></label></div>
+    <div class="row"><button id="ownTempo">Use the tune's own tempo</button></div>
+    </div>
+  </div>
+  </div>
+</div>
+<div class="ctl">
+  <div class="ctl-label" id="lab-melody">Melody</div>
+  <div class="ctl-row">
+  <div class="dd" data-dd="melody">
+    <button class="dd-btn" aria-expanded="false" aria-controls="pane-melody" aria-labelledby="lab-melody sum-melody"><span class="sum" id="sum-melody"></span><span class="caret">▾</span></button>
+    <div class="dd-panel list" id="pane-melody" hidden><div class="opts" id="tunes"></div></div>
+  </div>
+  <div class="dd" data-dd="melody-adv">
+    <button class="dd-btn gearbtn" id="gear-melody" aria-expanded="false" aria-controls="pane-melody-adv" title="Melody: details" aria-label="Melody details"><svg class="gear" viewBox="0 0 24 24" aria-hidden="true"><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(0 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(45 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(90 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(135 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(180 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(225 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(270 12 12)"/><rect x="10.4" y="1.2" width="3.2" height="5" rx="1" transform="rotate(315 12 12)"/><circle cx="12" cy="12" r="6.6" class="ring"/><circle cx="12" cy="12" r="2.6" class="hole"/></svg></button>
+    <div class="dd-panel" id="pane-melody-adv" hidden>
+  <p>A tune from the Lea, round and round over the rhythm. A new tune or speed comes in at the next
+  cycle. Its first full bar lands on the cycle's first pulse, with any pick-up before it, and each
+  time round starts on a cycle. Who plays it is under Arrangement.</p>
+  <div class="row">
+    <label>A simple-time tune's quavers, on beats of three</label>
+    <button data-fit="straight">straight: two against three</button><button data-fit="swung">swung onto the pulses: long short</button>
+  </div>
+  <div class="row">
+    <label>Speed <select id="speed">
+      <option value="1">a tune beat to each rhythm beat</option>
+      <option value="0.5">two tune beats to each rhythm beat</option>
+      <option value="2">a tune beat to every two rhythm beats</option>
+    </select></label>
+    <label>Start the tune on beat <select id="shift"><option>1</option></select> of the cycle</label>
+  </div>
+  <p id="fitInfo"></p>
+  <p class="key">Where the tune's notes fall in the cycle: how many start on each pulse, over the whole tune.</p>
+  <div class="grid" id="fitGrid"></div>
+  <p id="offPulse"></p>
+  </div>
+  </div>
+  </div>
+</div>
+<div class="ctl">
+  <div class="ctl-label" id="lab-arrangement">Arrangement</div>
+  <div class="ctl-row">
+  <div class="dd" data-dd="arrangement">
+    <button class="dd-btn" aria-expanded="false" aria-controls="pane-arrangement" aria-labelledby="lab-arrangement sum-arrangement"><span class="sum" id="sum-arrangement"></span><span class="caret">▾</span></button>
+    <div class="dd-panel list" id="pane-arrangement" hidden><div class="opts" id="arrs"></div></div>
+  </div>
+  </div>
+</div>
+<div class="ctl">
+  <div class="ctl-label" id="lab-entry">Entry</div>
+  <div class="ctl-row">
+  <div class="dd" data-dd="entry">
+    <button class="dd-btn" aria-expanded="false" aria-controls="pane-entry" aria-labelledby="lab-entry sum-entry"><span class="sum" id="sum-entry"></span><span class="caret">▾</span></button>
+    <div class="dd-panel list" id="pane-entry" hidden><div class="opts" id="entries"></div></div>
+  </div>
+  </div>
+</div>
+<div class="ctl small">
+  <div class="ctl-label" id="lab-room">Room</div>
+  <div class="ctl-row">
+  <div class="dd" data-dd="room">
+    <button class="dd-btn" aria-expanded="false" aria-controls="pane-room" aria-labelledby="lab-room sum-room"><span class="sum" id="sum-room"></span><span class="caret">▾</span></button>
+    <div class="dd-panel list" id="pane-room" hidden>
+    <div class="opts" id="rooms"></div>
+  </div>
+  </div>
+  </div>
+</div>
+</div>
+<select id="tune" hidden></select>
+
+<div class="grid" id="grid" aria-label="Everything playing, on the cycle you're hearing. Drum rows: click a square to change its stroke, untick to mute. Band rows: the notes each part strikes on each pulse."></div>
+<p id="text" hidden></p>
+<div class="bottom">
+  <button id="play" class="bigplay" aria-label="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="tri" d="M7 4.5 L20 12 L7 19.5 Z"/><rect class="sq" x="6" y="6" width="12" height="12" rx="1.5"/></svg></button>
+  <div id="where" aria-live="off"></div>
+</div>
+</main>
+<div id="hintbar" aria-hidden="true"></div>
+
+<script type="module">
+import { TUNES, TUNE_IDS, tune, schedule } from './js/tunes.js';
+import { partNotes, chords } from './js/arrange.js';
+import { Instruments, ROOMS } from './js/instruments.js';
+import { ingredient } from './js/ingredients.js';
+import { Ambience } from './js/ambience.js';
+const $ = id => document.getElementById(id);
+
+// ======================= the patterns =======================
+// a row per instrument, a character a pulse ('.' is a rest; spaces are ignored). A rhythm's
+// meter sets its grid: `beats`, the pulses in each beat of a bar (compound time: threes; simple
+// time: twos, quavers, or fours, semiquavers; the uneven aksak meters spell theirs out), and
+// `bars`, how many make a cycle. Left out, they follow from the meter (gridOf).
+// Every drum the bench knows: its strokes (what a click cycles through, and what each means),
+// which of them are low (a dum: the drone and the broken chords' root land there), which soft.
+const DRUMS = {
+  darbuka:  { name: 'darbuka', strokes: { D: 'dum: low, the middle of the skin', T: 'tek: high, at the rim', K: 'ka: tek with the other hand, softer' }, low: 'D', soft: 'K' },
+  bendir:   { name: 'bendir', strokes: { D: 'dum, the snare buzzing under it', T: 'tek, at the rim' }, low: 'D' },
+  taarija:  { name: 'taarija', strokes: { D: 'dum', T: 'tek' }, low: 'D' },
+  clap:     { name: 'claps', strokes: { X: 'a clap' } },
+  riq:      { name: 'riq', strokes: { D: 'dum: the skin, the jingles with it', T: 'the jingles alone' }, low: 'D' },
+  tbel:     { name: 'tbel', strokes: { D: 'the curved stick, on the bass head', T: 'the thin stick, on the other' }, low: 'D' },
+  krakeb:   { name: 'krakeb', strokes: { X: 'the iron castanets, clacked' } },
+  kick:     { name: 'kick drum', strokes: { D: 'the kick' }, low: 'D' },
+  snare:    { name: 'snare drum', strokes: { T: 'a hit', K: 'a ghost note, soft' }, soft: 'K' },
+  hihat:    { name: 'hi-hat', strokes: { x: 'closed', o: 'open' } },
+  bassdrum: { name: 'bass drum', strokes: { D: 'the big drum' }, low: 'D' },
+  cymbals:  { name: 'cymbals', strokes: { X: 'a crash of the pair' } },
+  conga:    { name: 'conga', strokes: { B: 'bass: the palm, in the middle', O: 'open: the fingers at the edge, ringing', S: 'slap: sharp, damped' }, low: 'B' },
+  claves:   { name: 'claves', strokes: { X: 'the two sticks struck' } },
+  shaker:   { name: 'shaker', strokes: { X: 'a shake' } },
+  bell:     { name: 'bell', strokes: { X: 'the iron bell, struck' } },
+  djembe:   { name: 'djembe', strokes: { B: 'bass: the palm, in the middle', T: 'tone: the fingers at the edge', S: 'slap: sharp, the fingers loose' }, low: 'B' },
+  tapan:    { name: 'tapan', strokes: { D: 'the mallet, on the big head', T: 'the rod, on the small one' }, low: 'D' },
+  bodhran:  { name: 'bodhrán', strokes: { D: 'a down stroke of the tipper', T: 'an up stroke' }, low: 'D' },
+};
+// the drums a rhythm is played on; `lead`, the drum the broken chords follow, `bass`, the drone's and the bells'
+const KITS = {
+  maghreb: { name: 'Maghrebi drums', drums: ['darbuka', 'bendir', 'taarija', 'clap'], lead: 'darbuka', bass: 'bendir' },
+  gnawa:   { name: 'Gnawa', drums: ['tbel', 'krakeb', 'clap'], lead: 'tbel', bass: 'tbel' },
+  arabic:  { name: 'Arabic takht', drums: ['darbuka', 'riq', 'clap'], lead: 'darbuka', bass: 'darbuka' },
+  kit:     { name: 'drum kit', drums: ['kick', 'snare', 'hihat'], lead: 'hihat', bass: 'kick' },
+  band:    { name: 'brass band', drums: ['bassdrum', 'snare', 'cymbals'], lead: 'snare', bass: 'bassdrum' },
+  latin:   { name: 'Latin', drums: ['conga', 'claves', 'shaker'], lead: 'conga', bass: 'conga' },
+  westafrica: { name: 'West African', drums: ['bell', 'djembe', 'shaker'], lead: 'djembe', bass: 'djembe' },
+  balkan:  { name: 'Balkan', drums: ['tapan', 'darbuka'], lead: 'darbuka', bass: 'tapan' },
+  irish:   { name: 'Irish', drums: ['bodhran'], lead: 'bodhran', bass: 'bodhran' },
+};
+let KIT = KITS.maghreb, VOICES = [];
+const voicesOf = kit => kit.drums.map(id => ({ id, name: DRUMS[id].name, strokes: Object.keys(DRUMS[id].strokes) }));
+VOICES = voicesOf(KIT);
+// in the list's order, a section a meter
+const METERS = [
+  { m: '2/4',  about: 'two beats a bar' },
+  { m: '3/4',  about: 'three beats a bar' },
+  { m: '4/4',  about: 'four beats a bar' },
+  { m: '2/2',  about: 'cut time: two half-note beats a bar' },
+  { m: '5/4',  about: 'five beats a bar, felt 3+2' },
+  { m: '6/8',  about: 'two beats of three' },
+  { m: '7/8',  about: 'uneven: beats of two and three' },
+  { m: '9/8',  about: 'three beats of three, or 2+2+2+3' },
+  { m: '12/8', about: 'four beats of three' },
+];
+const PATTERNS = [
+  // 2/4
+  { name: 'oom-pah', meter: [2, 4], kit: 'band', info: 'bass on the beat, a chick between: a polka, a march',
+    about: 'The two-step of a polka or a march band: the bass drum on each beat, the cymbals on each "and" between.',
+    rows: { bassdrum: 'D.D. D.D.', cymbals: '.X.X .X.X' } },
+  { name: 'habanera', meter: [2, 4], beats: [4, 4], bars: 1, kit: 'latin', info: 'long, short, two even: Cuba, the tango, a dozen dances since',
+    about: 'The habanera: a dotted quaver, a semiquaver, two quavers. It went from Cuba into the tango and much else. The claves carry it, the conga\'s bass on the beat. In semiquavers here, four pulses a beat.',
+    rows: { claves: 'X..XX.X.', conga: 'B...B...', shaker: 'XXXXXXXX' } },
+  { name: 'malfuf', meter: [2, 4], beats: [4, 4], bars: 1, kit: 'arabic', info: 'Arabic: dum, then two teks, quick',
+    about: 'Malfuf, a quick Arabic two: a dum, then teks on the fourth and seventh semiquavers. Often used to lead in or to hurry the end.',
+    rows: { darbuka: 'D..T..T.', riq: 'D.TTT.TT' } },
+  { name: 'ayyub', meter: [2, 4], beats: [4, 4], bars: 1, kit: 'arabic', info: 'Arabic: the rocking trance two',
+    about: 'Ayyub, the two of the zar and other trance music: dum, ka dum, tek. It rocks and keeps going.',
+    rows: { darbuka: 'D..KD.T.', riq: 'D.T.D.T.' } },
+  // 3/4
+  { name: 'waltz', meter: [3, 4], kit: 'band', info: 'one, two, three: bass, then two chicks',
+    about: 'The waltz: the bass drum on the first beat, the snare on the second and third.',
+    rows: { bassdrum: 'D..... D.....', snare: '..T.T. ..T.T.' } },
+  { name: 'three, in twos and threes', meter: [3, 4], info: 'the 3/4 bar against a 6/8 one: the same six quavers',
+    about: 'Six quavers make a 3/4 bar (2+2+2) or a 6/8 one (3+3). The bendir keeps the 3/4, the claps the 6/8: the same hemiola as the chaabi cycle, from the other side.',
+    rows: { bendir: 'D.D.D. D.D.D.', clap: 'X..X.. X..X..' } },
+  // 4/4
+  { name: 'backbeat', meter: [4, 4], kit: 'kit', info: 'rock and pop: kick on 1 and 3, snare on 2 and 4',
+    about: 'The backbeat of rock and pop: the kick on 1 and 3, the snare on 2 and 4, the hi-hat in quavers, opening at the end of the cycle.',
+    rows: { kick: 'D...D.D. D...D.D.', snare: '..T...T. ..T...TK', hihat: 'xxxxxxxx xxxxxxxo' } },
+  { name: 'maqsum', meter: [4, 4], kit: 'arabic', info: 'Arabic: the everyday four, dum tek – tek dum – tek –',
+    about: 'Maqsum, the most common Arabic rhythm: dum tek, tek, dum, tek.',
+    rows: { darbuka: 'DT.TD.T.', riq: 'DTTTDTTT' } },
+  { name: 'baladi', meter: [4, 4], kit: 'arabic', info: 'Arabic: maqsum with two dums at the head',
+    about: 'Baladi, maqsum\'s earthier sibling: two dums together at the head of the bar.',
+    rows: { darbuka: 'DD.TD.T.', riq: 'DD.TD.T.' } },
+  { name: 'sa\'idi', meter: [4, 4], kit: 'arabic', info: 'Egyptian: dum tek – dum dum – tek –',
+    about: 'Sa\'idi, from Upper Egypt, the stick dance\'s rhythm: the two dums in the middle carry it.',
+    rows: { darbuka: 'DT.DD.T.', riq: 'DT.DD.T.', clap: '..X...X.' } },
+  { name: 'tresillo', meter: [4, 4], kit: 'latin', info: '3+3+2 quavers: the Caribbean and Latin cell',
+    about: 'Tresillo: eight quavers grouped 3+3+2. Under a great deal of Latin, Caribbean and popular music.',
+    rows: { claves: 'X..X..X.', conga: 'B..OB.O.', shaker: 'XXXXXXXX' } },
+  // 2/2
+  { name: 'alla breve', meter: [2, 2], kit: 'band', info: 'two big beats: a quick march, a reel',
+    about: 'Cut time: two half-note beats a bar, each of four quavers. The bass drum on the beat, the snare between, the cymbals at the cycle\'s head.',
+    rows: { bassdrum: 'D...D... D...D...', snare: '..T...T. ..T.TKT.', cymbals: 'X....... ........' } },
+  // 5/4
+  { name: 'five, 3+2', meter: [5, 4], bars: 1, kit: 'kit', info: 'five beats felt as three and two',
+    about: 'Five beats, felt 3+2, a jazz drummer\'s way: the kick on the first and fourth, the snare between, the hi-hat on every beat.',
+    rows: { kick: 'D.....D...', snare: '..T.T...T.', hihat: 'x.x.x.x.x.' } },
+  // 6/8
+  { name: 'plain 6/8', meter: [6, 8], info: 'two beats a bar: low, then high',
+    about: 'The baseline: low on the first beat of each bar, high on the second. Two beats a bar, each of three pulses.',
+    rows: { darbuka: 'D..T.. D..T..' } },
+  { name: '3+3 against 2+2+2', meter: [6, 8], info: 'bendir in twos of three, claps in threes of two',
+    about: 'Why the beat is hard to find. The bendir beats two to a bar (3+3), the claps three (2+2+2), both from the same twelve pulses. Count along each way in turn.',
+    rows: { bendir: 'D..D.. D..D..', clap: 'X.X.X. X.X.X.' } },
+  { name: 'chaabi, a two-bar cycle', meter: [6, 8], info: 'my reading of the groove: all four drums',
+    about: 'My reading, a starting point: a darbuka line whose second bar answers the first, the bendir holding the 3+3, the claps on the 2+2+2, the taarija filling. Change it by ear. Then try starting the cycle on another pulse.',
+    rows: { darbuka: 'D.KT.K D.DT.K', bendir: 'D..T.. D..T.T', taarija: '.T..T. .T..TT', clap: 'X.X.X. X.X.X.' } },
+  { name: 'the hemiola turn', meter: [6, 8], info: 'my reading: a bar in threes, a bar in twos',
+    about: 'My reading, after the general 6/8 habit of turning the beat over: the first bar walks in 3+3, the second runs in 2+2+2 on every drum, then the cycle falls back onto the one. Not taken from a named rhythm.',
+    rows: { darbuka: 'D..T.K D.T.D.', bendir: 'D..D.. D.D.D.', clap: 'X..X.. X.X.X.' } },
+  { name: 'gnawa-like', meter: [6, 8], kit: 'gnawa', info: 'after a description: bass on 1 and 4, offbeat metal',
+    about: 'After a written description, not a recording: the big drum, the tbel, accents pulses 1 and 4 of each bar, and the krakeb, the iron castanets, fill the pulses between. A real Gnawa groove often sits nearer a long-short swing: try the lean slider.',
+    rows: { tbel: 'D..D.. D..T..', krakeb: '.XX.XX .XX.XX' } },
+  { name: 'busy darbuka', meter: [6, 8], info: 'my reading: the chaabi line, filled in',
+    about: 'My reading: the chaabi cycle with the darbuka filling nearly every pulse with light ka strokes, the way a player decorates once the groove is settled. The bendir and claps hold it steady underneath.',
+    rows: { darbuka: 'DKKTKK DKDTKT', bendir: 'D..T.. D..T.T', clap: 'X.X.X. X.X.X.' } },
+  // 7/8
+  { name: 'rachenitsa, 2+2+3', meter: [7, 8], beats: [2, 2, 3], kit: 'balkan', info: 'Bulgarian: short, short, long',
+    about: 'Seven quavers as 2+2+3, short short long: the rachenitsa\'s limp. The long beat lasts half again as long; the tempo counts the short ones.',
+    rows: { tapan: 'D.T.D.T D.T.D..', darbuka: 'D.T.D.. D.T.DKT' } },
+  { name: 'lesnoto, 3+2+2', meter: [7, 8], beats: [3, 2, 2], kit: 'balkan', info: 'Macedonian: long, short, short',
+    about: 'Seven quavers as 3+2+2, long short short: the lesnoto, walked slowly. The same seven pulses as the rachenitsa, the long beat first.',
+    rows: { tapan: 'D..T.T. D..T.T.', darbuka: '.K.D.D. .K.D.DK' } },
+  // 9/8
+  { name: 'slip jig, 3+3+3', meter: [9, 8], bars: 1, kit: 'irish', info: 'three beats of three: the Irish slip jig',
+    about: 'Nine quavers as three beats of three: the slip jig, on a bodhrán, the tipper going down and up.',
+    rows: { bodhran: 'DTDDTDDTT' } },
+  { name: 'karşılama, 2+2+2+3', meter: [9, 8], beats: [2, 2, 2, 3], bars: 1, kit: 'balkan', info: 'Turkish and Balkan: three short, one long',
+    about: 'Nine quavers as 2+2+2+3: three short beats and a long one, the karşılama\'s and the Roma 9/8\'s. My spelling of the strokes; the grouping is the thing.',
+    rows: { tapan: 'D...D.T..', darbuka: 'D.T.D.T.T' } },
+  // 12/8
+  { name: 'shuffle', meter: [12, 8], kit: 'kit', info: 'four beats of three: the blues shuffle',
+    about: 'Four beats of three quavers, the first and third of each sounded: the shuffle of the blues and of rock and roll. The snare on beats 2 and 4.',
+    rows: { kick: 'D.....D.....', snare: '...T.....T..', hihat: 'x.xx.xx.xx.x' } },
+  { name: 'the 12/8 bell', meter: [12, 8], kit: 'westafrica', info: 'West African: seven strokes over twelve pulses',
+    about: 'The standard bell pattern of West African and Afro-Cuban music: seven strokes over twelve pulses, against four steady beats.',
+    rows: { bell: 'X.X.XX.X.X.X', djembe: 'B..T.SB..T.S', shaker: 'XXXXXXXXXXXX' } },
+  { name: 'empty', meter: [6, 8], info: 'twelve rests, to make your own',
+    about: 'Twelve rests, to make one from scratch.',
+    rows: {} },
+];
+// a rhythm's grid: N pulses a cycle, NB beats; each beat's pulses (size), where each beat starts,
+// each pulse's beat (pb) and place in it (pj); base, the beat the tempo counts (the short one, in aksak)
+function gridOf(p){
+  const [n, d] = p.meter, compound = d === 8 && n % 3 === 0 && n > 3;
+  const beats = p.beats || (compound ? Array(n / 3).fill(3) : d === 2 ? Array(n).fill(4) : d === 8 ? Array(n).fill(1) : Array(n).fill(2));
+  const bar = beats.reduce((a, b) => a + b, 0), bars = p.bars || (bar <= 8 ? 2 : 1);
+  const size = Array.from({ length: bars }, () => beats).flat();
+  const start = [], pb = [], pj = []; let at = 0;
+  size.forEach((z, b) => { start.push(at); for (let j = 0; j < z; j++){ pb.push(b); pj.push(j); } at += z; });
+  return { meter: p.meter, beats, bars, bar, size, start, pb, pj, N: at, NB: size.length, base: Math.min(...beats),
+           threes: beats.every(z => z === 3), key: beats.join('+') + '×' + bars };
+}
+let G = gridOf({ meter: [6, 8] });
+const bm = b => ((b % G.NB) + G.NB) % G.NB;            // an absolute beat's place in the cycle
+
+let cells = {}, feel = '', playing = false, fit = 'swung', curPat = null;
+const muted = {};
+function load(p){
+  const g = gridOf(p), changed = g.key !== G.key;
+  G = g; cells = {};
+  KIT = KITS[p.kit || 'maghreb']; VOICES = voicesOf(KIT);
+  // a row shorter than the cycle (a bar's worth) repeats to fill it
+  for (const v of VOICES){ const r = (p.rows[v.id] || '').replace(/\s/g, '');
+    cells[v.id] = (r && G.N % r.length === 0 ? r.repeat(G.N / r.length) : (r + '.'.repeat(G.N)).slice(0, G.N)).split(''); }
+  for (const pid of ['drone', 'bells']) mix[pid].follows = KIT.bass;
+  mix.broken.follows = KIT.lead;
+  $('strokeKey').innerHTML = `On ${KIT.name}: ` + VOICES.map(v => `${v.name}, ` + Object.entries(DRUMS[v.id].strokes)
+    .map(([k, what]) => (v.id === 'clap' ? CLAP.replace('class="clap"', 'class="clap keyclap"') : `<code>${k}</code>`) + ' ' + what).join(', ')).join(' · ');
+  $('about').textContent = `${p.meter.join('/')}, ${G.bars > 1 ? `a cycle of ${G.bars} bars` : 'a bar a cycle'}, ${G.N} pulses. ` + p.about;
+  patName = p.name; curPat = p;
+  $('rot').max = G.N - 1; if (+$('rot').value > G.N - 1) $('rot').value = 0;
+  const sh = Math.min(+$('shift').value || 1, G.NB);
+  $('shift').innerHTML = Array.from({ length: G.NB }, (_, i) => `<option>${i + 1}</option>`).join(''); $('shift').value = sh;
+  const two = !G.threes;                               // the lean's buttons say what it does to these beats
+  $('leanL').textContent = G.threes ? 'Timing of the 3 pulses' : 'Swing: the off-pulses';
+  $('lean0').textContent = two ? 'straight' : 'even';
+  $('leanM').textContent = two ? 'early: short long' : 'toward 2/4: short short long';
+  $('leanP').textContent = two ? 'swung: long short' : 'toward 2/4: long short short';
+  document.querySelector('[data-feel="3"]').closest('.row').hidden = G.N % 6 !== 0;
+  // cycling songs, and the tune playing isn't in this meter's rotation: the rotation's first takes over
+  const was = $('tune').value, turn = entry === 'cycle' ? sameMeter() : [];
+  if (turn.length && !turn.includes(was)) $('tune').value = turn[0];
+  listTunes(); draw(); labels();
+  if (mel){
+    if (playing && changed){ stop(); start(); }
+    else { if ($('tune').value !== was) newTune(); else refit(); summary(); if (openDD === 'melody-adv') showFit(); }
+  }
+}
+
+// ======================= timing =======================
+// a beat is 3 pulses; `lean` moves pulses 2 and 3 between even thirds and a 2/4 split
+// (−1: 25/25/50 short short long; +1: 50/25/25 long short short)
+// a beat of 2 or 4 pulses: its off-pulses pushed later (swung, long short, up to a triplet's 2:1) or earlier
+function fracs(n = G.size[0]){
+  const l = +$('lean').value / 100;
+  if (n !== 3) return Array.from({ length: n }, (_, i) => i / n + (i % 2 ? l / (3 * n) : 0));
+  const E = [0, 1/3, 2/3];
+  const T = l < 0 ? [0, 0.25, 0.5] : [0, 0.5, 0.75], a = Math.abs(l);
+  return E.map((e, i) => e + (T[i] - e) * a);
+}
+const beatSec = () => 60 / +$('tempo').value;        // tempo counts the meter's beat (the short one, in aksak)
+const beatDur = ab => beatSec() * G.size[bm(ab)] / G.base;   // an absolute beat's length: a long aksak beat is longer
+// how long pulse i lasts, read fresh each pulse so the tempo and timing can change while it plays
+function stepLen(i){ const b = G.pb[i], f = [...fracs(G.size[b]), 1], j = G.pj[i]; return (f[j + 1] - f[j]) * beatDur(b); }
+
+// ======================= sounds =======================
+// One AudioContext for drums and band alike, instruments.js's own, so they keep time together;
+// the drums go into its master, so they're heard in the same room.
+const inst = new Instruments();
+let ctx, out, noise, room = 'palace';
+function initAudio(){
+  inst.setRoom(room); inst.init();
+  if (ctx) return;
+  ctx = inst.ctx;
+  out = ctx.createGain(); out.gain.value = 0.7;
+  const comp = ctx.createDynamicsCompressor(); out.connect(comp); comp.connect(inst.master);
+  noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+  const d = noise.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+}
+// each drum has its own gain (its volume); `into` is the one a stroke is being made on
+const drumVol = {}, drumGain = {};
+let into = null;
+function env(t, peak, dec){ const g = ctx.createGain(); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + 0.002); g.gain.setTargetAtTime(0, t + 0.004, dec); g.connect(into || out); return g; }
+function drumOut(id){
+  if (!drumGain[id]){ drumGain[id] = ctx.createGain(); drumGain[id].gain.value = drumVol[id] ?? 1; drumGain[id].connect(out); }
+  return drumGain[id];
+}
+function tone(t, f0, f1, peak, dec, type = 'sine'){
+  const o = ctx.createOscillator(); o.type = type; o.frequency.setValueAtTime(f0, t); o.frequency.exponentialRampToValueAtTime(f1, t + dec * 2);
+  o.connect(env(t, peak, dec)); o.start(t); o.stop(t + dec * 8);
+}
+function hiss(t, freq, q, peak, dec, len = 0.4){
+  const s = ctx.createBufferSource(); s.buffer = noise; const f = ctx.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = freq; f.Q.value = q;
+  s.connect(f); f.connect(env(t, peak, dec)); s.start(t, Math.random() * 0.5); s.stop(t + len);
+}
+// the riq's jingles: two pairs of little cymbals, a hair apart
+function jingle(t, g){ hiss(t, 7200, 3, 0.4 * g, 0.06, 0.3); hiss(t + 0.011, 9300, 3, 0.3 * g, 0.05, 0.3); }
+const SOUND = {
+  darbuka: { D: t => { tone(t, 150, 85, 0.9, 0.12); hiss(t, 400, 1, 0.15, 0.02); },
+             T: t => { tone(t, 620, 560, 0.35, 0.03, 'triangle'); hiss(t, 3800, 2, 0.55, 0.025); },
+             K: t => { tone(t, 600, 540, 0.2, 0.025, 'triangle'); hiss(t, 3400, 2, 0.32, 0.02); } },
+  bendir:  { D: t => { tone(t, 75, 52, 0.9, 0.2); hiss(t, 1800, 0.8, 0.22, 0.12, 0.7); },          // the gut snare buzzes under it
+             T: t => { hiss(t, 1300, 1.2, 0.5, 0.04); hiss(t, 2200, 0.8, 0.18, 0.1, 0.5); } },
+  taarija: { D: t => { tone(t, 260, 210, 0.45, 0.06); },
+             T: t => { tone(t, 900, 850, 0.2, 0.02, 'triangle'); hiss(t, 5000, 2, 0.35, 0.015); } },
+  clap:    { X: t => { for (const dt of [0, 0.009, 0.019]) hiss(t + dt, 1200, 1.5, 0.45, dt < 0.019 ? 0.006 : 0.05, 0.2); } },
+  riq:     { D: t => { tone(t, 230, 190, 0.4, 0.05); jingle(t, 0.4); }, T: t => jingle(t, 0.5) },
+  tbel:    { D: t => { tone(t, 68, 48, 1, 0.22); hiss(t, 500, 1, 0.2, 0.05); },
+             T: t => { tone(t, 420, 400, 0.25, 0.02, 'triangle'); hiss(t, 2600, 2, 0.35, 0.02); } },
+  krakeb:  { X: t => { for (const [dt, g] of [[0, 1], [0.016, 0.6]]){ hiss(t + dt, 4600, 4, 0.55 * g, 0.03, 0.2); tone(t + dt, 2900, 2800, 0.12 * g, 0.03, 'square'); } } },
+  kick:    { D: t => { tone(t, 130, 45, 1, 0.13); hiss(t, 3000, 1, 0.12, 0.005); } },
+  snare:   { T: t => { tone(t, 200, 175, 0.4, 0.05, 'triangle'); hiss(t, 2600, 0.7, 0.7, 0.09, 0.4); },
+             K: t => { tone(t, 200, 175, 0.12, 0.03, 'triangle'); hiss(t, 2600, 0.7, 0.22, 0.04, 0.2); } },
+  hihat:   { x: t => hiss(t, 9000, 0.9, 0.35, 0.02, 0.15), o: t => hiss(t, 8500, 0.8, 0.32, 0.2, 0.7) },
+  bassdrum:{ D: t => { tone(t, 90, 48, 1, 0.26); hiss(t, 300, 1, 0.2, 0.05); } },
+  cymbals: { X: t => { hiss(t, 6000, 0.5, 0.45, 0.3, 1.2); hiss(t, 3500, 1, 0.2, 0.18, 0.8); } },
+  conga:   { B: t => tone(t, 115, 92, 0.75, 0.08), O: t => tone(t, 310, 290, 0.6, 0.12),
+             S: t => { tone(t, 340, 330, 0.3, 0.03); hiss(t, 2100, 1.5, 0.5, 0.02); } },
+  claves:  { X: t => tone(t, 2500, 2480, 0.5, 0.025) },
+  shaker:  { X: t => hiss(t, 7000, 1.2, 0.22, 0.03, 0.12) },
+  bell:    { X: t => { tone(t, 1250, 1250, 0.32, 0.15, 'triangle'); tone(t, 2170, 2170, 0.12, 0.08); } },
+  djembe:  { B: t => tone(t, 88, 66, 0.9, 0.12), T: t => { tone(t, 330, 310, 0.5, 0.06); hiss(t, 1500, 1, 0.15, 0.02); },
+             S: t => { hiss(t, 2600, 1, 0.6, 0.03); tone(t, 430, 410, 0.25, 0.02); } },
+  tapan:   { D: t => { tone(t, 66, 44, 1, 0.3); hiss(t, 600, 1, 0.25, 0.06); }, T: t => hiss(t, 4200, 1.2, 0.45, 0.025) },
+  bodhran: { D: t => { tone(t, 98, 72, 0.8, 0.12); hiss(t, 800, 1, 0.12, 0.03); }, T: t => { tone(t, 145, 122, 0.45, 0.07); hiss(t, 900, 1, 0.08, 0.02); } },
+  count:   { 3: t => tone(t, 1760, 1760, 0.18, 0.015), 2: t => tone(t, 1175, 1175, 0.18, 0.015) },
+};
+
+// ======================= the arrangement =======================
+// the parts: the tune's own rhythm (tune, low), or a drum's (follows: which row of the grid)
+const PARTS = [
+  { id: 'tune',   name: 'the tune' },
+  { id: 'low',    name: 'the tune, an octave down' },
+  { id: 'drone',  name: 'drone: re-bowed on each dum', follows: 'bendir' },
+  { id: 'broken', name: 'broken chords: root on a dum, up the chord on a tek', follows: 'darbuka' },
+  { id: 'bells',  name: 'bells: a bar\'s head, high, on the first stroke', follows: 'bendir' },
+];
+const ARRANGEMENTS = [
+  { id: 'plain', name: 'plain',
+    about: 'The tune alone, on the silver pipes, over the drums.', info: 'the tune alone, on the silver pipes',
+    parts: { tune: 'silver pipes' } },
+  { id: 'faerean', name: 'Faerean',
+    info: 'the Gentry visiting the Maghreb: drone, harp chords and bells on the drummer\'s rhythm',
+    about: 'The Gentry visiting the Maghreb: their band (two silver pipes, two harps) and their way with a tune (arrange.js: a drone, broken chords, bells high on each bar\'s head, from the second phrase), but on the drummer\'s rhythm. The drone only plays over the broken chords, as in the game. Try it in the palace.',
+    parts: { tune: 'silver pipes', drone: 'silver pipes', broken: 'harp', bells: 'harp' } },   // the vielle's sample grates
+];
+const mix = {};              // part → { on, kind, vol, follows, voice: { I, out } }
+for (const p of PARTS) mix[p.id] = { in: false, on: false, kind: 'silver pipes', vol: 1.6, follows: p.follows };   // in: a row; on: heard
+let arrangement = 'plain';
+
+// the instrument for a part: its samples fetched, its own gain into instruments.js's music bus
+async function setVoice(pid){
+  const m = mix[pid], kind = m.kind;
+  if (!ctx || !kind) return;
+  m.want = kind;
+  const I = await inst._load(kind);
+  if (m.want !== kind) return;                       // changed again while it loaded
+  const g = ctx.createGain(); g.gain.value = m.vol; g.connect(inst.music || inst.master);   // the music bus, where instruments.js has one
+  const old = m.voice; m.voice = { I, out: g, kind };
+  if (old) setTimeout(() => old.out.disconnect(), 4000); // let its last notes ring out
+}
+const sound = (pid, midi, t, dur, vel) => { const v = mix[pid].voice; if (v) inst._note(v.I, v.out, midi, t, dur, vel); };
+// what each part struck, for the grid: cycle → part → 12 pulses of pitch lists
+const heard = new Map();
+function record(pid, cyc, col, midi){
+  if (!heard.has(cyc)){ heard.set(cyc, {}); for (const c of heard.keys()) if (c < cyc - 2) heard.delete(c); }
+  const C = heard.get(cyc); (C[pid] ??= Array.from({ length: G.N }, () => []))[col].push(midi);
+}
+const NAMES = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
+const nameOf = m => NAMES[((m % 12) + 12) % 12];
+
+// ======================= the clock =======================
+// One clock for drums and band, a pulse at a time, a little ahead. The tune and its low double are
+// sent a beat at a time at each beat's head, timed by the tempo, pulses and fit as they are then;
+// the others play on the strokes of their drum, as each pulse comes.
+let nextTime = 0, nextStep = 0, beatK = 0, timer, shown = [];
+let mel = null, origin = 0;          // the tune in rhythm beats (melody()), and the beat its first full bar starts on
+let enter = {};                      // part → beats after the origin it comes in (drums first, then each in turn)
+const AHEAD = 0.15;
+function tick(){
+  const ahead = ctx.currentTime + AHEAD, rot = +$('rot').value, drums = true;
+  while (nextTime <= ahead){
+    const t = nextTime, s = (nextStep + rot) % G.N;    // the pulse of the pattern heard at this moment
+    if (drums){
+      for (const v of VOICES){ const k = cells[v.id][s]; if (k !== '.' && !muted[v.id]){ into = drumOut(v.id); SOUND[v.id][k]?.(t); into = null; } }
+      if (feel.includes('3') && nextStep % 3 === 0) SOUND.count[3](t);
+      if (feel.includes('2') && nextStep % 2 === 0) SOUND.count[2](t + 0.004);
+    }
+    if (G.pj[nextStep] === 0){ nextSong(); for (const pid of ['tune', 'low']) beatNotes(pid, t); }
+    followers(t, s, beatK - origin + G.pj[nextStep] / G.size[G.pb[nextStep]], Math.floor(beatK / G.NB), nextStep);
+    shown.push([t, s, nextStep, Math.floor(beatK / G.NB)]);
+    nextTime += stepLen(nextStep);
+    if (++nextStep === G.N) nextStep = 0;
+    if (G.pj[nextStep] === 0) beatK++;
+  }
+}
+// where in a time round rhythm beat `pos` falls, or null before the part has come in
+const roundPos = (pid, pos) => !mel || pos < (enter[pid] || 0) ? null : ((pos % mel.L) + mel.L) % mel.L;
+
+// a tune-rhythm part's notes starting in this beat, each time round (a time round is `mel.L`
+// beats; the pick-up, before beat 0, sounds at the end of the round before, and before the first)
+function beatNotes(pid, t0){
+  const m = mix[pid]; if (!mel || !m.on || !m.voice) return;
+  const notes = mel[pid], k = beatK - origin, from = (enter[pid] || 0) + mel.first;
+  // seconds from this beat's head to rhythm beat rb (at or after it): whole beats, each its own length, then the warped part
+  const time = rb => { const x = rb - k, i = Math.floor(x + 1e-9); let sec = 0; for (let b = 0; b < i; b++) sec += beatDur(beatK + b);
+    return t0 + sec + mel.warp(Math.max(0, x - i), G.size[bm(beatK + i)]) * beatDur(beatK + i); };
+  for (const n of notes){
+    const r = Math.ceil((k - n.rb) / mel.L - 1e-9);                   // which time round puts it in or after this beat
+    const rb = n.rb + Math.max(0, r) * mel.L;
+    if (rb < k - 1e-9 || rb >= k + 1 - 1e-9 || rb < from - 1e-9) continue;
+    const t = time(rb), end = time(rb + n.len);
+    const i = Math.floor(rb + 1e-9), ab0 = beatK + (i - k), z = G.size[bm(ab0)], w = mel.warp(rb - i, z), fr = [...fracs(z), 1];
+    let j = 0; for (let x = 1; x <= z; x++) if (Math.abs(fr[x] - w) < Math.abs(fr[j] - w)) j = x;
+    const ab = ab0 + (j === z ? 1 : 0);                                 // the absolute beat it sounds in
+    record(pid, Math.floor(ab / G.NB), G.start[bm(ab)] + (j === z ? 0 : j), n.midi);
+    sound(pid, n.midi, t + (Math.random() - 0.5) * 0.01, Math.max(0.04, (end - t) * 0.94), 0.82 * (0.92 + Math.random() * 0.16));
+  }
+}
+// the parts that play on a drum's strokes: what the drum does at pattern pulse `s`, at rhythm beat `pos`
+const covering = (list, q) => list.filter(n => n.rb <= q + 1e-6 && q < n.rb + n.len - 1e-6);
+const lastFig = {}, lastQ = {}, lastBar = {};
+function followers(t, s, pos, cyc, col){
+  const play = (pid, midi, t, dur, vel) => { record(pid, cyc, col, midi); sound(pid, midi, t, dur, vel); };
+  for (const pid of ['drone', 'broken', 'bells']){
+    const m = mix[pid]; if (!m.on || !m.voice) continue;
+    const stroke = cells[m.follows][s]; if (stroke === '.') continue;
+    const q = roundPos(pid, pos); if (q == null) continue;
+    const Dm = DRUMS[m.follows], low = !!Dm.low && Dm.low.includes(stroke);
+    const vel = low ? 1 : Dm.soft?.includes(stroke) ? 0.6 : 0.8;
+    if (pid === 'drone'){
+      if (!low) continue;
+      let gap = 1; while (gap < G.N && !Dm.low.includes(cells[m.follows][(s + gap) % G.N])) gap++;   // held to the next dum
+      let held = 0; for (let x = 0; x < gap; x++) held += stepLen((col + x) % G.N);
+      for (const n of covering(mel.drone, q)) play(pid, n.midi, t, held * 0.97, (n.vel ?? 0.38) * 1.4);
+    } else if (pid === 'broken'){
+      const c = covering(mel.chords, q)[0] || mel.chords.at(-1); if (!c) continue;   // in the pick-up: the last bar's chord
+      const r = 43 + (((c.pcs[0] - 43) % 12) + 12) % 12, third = (((c.pcs[1] - c.pcs[0]) % 12) + 12) % 12;
+      const tones = [r, r + 7, r + 12, r + 12 + third];
+      let midi;
+      // the root on a dum; on a drum with none (a snare, a hi-hat), on its first stroke in each bar
+      const bar = Math.floor(col / G.bar), root = low || (!Dm.low && lastBar[pid] !== `${cyc}:${bar}`);
+      lastBar[pid] = `${cyc}:${bar}`;
+      if (root){ midi = tones[0]; lastFig[pid] = 0; }
+      else { lastFig[pid] = ((lastFig[pid] ?? 0) % 4) + 1; midi = tones[[1, 2, 3, 2][lastFig[pid] - 1]]; }
+      play(pid, midi, t, stepLen(col) + stepLen((col + 1) % G.N), (root ? 0.55 : 0.42) * (low || root ? 1 : vel / 0.8));
+    } else {                                           // bells: any bar head passed since this drum's last stroke
+      // how far on from this drum's last stroke, going forward round the tune. More than a couple of beats
+      // isn't a step but a jump (a new tune, a new start): then only what's on this very stroke rings
+      const fwd = x => ((x % mel.L) + mel.L) % mel.L;
+      let span = lastQ[pid] == null ? 0 : fwd(q - lastQ[pid]);
+      if (span > 2) span = 0;
+      lastQ[pid] = q;
+      for (const b of mel.bells){
+        let ago = fwd(q - b.rb);                      // how long ago the bar's head was
+        if (ago > mel.L - 1e-6) ago = 0;              // a hair ahead of the stroke is on it
+        if (ago < span - 1e-6 || ago < 1e-6) play(pid, b.midi, t, 0.35, 0.5);
+      }
+    }
+  }
+}
+function frame(){
+  if (!playing) return;
+  while (shown.length > 1 && shown[1][0] <= ctx.currentTime) shown.shift();
+  const cur = shown[0] && shown[0][0] <= ctx.currentTime ? shown[0] : null;
+  document.querySelectorAll('#grid .cell.drum').forEach(c => c.classList.toggle('now', !!cur && +c.dataset.s === cur[1]));
+  if (cur && (cur[3] !== shownCycle || cur[2] !== shownAt)){ shownCycle = cur[3]; shownAt = cur[2]; bandRows(cur[2]); }
+  document.querySelectorAll('#grid .cell.band').forEach(c => c.classList.toggle('now', !!cur && +c.dataset.col === cur[2]));
+  document.querySelectorAll('#fitGrid .cell').forEach(c => c.classList.toggle('now', !!cur && +c.dataset.s === cur[2]));
+  document.querySelectorAll('.count').forEach(c => c.classList.toggle('now', !!cur && +c.dataset.s === cur[2]));
+  if (mel){
+    const k = beatK - origin;
+    $('where').textContent = k < 0 ? 'the drums; the tune comes in…'
+      : entry === 'cycle' ? `${realName(mel.id)}: beat ${Math.min(k, mel.L - 1) + 1} of ${mel.L}`      // once through each, so no rounds
+      : `time round ${Math.floor(k / mel.L) + 1}, beat ${(k % mel.L) + 1} of ${mel.L}`;
+  }
+  requestAnimationFrame(frame);
+}
+async function start(){
+  initAudio(); await ctx.resume();
+  await Promise.all(PARTS.map(p => setVoice(p.id)));
+  mel = melody();
+  enter = {}; for (const k of Object.keys(lastQ)) delete lastQ[k];
+  if (entry === 'one'){
+    origin = 2 * G.NB;                                 // the drums alone for two cycles
+    let i = 0; for (const p of ['tune', 'drone', 'broken', 'bells', 'low']) if (mix[p].on) enter[p] = G.NB * i++;
+  } else origin = 0;
+  beatK = Math.min(0, Math.floor(mel.first));          // begin early enough for the pick-up
+  nextStep = G.start[bm(beatK)];                       // and the drums from that point in the cycle
+  nextTime = ctx.currentTime + 0.08; shown = []; playing = true;
+  clearInterval(timer); timer = setInterval(tick, 25); tick(); frame(); playLabel(); ambience(true);
+}
+// The Lea's own ambience under two of the rooms: the wind in the leaves out on the Lea, water
+// dripping in a cave. Its own AudioContext, as in the game; the other rooms are silent beneath.
+const amb = new Ambience();
+const AMBIENT = { open: { wind: 0.6 }, cave: { under: true, drips: 'cave' } };
+let ambTimer = null, ambT = 0;
+function ambience(on){
+  clearInterval(ambTimer); ambTimer = null;
+  if (!on){ if (amb.ctx) amb.update(0.1, { under: true }); return; }   // one silent step: the beds glide out
+  amb.init(); ambT = performance.now();
+  ambTimer = setInterval(() => {
+    const now = performance.now(), dt = (now - ambT) / 1000; ambT = now;
+    amb.update(dt, { here: { x: 0, z: 0, yaw: 0 }, wind: 0, ...(AMBIENT[room] || { under: true }) });
+  }, 100);
+}
+function stop(){
+  ambience(false);
+  playing = false; clearInterval(timer); upNext = null; $('where').textContent = ''; heard.clear(); shownCycle = null; bandRows();
+  playLabel(); document.querySelectorAll('.now').forEach(c => c.classList.remove('now'));
+}
+// cycle songs: the tunes in the rhythm's own meter, in the list's order. Each comes in where the last
+// one's time round ends, its pick-up sounding in the round's last beat(s)
+const sameMeter = () => tuneGroups().find(g => g.ids.length && g.rotate)?.ids || [];
+let upNext = null;
+function nextSong(){
+  if (entry !== 'cycle' || !mel) return;
+  const list = sameMeter(); if (!list.length) return;
+  const k = beatK - origin;
+  if (!upNext){
+    const at = list.indexOf(mel.id);
+    $('tune').value = list[(at + 1) % list.length];          // laid out now, so its pick-up is known
+    upNext = melody(); $('tune').value = mel.id;
+  }
+  const pre = Math.ceil(-upNext.first - 1e-9);
+  if (k !== mel.L - pre) return;
+  origin += mel.L; mel = upNext; upNext = null; forgetStrokes();
+  $('tune').value = mel.id; summary(); if (openDD === 'melody-adv') showFit();
+}
+// a new tune, or a new speed: from the next cycle with room for its pick-up, everyone together
+// a tune's place starts again: the bells' memory of the last stroke belongs to the old one
+const forgetStrokes = () => { for (const k of Object.keys(lastQ)) delete lastQ[k]; };
+function newTune(){
+  upNext = null; forgetStrokes();
+  const m = melody();
+  if (playing){ origin = Math.ceil((beatK + 1 - Math.min(0, Math.floor(m.first))) / G.NB) * G.NB; enter = {}; }
+  mel = m;
+}
+// a change that moves the notes but not the tune's place in it (the fit, where it starts, an instrument)
+function refit(){ mel = melody(); }
+
+// ======================= the rhythm grid =======================
+let shownCycle = null;
+const PART_SHORT = { tune: 'tune', low: 'tune low', drone: 'drone', broken: 'chords', bells: 'bells' };
+// the cycle being heard, up to pulse `at`; past it, the cycle before, dimmed, so a row always shows a whole cycle
+let shownAt = -1;
+function bandRows(at = G.N - 1){
+  const C = heard.get(shownCycle) || {}, P = heard.get(shownCycle - 1) || {};
+  document.querySelectorAll('#grid .cell.band').forEach(c => {
+    const col = +c.dataset.col, old = col > at, ns = (old ? P : C)[c.dataset.part]?.[col] || [];
+    c.textContent = [...new Set(ns.map(nameOf))].join(' ');
+    c.classList.toggle('hit', ns.length > 0); c.classList.toggle('prev', old && ns.length > 0);
+  });
+}
+function fitGrid(){
+  const g = $('grid'); if (!g) return;
+  const rows = VOICES.length + PARTS.filter(p => mix[p.id].in).length;
+  // the label column holds an icon sized from the cells (--iconcol: 0.8 of a cell, at most 60px),
+  // so solve for the cell with the label's fixed part and its icon both counted
+  const gap = 3, cur = parseFloat(getComputedStyle(g).getPropertyValue('--cell')) || 40;
+  const fixed = (g.querySelector('.lab.rowlab')?.offsetWidth || 102) - Math.min(cur * 0.8, 60);
+  const avail = Math.min(document.querySelector('main').clientWidth, innerWidth - 32), room = avail - fixed - (G.N + 1) * gap;
+  const across = (room - 60) / G.N * 0.8 >= 60 ? (room - 60) / G.N : room / (G.N + 0.8);
+  g.style.setProperty('--n', G.N); $('fitGrid')?.style.setProperty('--n', G.N);
+  const below = (document.querySelector('.bottom')?.offsetHeight || 0) + 18 + ($('hintbar')?.offsetHeight || 0) + 16;   // Play, the readout, the hint bar
+  const down = (innerHeight - (g.getBoundingClientRect().top + scrollY) - below - rows * gap) / (rows + 0.6);   // the count row is short
+  const least = innerWidth < 600 ? 14 : 18;             // a phone: sixteen pulses only fit smaller
+  let cell = Math.floor(Math.max(least, Math.min(across, Math.max(down, 34), 110)));
+  g.style.setProperty('--cell', cell + 'px');
+  // and measured: if the columns still run past the room (the label's fixed part read mid-change), shrink to fit
+  const over = g.scrollWidth - avail;
+  if (over > 0 && cell > least){ cell = Math.max(least, Math.floor(cell - over / (G.N + 0.8))); g.style.setProperty('--cell', cell + 'px'); }
+}
+addEventListener('resize', fitGrid);
+// how a player counts pulse i: quavers in twos as "1 & 2 &", semiquavers as "1 e & a",
+// threes and uneven beats by the quaver, "1 2 3 4 5 6"
+function countOf(i){
+  const b = G.pb[i], j = G.pj[i], z = G.size[b], inBar = b % G.beats.length;
+  if (G.threes || G.beats.some(x => x !== z) || z === 1) return (i % G.bar) + 1;
+  return j === 0 ? inBar + 1 : z === 2 ? '&' : ['', 'e', '&', 'a'][j];
+}
+function countRow(g){
+  g.append(Object.assign(document.createElement('div'), { className: 'lab' }));
+  for (let i = 0; i < G.N; i++){
+    const c = Object.assign(document.createElement('div'), { className: 'count', textContent: countOf(i) }); c.dataset.s = i; g.append(c);
+  }
+}
+// a palm, fingers up, thumb toward the middle; the right hand is the left mirrored
+const PALM = 'M3 23 L2.5 9 Q2.5 3.5 6.5 3.5 Q10.5 3.5 10.5 9 L10.5 13 L12.6 10.4 Q14.3 9 14.6 11 L11 20.5 Q9.8 23 7.5 23 Z';
+const FINGERS = 'M4.6 4.8 L4.6 11 M6.5 4.2 L6.5 11 M8.4 4.8 L8.4 11';         // the gaps between four fingers
+const CLAP = `<svg class="clap" viewBox="0 0 26 24" aria-label="clap"><g class="l"><path d="${PALM}"/><path class="fing" d="${FINGERS}"/></g>`
+  + `<g class="r"><g transform="translate(26,0) scale(-1,1)"><path d="${PALM}"/><path class="fing" d="${FINGERS}"/></g></g>`
+  + `<path class="spark" d="M13 1.5 L13 -1.5 M8.5 3 L6.5 0.5 M17.5 3 L19.5 0.5"/></svg>`;
+const DRUM_ICON = {
+  // a goblet drum: a head on a wide cup, narrowing to a waist and flaring to an open foot
+  darbuka: '<svg class="icon" viewBox="0 0 28 28"><path d="M6 5 L22 5 Q22 11 16.5 14 L16.5 17 Q20 20 20 24 L8 24 Q8 20 11.5 17 L11.5 14 Q6 11 6 5 Z"/><path d="M6 5 Q14 7 22 5"/></svg>',
+  // a frame drum: a wide round frame, a skin across it, the snare showing through
+  bendir:  '<svg class="icon" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10.5"/><circle cx="14" cy="14" r="8"/><path d="M7 16 L21 12"/></svg>',
+  // a small goblet drum, held under the arm
+  taarija: '<svg class="icon" viewBox="0 0 28 28"><path d="M9 8 L19 8 Q19 12 15.5 14 L15.5 16 Q18 18 18 21 L10 21 Q10 18 12.5 16 L12.5 14 Q9 12 9 8 Z"/><path d="M9 8 Q14 9.5 19 8"/></svg>',
+  riq: '<svg class="icon" viewBox="0 0 28 28"><circle cx="14" cy="14" r="9.5"/><circle cx="14" cy="14" r="7"/><circle cx="14" cy="3.2" r="1.6"/><circle cx="14" cy="24.8" r="1.6"/><circle cx="3.2" cy="14" r="1.6"/><circle cx="24.8" cy="14" r="1.6"/></svg>',
+  tbel: '<svg class="icon" viewBox="0 0 28 28"><ellipse cx="9" cy="14" rx="3.5" ry="8"/><path d="M9 6 L19 6 M9 22 L19 22"/><path d="M19 6 A3.5 8 0 0 1 19 22"/><path d="M21 3 Q26 6 24 11"/></svg>',
+  krakeb: '<svg class="icon" viewBox="0 0 28 28"><path d="M3 9 Q3 4 7.5 4 Q12 4 12 9 Q12 12 9 12.5 L9 15.5 Q12 16 12 19 Q12 24 7.5 24 Q3 24 3 19 Q3 16 6 15.5 L6 12.5 Q3 12 3 9 Z"/><path d="M16 9 Q16 4 20.5 4 Q25 4 25 9 Q25 12 22 12.5 L22 15.5 Q25 16 25 19 Q25 24 20.5 24 Q16 24 16 19 Q16 16 19 15.5 L19 12.5 Q16 12 16 9 Z"/></svg>',
+  kick: '<svg class="icon" viewBox="0 0 28 28"><circle cx="14" cy="13" r="10"/><circle cx="14" cy="13" r="3"/><path d="M6 21 L4 26 M22 21 L24 26"/></svg>',
+  snare: '<svg class="icon" viewBox="0 0 28 28"><ellipse cx="14" cy="11" rx="10" ry="3.5"/><path d="M4 11 L4 19 Q14 25 24 19 L24 11"/><path d="M7 3 L19 9"/></svg>',
+  hihat: '<svg class="icon" viewBox="0 0 28 28"><path d="M3 9 Q14 5 25 9 Z"/><path d="M3 12 Q14 16 25 12 Z"/><path d="M14 5 L14 26 M9 26 L19 26"/></svg>',
+  bassdrum: '<svg class="icon" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10.5"/><path d="M6.5 6.5 L21.5 21.5 M21.5 6.5 L6.5 21.5"/></svg>',
+  cymbals: '<svg class="icon" viewBox="0 0 28 28"><ellipse cx="9" cy="14" rx="3" ry="10" transform="rotate(-12 9 14)"/><ellipse cx="19" cy="14" rx="3" ry="10" transform="rotate(12 19 14)"/><path d="M5 14 L2 14 M23 14 L26 14"/></svg>',
+  conga: '<svg class="icon" viewBox="0 0 28 28"><ellipse cx="14" cy="5" rx="6" ry="2"/><path d="M8 5 Q5 14 9 25 L19 25 Q23 14 20 5"/></svg>',
+  claves: '<svg class="icon" viewBox="0 0 28 28"><path d="M4 20 L22 6 M6 24 L25 12" stroke-width="2.4" stroke-linecap="round"/></svg>',
+  shaker: '<svg class="icon" viewBox="0 0 28 28"><path d="M14 3 Q22 3 22 15 Q22 25 14 25 Q6 25 6 15 Q6 3 14 3 Z"/><path d="M10 12 L10.5 12 M15 9 L15.5 9 M17 15 L17.5 15 M12 18 L12.5 18" stroke-linecap="round" stroke-width="2"/></svg>',
+  bell: '<svg class="icon" viewBox="0 0 28 28"><path d="M4 9 L11 4 L14 18 Z"/><path d="M14 12 L21 8 L24 22 Z"/><path d="M14 18 Q14 25 8 25 M24 22 Q24 26 18 26"/></svg>',
+  djembe: '<svg class="icon" viewBox="0 0 28 28"><path d="M6 4 L22 4 Q22 11 16.5 14 L16.5 16 Q21 20 21 25 L7 25 Q7 20 11.5 16 L11.5 14 Q6 11 6 4 Z"/><path d="M8 7 L11 13 M14 6 L14 13 M20 7 L17 13"/></svg>',
+  tapan: '<svg class="icon" viewBox="0 0 28 28"><ellipse cx="11" cy="14" rx="4" ry="9"/><path d="M11 5 L19 5 M11 23 L19 23"/><path d="M19 5 A4 9 0 0 1 19 23"/><path d="M24 3 L24 13"/><circle cx="24" cy="15" r="2"/></svg>',
+  bodhran: '<svg class="icon" viewBox="0 0 28 28"><circle cx="14" cy="14" r="10.5"/><circle cx="14" cy="14" r="8.2"/><path d="M5 25 L23 5" stroke-width="2" stroke-linecap="round"/></svg>',
+};
+// an instrument's picture as the game shows it (ingredients.js pic), and the name the game gives it
+function icon(kind){
+  if (kind === 'clap') return CLAP.replace('class="clap"', 'class="clap icon"');
+  if (DRUM_ICON[kind]) return DRUM_ICON[kind];
+  const pic = ingredient(kind)?.pic?.[0];
+  return pic ? `<img class="icon" src="${pic}" alt="">` : '';
+}
+// a grid row's label: its checkbox and the instrument's icon, the name on hover (or written out, with no icon)
+// a muted row stays, dimmed
+const dim = (row, off) => document.querySelectorAll(`#grid .cell[data-row="${row}"]`).forEach(c => c.classList.toggle('muted', off));
+function rowLabel(lab, cb, kind, name, { part = null, vol = 1, setVol = null, follows = null } = {}){
+  lab.classList.add('rowlab'); lab.dataset.name = name; lab.dataset.hint = name; lab.setAttribute('aria-label', name);
+  const ic = icon(kind);
+  lab.append(cb);
+  let face;
+  if (ic){ face = document.createElement('span'); face.innerHTML = ic; face = face.firstElementChild; }
+  else { face = document.createElement('span'); face.textContent = name; delete lab.dataset.name; }
+  if (part){                                           // a band part: choose its instrument
+    const b = Object.assign(document.createElement('button'), { className: 'iconbtn', title: 'choose the instrument' });
+    b.append(face); b.onclick = e => { e.stopPropagation(); openPicker(b, KINDS.map(k => ({ value: k, html: icon(k), name: kindName(k) })), mix[part].kind, k => setKind(part, k)); };
+    lab.append(b);
+  } else lab.append(face);
+  // its volume
+  const v = Object.assign(document.createElement('input'), { type: 'range', min: 0, max: 300, value: Math.round(vol * 100), title: 'volume' });
+  v.setAttribute('aria-label', `${name}: volume`);
+  v.oninput = () => setVol?.(v.value / 100);
+  lab.append(v);
+  // the drum whose strokes it plays on
+  if (follows){
+    const f = Object.assign(document.createElement('button'), { className: 'follow', title: `plays on the ${follows}'s strokes`, innerHTML: icon(follows) });
+    f.setAttribute('aria-label', `${name}: plays on the ${follows}'s strokes`);
+    f.onclick = e => { e.stopPropagation(); openPicker(f, VOICES.filter(x => DRUMS[x.id].low || Object.keys(DRUMS[x.id].strokes).length > 1).map(x => ({ value: x.id, html: icon(x.id), name: `on the ${x.name}'s strokes` })), mix[part].follows, d => { mix[part].follows = d; draw(); }); };
+    lab.append(f);
+  } else lab.append(document.createElement('span'));
+}
+// the instrument picker: the Lea's instruments, with their pictures, the one playing marked
+function openPicker(anchor, items, current, pick){
+  closePicker();
+  const box = document.createElement('div'); box.id = 'picker'; box.setAttribute('role', 'menu');
+  for (const it of items){
+    const b = document.createElement('button'); b.setAttribute('role', 'menuitem');
+    b.className = it.value === current ? 'sel' : '';
+    b.innerHTML = it.html || '<span class="icon"></span>';
+    b.append(it.name);
+    b.onclick = () => { closePicker(); pick(it.value); };
+    box.append(b);
+  }
+  document.body.append(box);
+  const r = anchor.getBoundingClientRect();
+  box.style.left = Math.max(8, Math.min(r.left + scrollX, scrollX + innerWidth - box.offsetWidth - 8)) + 'px';
+  box.style.top = (r.bottom + scrollY + 4) + 'px';
+  (box.querySelector('.sel') || box.querySelector('button'))?.focus();   // start on the one playing
+  setTimeout(() => document.addEventListener('pointerdown', outside), 0);
+  document.addEventListener('keydown', onKey);
+}
+const outside = e => { if (!e.target.closest('#picker')) closePicker(); };
+const onKey = e => { if (e.key === 'Escape') closePicker(); };
+function closePicker(){
+  document.getElementById('picker')?.remove();
+  document.removeEventListener('pointerdown', outside); document.removeEventListener('keydown', onKey);
+}
+// a part's instrument, from the picker or the mixer
+function setKind(part, k){ mix[part].kind = k; refit(); draw(); if (ctx) setVoice(part); }
+const kindName = kind => ingredient(kind)?.label || kind;
+const edge = i => !i ? '' : i % G.bar === 0 ? ' bar' : G.pj[i] === 0 ? ' beat' : '';
+function draw(){
+  const g = $('grid'); g.innerHTML = '';
+  const rot = +$('rot').value;
+  countRow(g);
+  for (const v of VOICES){
+    const lab = document.createElement('div'); lab.className = 'lab';
+    const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: !muted[v.id], title: `mute the ${v.name}` });
+    cb.onchange = () => { muted[v.id] = !cb.checked; dim(v.id, !cb.checked); };
+    rowLabel(lab, cb, v.id, v.name, { vol: drumVol[v.id] ?? 1, setVol: x => { drumVol[v.id] = x; if (drumGain[v.id]) drumGain[v.id].gain.setTargetAtTime(x, ctx.currentTime, 0.05); } });
+    g.append(lab);
+    for (let i = 0; i < G.N; i++){
+      const s = (i + rot) % G.N, k = cells[v.id][s];       // columns show the cycle as heard, from the chosen start
+      const c = document.createElement('div');
+      c.className = 'cell drum' + (k !== '.' ? ' hit' : '') + edge(i) + (muted[v.id] ? ' muted' : ''); c.dataset.row = v.id;
+      if (k === 'X' && v.id === 'clap') c.innerHTML = CLAP; else c.textContent = k === '.' ? '' : k;
+      c.dataset.s = s;
+      c.onclick = () => { const order = ['.', ...v.strokes]; cells[v.id][s] = order[(order.indexOf(cells[v.id][s]) + 1) % order.length]; if (!patName.endsWith('(edited)')) patName += ' (edited)'; draw(); };
+      g.append(c);
+    }
+  }
+  for (const p of PARTS){
+    const m = mix[p.id]; if (!m.in) continue;
+    const lab = document.createElement('div'); lab.className = 'lab band';
+    const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: m.on, title: `mute the ${PART_SHORT[p.id]}` });
+    cb.onchange = () => { m.on = cb.checked; dim(p.id, !m.on); summary(); };
+    rowLabel(lab, cb, m.kind, `${PART_SHORT[p.id]}: ${kindName(m.kind)}`, {
+      part: p.id, vol: m.vol,
+      setVol: x => { m.vol = x; if (m.voice) m.voice.out.gain.setTargetAtTime(x, ctx.currentTime, 0.05); },
+      follows: p.follows ? m.follows : null });
+    g.append(lab);
+    for (let i = 0; i < G.N; i++){
+      const c = document.createElement('div'); c.className = 'cell band' + edge(i) + (m.on ? '' : ' muted'); c.dataset.col = i; c.dataset.part = p.id; c.dataset.row = p.id; g.append(c);
+    }
+  }
+  bandRows(); summary(); requestAnimationFrame(fitGrid);
+  $('text').innerHTML = 'As text: ' + VOICES.filter(v => cells[v.id].some(k => k !== '.'))
+    .map(v => `${v.name} <code>${Array.from({ length: G.bars }, (_, b) => cells[v.id].slice(b * G.bar, (b + 1) * G.bar).join('')).join(' ')}</code>`).join(' · ');
+}
+
+// ======================= fitting a tune =======================
+// A tune's beat is a dotted crotchet in compound time (6/8, 9/8, 12/8), else a note of the meter's
+// own (arrange.js grid). Each tune beat goes to `speed` rhythm beats, and inside a beat the tune's
+// time is bent onto the pulses: compound tunes' thirds onto the three pulses as they're timed; a
+// simple tune's halves left straight (two against three) or the second moved onto the third pulse
+// (long short, a jig's way).
+function shape(id){
+  const T = TUNES[id], P = tune(id);
+  const compound = T.meter[1] === 8 && T.meter[0] % 3 === 0;
+  const beatW = compound ? 3 / 8 : 1 / T.meter[1];                // a beat, in whole notes
+  const barW = T.meter[0] / T.meter[1];
+  const ph = P.phrases[P.form[0]], b0 = ph.bars.length ? ph.bars[0] : ph.notes.length;
+  let pick = ph.notes.slice(0, b0).reduce((a, n) => a + n.len, 0) * T.unit;
+  if (pick >= barW - 1e-9) pick = 0;                             // a full first bar is never a pick-up
+  return { T, P, compound, beatW, barW, pickBeats: pick / beatW, beatsPerBar: barW / beatW };
+}
+// 0..1 of a rhythm beat as the tune has it → 0..1 as it's played, read live (the pulses' timing)
+// a beat of z pulses: a compound tune's thirds onto three pulses; a simple tune's halves onto two
+// (swung as the pulses are), its quarters onto four, its halves onto three by the fit; the rest straight
+function warpFn(compound, speed){
+  return (f, z = 3) => {
+    if (speed !== 1) return f;
+    const fr = fracs(z);
+    const pts = compound ? (z === 3 ? [[0, 0], [1/3, fr[1]], [2/3, fr[2]], [1, 1]] : [[0, 0], [1, 1]])
+      : z === 2 ? [[0, 0], [0.5, fr[1]], [1, 1]]
+      : z === 4 ? [[0, 0], [0.25, fr[1]], [0.5, fr[2]], [0.75, fr[3]], [1, 1]]
+      : z === 3 && fit === 'swung' ? [[0, 0], [0.5, fr[2]], [1, 1]] : [[0, 0], [1, 1]];
+    for (let i = 1; i < pts.length; i++){
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+      if (f <= x1 + 1e-9) return y0 + (y1 - y0) * (f - x0) / (x1 - x0);
+    }
+    return 1;
+  };
+}
+// the tune and its parts laid out in rhythm beats, 0 its first full bar's head: tune, low, drone
+// ({ rb, len, midi }), chords ({ rb, len, pcs }), bells ({ rb, midi }); L, the beats of one time
+// round (a whole number of cycles); first, where its pick-up starts
+function melody(){
+  const id = $('tune').value, S = shape(id), s = schedule(id), speed = +$('speed').value;
+  const shift = +$('shift').value - 1;
+  const toBeats = sec => sec / S.P.unitSec * S.T.unit / S.beatW;   // seconds at the tune's tempo → its beats
+  const rbOf = sec => (toBeats(sec) - S.pickBeats) * speed + shift;
+  const lay = list => list.map(n => ({ ...n, rb: rbOf(n.t), len: toBeats(n.dur ?? n.len) * speed }));
+  const tuneNotes = lay(s.notes);
+  const total = (toBeats(s.length) - S.pickBeats) * speed + shift;
+  const L = Math.max(G.NB, Math.ceil(total / G.NB - 1e-6) * G.NB);
+  return { id, S, L, first: Math.min(0, ...tuneNotes.map(n => n.rb)), warp: warpFn(S.compound, speed),
+           tune: tuneNotes,
+           low: lay(partNotes(id, 'low', null, mix.low.kind).notes),
+           drone: lay(partNotes(id, 'drone', null, mix.drone.kind).notes),
+           chords: lay(chords(id)),
+           bells: lay(partNotes(id, 'bells').notes) };
+}
+// a tune's note onsets on the cycle's twelve pulses (or between them), and what the fit did
+function showFit(){
+  const m = melody(), S = m.S;
+  const hits = new Array(G.N).fill(0); let off = 0;
+  for (const n of m.tune){
+    const i0 = Math.floor(n.rb + 1e-9), z = G.size[bm(i0)], f = m.warp(n.rb - i0, z), fr = fracs(z);
+    let j = fr.findIndex(x => Math.abs(x - f) < 0.02), i = i0;
+    if (j < 0 && Math.abs(1 - f) < 0.02){ j = 0; i++; }           // a hair under the next beat's head
+    if (j < 0){ off++; continue; }
+    hits[G.start[bm(i)] + j]++;
+  }
+  const g = $('fitGrid'); g.innerHTML = '';
+  countRow(g);
+  g.append(Object.assign(document.createElement('div'), { className: 'lab', textContent: 'notes' }));
+  const top = Math.max(1, ...hits);
+  hits.forEach((h, i) => {
+    const c = document.createElement('div'); c.className = 'cell ro' + edge(i); c.dataset.s = i;
+    c.textContent = h || ''; if (h) c.style.background = `rgba(201,138,58,${0.15 + 0.7 * h / top})`;
+    g.append(c);
+  });
+  const speed = +$('speed').value;
+  $('offPulse').textContent = off ? `${off} of ${m.tune.length} notes start between pulses${S.compound || speed !== 1 ? ': quicker notes than the pulse, like a dotted figure\'s short note' : fit === 'straight' ? ': two against three, or quicker notes than the pulse' : ': quicker notes than the pulse'}.` : `All ${m.tune.length} notes start on a pulse.`;
+  const barsPerCycle = G.NB / (S.beatsPerBar * speed);
+  $('fitInfo').textContent = `${realName(m.id)}: ${S.T.meter.join('/')}, ${S.compound ? 'beats of three quavers' : `beats of a ${S.T.meter[1] === 8 ? 'quaver' : 'crotchet'}`}`
+    + (S.pickBeats ? `, a pick-up of ${+S.pickBeats.toFixed(2)} beat${S.pickBeats === 1 ? '' : 's'}` : '')
+    + `. ${barsPerCycle === 1 ? 'One bar' : `${+barsPerCycle.toFixed(2)} bars`} of it to each cycle`
+    + (Number.isInteger(barsPerCycle) || Number.isInteger(1 / barsPerCycle) ? '' : ', so its bars drift across the cycle')
+    + `; once through is ${m.L / G.NB} cycle${m.L === G.NB ? '' : 's'}.`
+    + (S.compound || speed !== 1 || !G.size.includes(3) ? '' : fit === 'swung' ? ' Quavers swung long short, as the pulses are timed.' : ' Quavers straight, two against the rhythm\'s three.');
+  document.querySelectorAll('[data-fit]').forEach(b => { b.classList.toggle('sel', b.dataset.fit === fit); b.disabled = S.compound || !G.size.includes(3); });
+  summary();
+}
+
+// ======================= controls =======================
+// a chooser's list: each option its name and a line of info; choosing one closes the dropdown
+function fillOpts(box, items, pick){
+  box.innerHTML = '';
+  for (const it of items){
+    if (it.header){ box.append(Object.assign(document.createElement('div'), { className: 'opt-h', textContent: it.header })); continue; }
+    const b = document.createElement('button'); b.className = 'opt'; b.dataset.value = it.value; b.setAttribute('role', 'option');
+    b.innerHTML = (it.icon || '') + '<span class="txt"><span class="name"></span><span class="info"></span></span>';
+    b.querySelector('.name').textContent = it.name; b.querySelector('.info').textContent = it.info || '';
+    b.title = it.info || '';
+    b.onclick = () => { pick(it.value); closeDropdown(); };
+    box.append(b);
+  }
+}
+// The tunes' real names, for this bench only: the game gives them Lea names and keeps the real ones
+// out (tunes.js). From docs/texts/tunes.md; the two Benedicamus are told apart by manuscript.
+const REAL = {
+  'the little star': 'Ah! vous dirai-je, maman', 'the sleeping brother': 'Frère Jacques', 'the flowering time': 'Tempus adest floridum',
+  'the old cup': 'Auld Lang Syne', "the boatman's song": 'Drunken Sailor', 'the lady in green': 'Greensleeves',
+  'the washerwoman': 'The Irish Washerwoman', 'the blossom': 'Sakura Sakura',
+  'the round of mercy': 'Kyrie Rondello', 'the closing blessing': 'Benedicamus Domino (Vatican)', 'the dancing blessing': 'Benedicamus Domino (Padua)',
+  'the dearer you are': 'Landini, Quanto più caro fay', "the rider's song": 'Piero, Chavalcando con un giovine', 'where my spirit goes': "Landini, A le' s'andrà lo spirto",
+  'long fortune': "Fortuna d'un gran tempo", 'the slow trio': 'Corelli, Trio Sonata op. 3 no. 1: Grave',
+  'west through the pass': 'Zou xikou (走西口)', 'the old man': 'Ga laohan (尕老汉)',
+  'the rocking air': 'Bach, Siciliano (BWV 1031)', 'slow and sorrowful': 'Satie, Gymnopédie no. 1',
+};
+const realName = id => REAL[id] || id;
+const markOpt = (box, value) => box.querySelectorAll('.opt').forEach(b => b.classList.toggle('sel', b.dataset.value === String(value)));
+// The tunes by how their meter meets the rhythm's: the same meter; the same kind of beat (in threes,
+// or not) with whole bars to the cycle; the other kind, bars still filling it; bars that drift.
+// Cycle songs plays the first of the first two sections that has any.
+function tuneGroups(){
+  const pm = curPat.meter.join('/'), groups = [
+    { header: `In ${pm}, like the rhythm`, ids: [], rotate: true },
+    { header: G.threes ? 'Other beats of three: bars fill the cycle' : 'Simple time: bars fill the cycle', ids: [], rotate: true },
+    { header: G.threes ? 'Simple time: bars fill the cycle, quavers swung or straight' : 'Beats of three, a beat to each of the rhythm\'s: bars fill the cycle', ids: [] },
+    { header: 'Its bars drift across the cycle', ids: [] },
+  ];
+  for (const id of TUNE_IDS){
+    const S = shape(id), m = TUNES[id].meter.join('/');
+    const fills = G.NB % S.beatsPerBar === 0 || S.beatsPerBar % G.NB === 0;
+    groups[m === pm ? 0 : !fills ? 3 : S.compound === G.threes ? 1 : 2].ids.push(id);
+  }
+  return groups;
+}
+function listTunes(){
+  if (!$('tunes') || !curPat) return;
+  fillOpts($('tunes'), tuneGroups().filter(g => g.ids.length).flatMap(g => [{ header: g.header },
+    ...g.ids.map(id => ({ value: id, name: realName(id), info: `${TUNES[id].meter.join('/')} · in the Lea, “${id}”` }))]),
+    id => { $('tune').value = id; $('tune').onchange(); });
+  markOpt($('tunes'), $('tune').value);
+}
+// the dropdowns: one open at a time, floating over the grid; Escape, a click outside, or its button closes it
+let openDD = null;
+function openDropdown(id){
+  if (openDD && openDD !== id) closeDropdown();
+  const dd = document.querySelector(`.dd[data-dd="${id}"]`), panel = dd.querySelector('.dd-panel');
+  openDD = id; dd.classList.add('open'); dd.querySelector('.dd-btn').setAttribute('aria-expanded', 'true');
+  panel.hidden = false; panel.style.left = '0px';
+  const r = panel.getBoundingClientRect(), over = r.right - (innerWidth - 16);   // kept inside the window
+  if (over > 0) panel.style.left = Math.max(-(r.left - 16), -over) + 'px';
+  if (id === 'melody-adv') showFit();
+  (panel.querySelector('.opt.sel') || panel.querySelector('.opt'))?.focus();
+}
+function closeDropdown(){
+  if (!openDD) return;
+  const dd = document.querySelector(`.dd[data-dd="${openDD}"]`);
+  dd.classList.remove('open'); dd.querySelector('.dd-btn').setAttribute('aria-expanded', 'false');
+  dd.querySelector('.dd-panel').hidden = true; openDD = null;
+}
+document.querySelectorAll('.dd').forEach(dd => dd.querySelector('.dd-btn').onclick = () =>
+  openDD === dd.dataset.dd ? closeDropdown() : openDropdown(dd.dataset.dd));
+document.addEventListener('pointerdown', e => { if (openDD && !e.target.closest('.dd, #picker')) closeDropdown(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && openDD && !document.getElementById('picker')) closeDropdown(); });
+// what each closed dropdown says: its settings at a glance
+let patName = '';
+const LEAN_NAME = { 0: 'even', '-100': 'short short long', 100: 'long short short' };
+const SPEED_NAME = { 1: '×1', 0.5: '×2', 2: '×½' };
+// Each summary holds every name it could show, invisible and stacked in one grid cell, so the
+// button is as wide as its widest option and doesn't jump when the choice changes.
+function setSum(k, text){
+  const box = $('sum-' + k); let cur = box.querySelector('.cur');
+  if (!cur){ cur = document.createElement('span'); cur.className = 'cur'; box.prepend(cur); }
+  cur.textContent = text; box.dataset.hint = text;
+}
+function ghosts(k, names){
+  const box = $('sum-' + k); box.querySelectorAll('.ghost').forEach(g => g.remove());
+  for (const n of names){ const g = document.createElement('span'); g.className = 'ghost'; g.setAttribute('aria-hidden', 'true'); g.textContent = n; box.append(g); }
+}
+function summary(){
+  if (!document.getElementById('sum-rhythm')) return;
+  const lean = +$('lean').value, rot = +$('rot').value;
+  setSum('rhythm', patName);
+  $('gear-rhythm').classList.toggle('changed', lean !== 0 || rot !== 0 || feel !== '');
+  $('gear-rhythm').dataset.hint = 'Rhythm: details · ' + [LEAN_NAME[lean] || fracs().map((f, i, a) => Math.round(((a[i + 1] ?? 1) - f) * 100)).join('/'), rot ? `from pulse ${rot + 1}` : '', feel ? 'counting along' : ''].filter(Boolean).join(' · ');
+  markOpt($('pats'), patName.replace(/ \(edited\)$/, ''));
+  const id = $('tune').value;
+  if (id && TUNES[id]){
+    const S = shape(id), sh = +$('shift').value, sp = +$('speed').value;
+    setSum('melody', realName(id));
+    $('gear-melody').classList.toggle('changed', sp !== 1 || sh !== 1 || (!S.compound && fit !== 'swung'));
+    $('gear-melody').dataset.hint = 'Melody: details · ' + [S.compound ? '' : fit, SPEED_NAME[sp], sh > 1 ? `on beat ${sh}` : ''].filter(Boolean).join(' · ');
+    markOpt($('tunes'), id);
+  }
+  setSum('arrangement', ARRANGEMENTS.find(a => a.id === arrangement)?.name ?? '');
+  markOpt($('arrs'), arrangement);
+  $('sum-room').innerHTML = roomIcon(room);
+  const rb = document.querySelector('.dd[data-dd=room] .dd-btn'); rb.dataset.hint = `Room: ${room}`; rb.setAttribute('aria-label', `Room: ${room}`); rb.removeAttribute('aria-labelledby');
+  setSum('entry', ENTRIES.find(e => e.value === entry).name); markOpt($('entries'), entry);
+  setSum('tempo', $('tempo').value);
+  markOpt($('rooms'), room);
+}
+function playLabel(){
+  $('play').classList.toggle('playing', playing); $('play').setAttribute('aria-label', playing ? 'Stop' : 'Play'); $('play').dataset.hint = playing ? 'Stop' : 'Play';
+}
+let entry = 'cycle';
+const ENTRIES = [
+  { value: 'all', name: 'all at once', info: 'the drums start, and the band with them' },
+  { value: 'one', name: 'one at a time', info: 'two cycles of drums, then a part a cycle' },
+  { value: 'cycle', name: 'cycle songs', info: 'one tune after another: every tune in the rhythm\'s meter, or else the nearest fit' },
+];
+fillOpts($('entries'), ENTRIES, v => { entry = v; summary(); });
+
+fillOpts($('pats'), METERS.flatMap(({ m, about }) => {
+  const ps = PATTERNS.filter(p => p.meter.join('/') === m && p.name !== 'empty');
+  return ps.length ? [{ header: `${m} · ${about}` }, ...ps.map(p => ({ value: p.name, name: p.name, info: `${p.info} · ${KITS[p.kit || 'maghreb'].name}` }))] : [];
+}).concat([{ header: 'Your own' }, ...PATTERNS.filter(p => p.name === 'empty').map(p => ({ value: p.name, name: p.name, info: p.info }))]),
+  name => load(PATTERNS.find(p => p.name === name)));
+$('play').onclick = () => playing ? stop() : start();
+function labels(){
+  $('tempoV').textContent = `${$('tempo').value} beats a minute (${$('tempo').value * G.base} pulses)`;
+  $('leanV').textContent = fracs().map((f, i, a) => Math.round(((a[i + 1] ?? 1) - f) * 100)).join(' / ') + ' %';
+  $('rotV').textContent = $('rot').value === '0' ? '1 (as written)' : `${+$('rot').value + 1}`;
+  summary();
+}
+const moved = () => { labels(); if (openDD === 'melody-adv') showFit(); };   // tempo and timing are read live
+$('tempo').oninput = moved; $('lean').oninput = moved;
+$('rot').oninput = () => { labels(); draw(); };
+document.querySelectorAll('[data-lean]').forEach(b => b.onclick = () => { $('lean').value = b.dataset.lean; moved(); });
+document.querySelectorAll('[data-feel]').forEach(b => b.onclick = () => {
+  feel = b.dataset.feel; document.querySelectorAll('[data-feel]').forEach(x => x.classList.toggle('sel', x === b)); summary();
+});
+document.querySelector('[data-feel=""]').classList.add('sel');
+
+// the melody tab
+for (const id of TUNE_IDS) $('tune').append(Object.assign(document.createElement('option'), { value: id, textContent: id }));
+$('tune').value = 'the lady in green';
+listTunes();
+document.querySelectorAll('[data-fit]').forEach(b => b.onclick = () => { fit = b.dataset.fit; refit(); showFit(); });
+$('shift').onchange = () => { refit(); showFit(); };
+$('tune').onchange = $('speed').onchange = () => { newTune(); showFit(); };
+$('ownTempo').onclick = () => {                                   // the tune's crotchets a minute, as rhythm beats
+  const S = shape($('tune').value), bpm = S.T.bpm * (1 / 4) / S.beatW / +$('speed').value;
+  $('tempo').value = Math.round(bpm); moved();
+};
+
+// the arrangement tab: the arrangements, and a mixer of parts
+let KINDS = [];
+function setArrangement(id){
+  arrangement = id;
+  const A = ARRANGEMENTS.find(a => a.id === id);
+  for (const p of PARTS){ mix[p.id].in = mix[p.id].on = p.id in A.parts; if (A.parts[p.id]) mix[p.id].kind = A.parts[p.id]; }
+  draw(); refit();
+  if (ctx) for (const p of PARTS) if (mix[p.id].voice?.kind !== mix[p.id].kind) setVoice(p.id);
+}
+fillOpts($('arrs'), ARRANGEMENTS.map(A => ({ value: A.id, name: A.name, info: A.info })), setArrangement);
+$('arrs').querySelectorAll('.opt').forEach(b => { b.title = ARRANGEMENTS.find(A => A.id === b.dataset.value).about; });
+
+// the room tab
+const ROOM_ABOUT = { open: 'Out on the Lea: nearly dry, the wind in the leaves.', crypt: 'A crypt: stone that rings for a couple of seconds.',
+                     cave: 'A cave: a long ring, your notes given back off the far walls, water dripping in the dark.', palace: 'A Faerie palace: long and bright.' };
+// a room as a little drawing: out on the Lea, a crypt's arches, a cave's mouth, a palace's towers
+const ROOM_ICON = {
+  open:   '<path d="M2 18 Q8 11 13 15 T22 14"/><circle cx="16.5" cy="7" r="2.8"/><path d="M2 20.5 H22"/>',
+  crypt:  '<path d="M5 20.5 V10 A7 7 0 0 1 19 10 V20.5"/><path d="M9.5 20.5 V13.5 A2.5 2.5 0 0 1 14.5 13.5 V20.5"/><path d="M3 20.5 H21"/>',
+  cave:   '<path d="M2 20.5 L6 10 L9.5 12.5 L13 5 L17 11 L22 20.5"/><path d="M8 20.5 Q12 12 16 20.5"/><path d="M2 20.5 H22"/>',
+  palace: '<path d="M3.5 20.5 V9 L5.5 6 L7.5 9 V20.5 M16.5 20.5 V9 L18.5 6 L20.5 9 V20.5 M7.5 20.5 V12 H16.5 V20.5"/><path d="M10 20.5 V16.5 A2 2 0 0 1 14 16.5 V20.5"/><path d="M12 12 V6 L15 7 L12 8"/><path d="M2 20.5 H22"/>',
+};
+const roomIcon = name => `<svg class="roomicon" viewBox="0 0 24 24" aria-hidden="true">${ROOM_ICON[name] || ''}</svg>`;
+function setRoom(name){
+  room = name; inst.setRoom(name);
+  summary();
+}
+fillOpts($('rooms'), Object.keys(ROOMS).map(name => ({ value: name, name, info: ROOM_ABOUT[name] || '', icon: roomIcon(name) })), setRoom);
+
+function hintOf(el){
+  const h = el?.closest?.('[title], [data-hint]'); if (!h) return '';
+  if (h.hasAttribute('title')){ if (h.title && !h.dataset.hint) h.dataset.hint = h.title; h.removeAttribute('title'); }
+  return h.dataset.hint || '';
+}
+const showHint = text => { $('hintbar').textContent = text; $('hintbar').classList.toggle('on', !!text); };
+document.addEventListener('pointerover', e => showHint(hintOf(e.target)));
+document.addEventListener('focusin', e => showHint(hintOf(e.target)));
+document.addEventListener('pointerleave', () => showHint(''));
+// for headless checks: what's been heard, and the tune as laid out
+window.__bench = { heard, mel: () => mel, cells: () => cells, amb, fitGrid };
+labels(); load(PATTERNS.find(p => p.name === 'chaabi, a two-bar cycle')); setRoom('palace'); playLabel();
+fetch('instruments/instruments.json').then(r => r.json()).then(bank => {
+  KINDS = Object.keys(bank).filter(k => !bank[k].perc);
+  setArrangement('plain');
+});
+ghosts('rhythm', PATTERNS.flatMap(p => [p.name, p.name + ' (edited)']));
+ghosts('melody', TUNE_IDS.map(realName));
+ghosts('arrangement', ARRANGEMENTS.map(a => a.name));
+ghosts('entry', ENTRIES.map(e => e.name));
+ghosts('tempo', [$('tempo').min, $('tempo').max]);
+showFit(); summary();
+</script>
+</body></html>
