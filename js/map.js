@@ -7,6 +7,8 @@
 import { SIZE, WATER } from './config.js';
 import { height, habitat, HABITATS, settlements, ruins, under } from './gen/land.js';
 import { places, placeAt, settlementNames, ruinNames, underNames } from './gen/places.js';
+import { placeSign } from './place-sign.js';
+import { makeSight } from './sight.js';
 const TOUCH = document.documentElement.classList.contains('touch');
 
 const WATER_RGB = [47, 109, 176];
@@ -19,6 +21,8 @@ const FONT = "Georgia,'Times New Roman',serif";
 const LANE_RGB = '#d98a4a', BUILT_RGB = '#3a2414', BUILT_NAME = '#f4b27a';
 // the ruins: older than anyone's building, in stone grey
 const RUIN_RGB = '#a39e92', RUIN_NAME = '#c9c4b8';   // light, so the walls read apart from the dark buildings
+// the land you haven't seen
+const UNSEEN = '#0d0c09', SIGHT_MOVE = 3;   // look again after moving this far (world units)
 
 // one pixel of land: habitat colour, lit from the north-west
 function landRGB(x, z){
@@ -57,13 +61,11 @@ function label(ctx, text, x, y, size, color = '#f3e7c4'){
 }
 const overlaps = (a, list) => list.some(b => a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0);
 
-// The settlements on a map (gen/settle.js): lanes as lines, buildings as their
-// footprints once they're big enough to see, and the names — settlements first,
-// then a lane's name beside it where the lane is long enough on screen to carry
-// it. `px` is screen pixels per world unit. Pushes the name boxes into `boxes`,
-// so the region names drawn after keep clear of them.
-function drawSettlements(ctx, toScreen, px, boxes, inView){
-  const S = settlements(), names = settlementNames(), lw = Math.max(1.5, Math.min(4, 3.2 * px));
+// The settlements on a map (gen/settle.js), in two layers either side of the
+// darkness. Under it: lanes as lines, buildings as their footprints once they're
+// big enough to see. `px` is screen pixels per world unit.
+function drawSettlementShapes(ctx, toScreen, px){
+  const S = settlements(), lw = Math.max(1.5, Math.min(4, 3.2 * px));
   ctx.lineCap = 'round'; ctx.lineJoin = 'round';
   for (const [w, c] of [[lw + 2, 'rgba(12,10,6,.7)'], [lw, LANE_RGB]]){
     ctx.lineWidth = w; ctx.strokeStyle = c;
@@ -76,7 +78,7 @@ function drawSettlements(ctx, toScreen, px, boxes, inView){
   }
   if (px > 0.25){
     ctx.fillStyle = BUILT_RGB;
-    for (const b of S.buildings){
+    for (const b of S.buildings.flatMap(o => [o, ...(o.parts || [])])){
       const lx = Math.cos(b.a), lz = Math.sin(b.a), cx = -lz, cz = lx;
       ctx.beginPath();
       for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]){
@@ -86,7 +88,14 @@ function drawSettlements(ctx, toScreen, px, boxes, inView){
       ctx.fill();
     }
   }
+}
+// Over it: the names of what you've seen — settlements first, then a lane's name
+// beside it where the lane is long enough on screen to carry it. Pushes the name
+// boxes into `boxes`, so the region names drawn after keep clear of them.
+function drawSettlementNames(ctx, toScreen, px, boxes, inView, seen){
+  const S = settlements(), names = settlementNames();
   const put = (text, x, z, fs, dy = 0) => {
+    if (!seen(x, z)) return;
     let [sx, sy] = toScreen(x, z); sy += dy;
     if (!inView(sx, sy)) return;
     ctx.font = `italic ${fs}px ${FONT}`;
@@ -104,27 +113,35 @@ function drawSettlements(ctx, toScreen, px, boxes, inView){
   }
 }
 
-// The ruins on a map (gen/ruins.js): their walls and stones as footprints once
-// they're big enough to see, a small grey mark when not, and their names.
-function drawRuins(ctx, toScreen, px, boxes, inView){
+// The ruins on a map (gen/ruins.js), the same way. Under the darkness: their walls
+// and stones as footprints, once they're big enough to see.
+function drawRuinShapes(ctx, toScreen, px, inView){
+  if (px <= 0.5) return;
+  ctx.fillStyle = RUIN_RGB;
+  for (const ru of ruins()){
+    const [cx, cy] = toScreen(ru.x, ru.z);
+    if (!inView(cx, cy)) continue;
+    for (const o of [...ru.pieces, ...ru.stones]){
+      if (o.block) continue;
+      const lx = Math.cos(o.a), lz = Math.sin(o.a), qx = -lz, qz = lx, hw = Math.max(o.hw, 0.6 / px);
+      ctx.beginPath();
+      for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]){
+        const [sx, sy] = toScreen(o.x + lx * u * o.hl + qx * v * hw, o.z + lz * u * o.hl + qz * v * hw);
+        ctx.lineTo(sx, sy);
+      }
+      ctx.fill();
+    }
+  }
+}
+// Over it: a small grey mark when they're too small to draw, and their names.
+function drawRuinNames(ctx, toScreen, px, boxes, inView, seen){
   const names = ruinNames();
   ruins().forEach((ru, i) => {
+    if (!seen(ru.x, ru.z)) return;
     const [cx, cy] = toScreen(ru.x, ru.z);
     if (!inView(cx, cy)) return;
-    ctx.fillStyle = RUIN_RGB;
-    if (px > 0.5){
-      for (const o of [...ru.pieces, ...ru.stones]){
-        if (o.block) continue;
-        const lx = Math.cos(o.a), lz = Math.sin(o.a), qx = -lz, qz = lx, hw = Math.max(o.hw, 0.6 / px);
-        ctx.beginPath();
-        for (const [u, v] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]){
-          const [sx, sy] = toScreen(o.x + lx * u * o.hl + qx * v * hw, o.z + lz * u * o.hl + qz * v * hw);
-          ctx.lineTo(sx, sy);
-        }
-        ctx.fill();
-      }
-    } else {
-      ctx.strokeStyle = RUIN_NAME; ctx.lineWidth = 1;
+    if (px <= 0.5){
+      ctx.fillStyle = RUIN_RGB; ctx.strokeStyle = RUIN_NAME; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.rect(cx - 2.5, cy - 2.5, 5, 5); ctx.fill(); ctx.stroke();
     }
     const fs = 10, dy = -Math.max(9, (ru.labelR || ru.rad) * px + 6);
@@ -139,9 +156,10 @@ function drawRuins(ctx, toScreen, px, boxes, inView){
 // dark square with its steps. One under a ruin goes unnamed, the ruin's name being
 // beside it; a cave or a country tomb is named.
 const WAY_RGB = '#1a1612', WAY_EDGE = '#e8c75a';
-export function drawWaysDown(ctx, toScreen, px, boxes, inView){
+export function drawWaysDown(ctx, toScreen, px, boxes, inView, seen){
   const names = underNames(), levels = under().levels;
   for (const e of under().entrances){
+    if (!seen(e.x, e.z)) continue;
     const [cx, cy] = toScreen(e.x, e.z);
     if (!inView(cx, cy)) continue;
     const s = Math.max(4, Math.min(7, 3 * px + 3));
@@ -169,7 +187,32 @@ function arrow(ctx, x, y, rot){
   ctx.fill(); ctx.stroke(); ctx.restore();
 }
 
+// ink over everything outside the world's square (x0, y0, w, h), which the land tiles spill past
+function inkOutside(ctx, x0, y0, w, h, far){
+  ctx.fillStyle = UNSEEN;
+  ctx.fillRect(x0 - far, y0 - far, w + 2 * far, far); ctx.fillRect(x0 - far, y0 + h, w + 2 * far, far);
+  ctx.fillRect(x0 - far, y0, far, h); ctx.fillRect(x0 + w, y0, far, h);
+}
+
 export function createMaps({ mini, nameEl, drawMarks }){
+  const sign = placeSign(nameEl);
+  // ---------- what you've seen of the land (js/sight.js) ----------
+  // The darkness is one canvas, a pixel a cell, with a hole cleared wherever you've
+  // seen. Drawn smoothed over the land, so its edge is soft whatever the zoom.
+  const veil = document.createElement('canvas');
+  const vctx = veil.getContext('2d');
+  const sight = makeSight({ size: SIZE, height, water: WATER, onSee: (i, j) => vctx.clearRect(i, j, 1, 1) });
+  veil.width = veil.height = sight.N;
+  vctx.fillStyle = UNSEEN; vctx.fillRect(0, 0, sight.N, sight.N);
+  const seen = sight.seen, been = new Set();           // the regions you've stood in keep their names, wherever their middles lie
+  let lastLook = null;
+  function see(x, z, eye){
+    if (lastLook && Math.hypot(x - lastLook.x, z - lastLook.z) < SIGHT_MOVE && Math.abs(eye - lastLook.eye) < 1) return;
+    lastLook = { x, z, eye };
+    sight.look(x, z, eye);
+  }
+  const named = g => seen(g.x, g.z) || been.has(g);
+
   // ---------- underground (gen/under.js) ----------
   // While you're down a cave or a crypt, both maps show that level instead of
   // the land: only the cells you've come near, the way Might and Magic's
@@ -181,7 +224,7 @@ export function createMaps({ mini, nameEl, drawMarks }){
     const cv = document.createElement('canvas'); cv.width = L.W; cv.height = L.H;
     level = { L, name, cv, ctx: cv.getContext('2d') };
     for (let k = 0; k < L.W * L.H; k++) if (L.revealed[k]) paintCell(k);
-    nameEl.classList.remove('hide', 'fade'); clearTimeout(nameEl._t); nameEl.textContent = name;
+    sign.show(name, 0);
   }
   function paintCell(k){
     const { L, ctx } = level, i = k % L.W, j = (k / L.W) | 0;
@@ -232,12 +275,10 @@ export function createMaps({ mini, nameEl, drawMarks }){
   let current = null;
   function updatePlace(px, pz){
     const g = placeAt(px, pz);
+    been.add(g);
     if (g === current) return g;
-    nameEl.classList.remove('hide');                 // first call: play has begun
     current = g;
-    nameEl.classList.add('fade');                     // fade out, swap, fade in
-    clearTimeout(nameEl._t);
-    nameEl._t = setTimeout(() => { nameEl.textContent = g.name; nameEl.classList.remove('fade'); }, nameEl.textContent ? 350 : 0);
+    sign.show(g.name);
     return g;
   }
 
@@ -264,13 +305,26 @@ export function createMaps({ mini, nameEl, drawMarks }){
         if (t) mctx.drawImage(t, i * TILE, j * TILE, TILE, TILE);
       }
     mctx.restore();
+    const inMini = (sx, sy) => Math.hypot(sx - C, sy - C) < C - 14;
+    drawSettlementShapes(mctx, toScreen, scale);
+    drawRuinShapes(mctx, toScreen, scale, inMini);
+    // the darkness, over the land and what's built on it: only the part in reach
+    mctx.save();
+    mctx.translate(C, C); mctx.rotate(yaw); mctx.scale(scale, scale); mctx.translate(-px, -pz);
+    const cw = SIZE / sight.N;
+    const i0 = Math.max(0, Math.floor((px - reach + SIZE / 2) / cw)), i1 = Math.min(sight.N, Math.ceil((px + reach + SIZE / 2) / cw));
+    const j0 = Math.max(0, Math.floor((pz - reach + SIZE / 2) / cw)), j1 = Math.min(sight.N, Math.ceil((pz + reach + SIZE / 2) / cw));
+    if (i1 > i0 && j1 > j0) mctx.drawImage(veil, i0, j0, i1 - i0, j1 - j0, i0 * cw - SIZE / 2, j0 * cw - SIZE / 2, (i1 - i0) * cw, (j1 - j0) * cw);
+    inkOutside(mctx, -SIZE / 2, -SIZE / 2, SIZE, SIZE, 2 * reach);
+    mctx.restore();
     const boxes = [];
-    drawSettlements(mctx, toScreen, scale, boxes, (sx, sy) => Math.hypot(sx - C, sy - C) < C - 14);
-    drawRuins(mctx, toScreen, scale, boxes, (sx, sy) => Math.hypot(sx - C, sy - C) < C - 14);
-    drawWaysDown(mctx, toScreen, scale, boxes, (sx, sy) => Math.hypot(sx - C, sy - C) < C - 14);
-    drawMarks(mctx, toScreen);
+    drawSettlementNames(mctx, toScreen, scale, boxes, inMini, seen);
+    drawRuinNames(mctx, toScreen, scale, boxes, inMini, seen);
+    drawWaysDown(mctx, toScreen, scale, boxes, inMini, seen);
+    drawMarks(mctx, toScreen, seen);
     // names of the places whose heart is in view
     for (const g of places()){
+      if (!named(g) || g.town != null) continue;        // a town's name is drawn at the town
       const [sx, sy] = toScreen(g.x, g.z);
       if (Math.hypot(sx - C, sy - C) > C - 14) continue;
       mctx.font = `italic 11px ${FONT}`;
@@ -298,6 +352,18 @@ export function createMaps({ mini, nameEl, drawMarks }){
   // choosing a place (the Teleport spell): the world is shown even from underground,
   // and a click — not a drag — picks the spot
   let picking = null;
+  // ...or only among these places (the Town Portal spell): [{ x, z, name, kind }], ringed on the map
+  let pickFrom = null, pickHover = null;
+  const PICK_REACH = 44;                              // css px from a ring that still chooses it
+  function pickAt(cssX, cssY){
+    const d = DPR();
+    let best = null, bd = PICK_REACH;
+    for (const t of pickFrom || []){
+      const [sx, sy] = toBig(t.x, t.z), r = Math.hypot(sx / d - cssX, sy / d - 10 - cssY);   // between the ring and the name
+      if (r < bd){ bd = r; best = t; }
+    }
+    return best;
+  }
   const HINT = TOUCH ? 'pinch to zoom · drag to move' : 'M or Esc to close · scroll to zoom · drag to move';
   const showLevel = () => level && !picking;
   const DPR = () => Math.min(2, window.devicePixelRatio || 1);
@@ -340,20 +406,38 @@ export function createMaps({ mini, nameEl, drawMarks }){
           bctx.drawImage(t, sx, sy, TILE * view.z, TILE * view.z);
         }
     }
-    bctx.strokeStyle = 'rgba(201,162,58,.5)'; bctx.lineWidth = d;
-    bctx.strokeRect(x0, y0, SIZE * view.z, SIZE * view.z);
     bctx.save(); bctx.scale(d, d);
     const toB = (x, z) => { const [sx, sy] = toBig(x, z); return [sx / d, sy / d]; };
+    const inBig = (sx, sy) => sx > -80 && sy > -20 && sx < W / d + 80 && sy < H / d + 20;
+    drawSettlementShapes(bctx, toB, view.z / d);
+    drawRuinShapes(bctx, toB, view.z / d, inBig);
+    // the darkness, over the land and what's built on it
+    const bx = x0 / d, by = y0 / d, bs = SIZE * view.z / d;
+    bctx.imageSmoothingEnabled = true;
+    bctx.drawImage(veil, bx, by, bs, bs);
+    inkOutside(bctx, bx, by, bs, bs, Math.max(W, H) / d + bs);
+    bctx.strokeStyle = 'rgba(201,162,58,.5)'; bctx.lineWidth = 1;
+    bctx.strokeRect(bx, by, bs, bs);
     const boxes = [];
-    drawSettlements(bctx, toB, view.z / d, boxes, (sx, sy) => sx > -80 && sy > -20 && sx < W / d + 80 && sy < H / d + 20);
-    drawRuins(bctx, toB, view.z / d, boxes, (sx, sy) => sx > -80 && sy > -20 && sx < W / d + 80 && sy < H / d + 20);
-    drawWaysDown(bctx, toB, view.z / d, boxes, (sx, sy) => sx > -80 && sy > -20 && sx < W / d + 80 && sy < H / d + 20);
-    drawMarks(bctx, toB);
+    drawSettlementNames(bctx, toB, view.z / d, boxes, inBig, seen);
+    drawRuinNames(bctx, toB, view.z / d, boxes, inBig, seen);
+    drawWaysDown(bctx, toB, view.z / d, boxes, inBig, seen);
+    drawMarks(bctx, toB, seen);
+    for (const t of pickFrom || []){
+      // clear of its name: that sits on a village or hamlet, and just above a farmstead
+      const [sx, py] = toB(t.x, t.z), sy = py + (t.kind === 'farmstead' ? 8 : -19), on = t === pickHover;
+      boxes.push({ x0: sx - 12, x1: sx + 12, y0: sy - 12, y1: sy + 12 });        // the region names keep clear
+      bctx.beginPath(); bctx.arc(sx, sy, on ? 10 : 8, 0, Math.PI * 2);
+      if (on){ bctx.fillStyle = 'rgba(232,199,90,.4)'; bctx.fill(); }
+      bctx.lineWidth = 3; bctx.strokeStyle = 'rgba(13,12,9,.75)'; bctx.stroke();
+      bctx.lineWidth = on ? 2 : 1.5; bctx.strokeStyle = '#e8c75a'; bctx.stroke();
+    }
     // names, biggest places first; a name that would overlap one already
     // drawn waits for you to zoom in
     const here = placeAt(player.x, player.z);
     const list = [...places()].sort((a, b) => (b === here) - (a === here) || b.area - a.area);
     for (const g of list){
+      if (!named(g) || g.town != null) continue;        // a town's name is drawn at the town
       let [sx, sy] = toBig(g.x, g.z); sx /= d; sy /= d;
       if (sx < -80 || sy < -20 || sx > W / d + 80 || sy > H / d + 20) continue;
       const fs = g.kind === 'greatlake' ? 16 : g.area > 40000 ? 13 : 11;
@@ -387,7 +471,7 @@ export function createMaps({ mini, nameEl, drawMarks }){
     view = { cx: 0, cz: 0, z: fit };
     drawBig();
   }
-  function closeBig(){ open = false; wrap.classList.add('hide'); drag = null; picking = null; hint.textContent = HINT; big.style.cursor = ''; }
+  function closeBig(){ open = false; wrap.classList.add('hide'); drag = null; picking = null; pickFrom = null; pickHover = null; hint.textContent = HINT; big.style.cursor = ''; }
   // pick(cb, x, z, yaw): open the world map for choosing a spot; cb(x, z) on a click
   function pick(cb, px, pz, yaw){
     picking = cb;
@@ -395,6 +479,18 @@ export function createMaps({ mini, nameEl, drawMarks }){
     hint.textContent = TOUCH ? 'Tap where you would go · pinch to zoom · drag to move' : 'Click where you would go · scroll to zoom · drag to move · Esc to cancel';
     big.style.cursor = 'crosshair';
   }
+  // pickPlace(list, cb, x, z, yaw): the same, but only a place in the list can be chosen; cb(place)
+  function pickPlace(list, cb, px, pz, yaw){
+    picking = cb; pickFrom = list;
+    openBig(px, pz, yaw);
+    hint.textContent = TOUCH ? 'Tap a town · pinch to zoom · drag to move' : 'Click a town · scroll to zoom · drag to move · Esc to cancel';
+  }
+  big.addEventListener('pointermove', e => {
+    if (!pickFrom || drag || e.pointerType === 'touch') return;
+    const t = pickAt(e.offsetX, e.offsetY);
+    if (t === pickHover) return;
+    pickHover = t; big.style.cursor = t ? 'pointer' : ''; drawBig();
+  });
   big.addEventListener('wheel', e => {
     e.preventDefault();
     const d = DPR(), mx = e.offsetX * d, my = e.offsetY * d;
@@ -434,6 +530,11 @@ export function createMaps({ mini, nameEl, drawMarks }){
     drag = null;
     if (!click || !picking) return;
     const d = DPR(), cb = picking;
+    if (pickFrom){                                    // a click away from every town keeps the map open
+      const t = pickAt(e.offsetX, e.offsetY);
+      if (t){ closeBig(); cb(t); }
+      return;
+    }
     const wx = view.cx + (e.offsetX * d - big.width / 2) / view.z, wz = view.cz + (e.offsetY * d - big.height / 2) / view.z;
     closeBig();
     cb(wx, wz);
@@ -441,8 +542,11 @@ export function createMaps({ mini, nameEl, drawMarks }){
   addEventListener('resize', () => { if (open){ const r = view.z / fit; size(); view.z = fit * r; clampView(); drawBig(); } });
 
   return {
-    updatePlace, drawMini, openBig, closeBig, setLevel, reveal, pick,
-    // the whole level at once (the Wizard Eye spell)
+    updatePlace, drawMini, openBig, closeBig, setLevel, reveal, pick, pickPlace, see, seen,
+    get seenShare(){ return sight.share; },
+    // the whole of the Lea (the Wizard Eye spell, out in the open)
+    revealLand(){ sight.revealAll(); vctx.clearRect(0, 0, sight.N, sight.N); },
+    // the whole level at once (the Wizard Eye spell, underground)
     revealAll(){
       if (!level) return;
       const { L } = level, near = k => { const i = k % L.W, j = (k / L.W) | 0; for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++){ const q = (j + b) * L.W + i + a; if (i + a >= 0 && i + a < L.W && j + b >= 0 && j + b < L.H && L.open[q]) return true; } return false; };

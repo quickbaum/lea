@@ -6,20 +6,19 @@
 
 import * as THREE from 'three';
 import { settlements } from './terrain.js';
-import { KINDS } from './gen/settle.js';
 import { height } from './terrain.js';
 import { UNITS_PER_M } from './config.js';
 import { makeTexture } from './textures.js';
 import { mulberry32 } from './rng.js';
+import { addDressed, addWell } from './house-view.js';
+import { ashlar } from './stone-tex.js';
+import { fieldInto, croftInto, paintAtlas } from './crop-view.js';
 
 const M = UNITS_PER_M;
 const TILE = 2 * M;              // world size of one texture tile (2 m)
 const SINK = 0.4;                // walls run this far below the pad, so no gap shows on its feathered edge
-const OVER_EAVE = 0.4 * M;       // roof overhang past the walls
-const OVER_GABLE = 0.3 * M;
-const POST = 0.24 * M;           // corner posts
-const DARK = [0.22, 0.16, 0.10], SHUTTER = [0.17, 0.12, 0.08], POSTC = [0.30, 0.23, 0.15];
-const WIN_DARK = [0.10, 0.08, 0.06], WIN_LIT = [1.0, 0.70, 0.34], STONE = [0.45, 0.43, 0.40];
+const POSTC = [0.30, 0.23, 0.15];
+const WIN_DARK = [0.035, 0.028, 0.022], WIN_LIT = [1.0, 0.70, 0.34];
 
 // ---- textures (32px a tile, nearest-filtered like the rest of the world) ------------
 export function pixels(seed, draw){
@@ -59,8 +58,8 @@ const boardsTexture = () => pixels(0xb0a2d, (r, put) => {
 const thatchTexture = () => pixels(0x7a7c4, (r, put) => {
   const streak = Array.from({ length: 32 }, () => 0.85 + r() * 0.3);
   for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++){
-    const n = (r() - 0.5) * 22, course = y % 8 === 7 ? 0.68 : y % 8 === 0 ? 1.1 : 1;
-    put(x, y, shade([146, 122, 76], streak[x] * course, n));
+    const n = (r() - 0.5) * 22, course = y % 8 === 7 ? 0.84 : y % 8 === 0 ? 1.06 : 1;
+    put(x, y, shade([176, 152, 100], streak[x] * course, n));
   }
 });
 // split shingles in staggered rows, silvered with weather
@@ -80,16 +79,84 @@ const shingleTexture = () => pixels(0x5419e, (r, put) => {
   }
 });
 
+// limewashed daub: near white, so each house's wash can colour it; trowel marks and flaking
+const daubTexture = () => pixels(0xda0b, (r, put) => {
+  const blot = Array.from({ length: 6 }, () => [r() * 32, r() * 32, 3 + r() * 5]);
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++){
+    let k = 232 + (r() - 0.5) * 16 + Math.sin(y * 0.8 + x * 0.25) * 4;
+    for (const [bx, by, br] of blot) if (Math.hypot(x - bx, y - by) < br) k -= 7;
+    if (r() < 0.012) k -= 44;
+    put(x, y, [k, k * 0.985, k * 0.95]);
+  }
+});
+// coursed rubble: long stones, deep joints
+const stoneTexture = () => pixels(0x570e, (r, put) => {
+  const ids = new Int16Array(32 * 32), tones = [];
+  for (let row = 0; row < 5; row++){
+    let x = (row * 7) % 5 - 5;
+    while (x < 32){
+      const w = 5 + ((r() * 7) | 0), id = tones.length;
+      tones.push(0.8 + r() * 0.34);
+      const y0 = Math.floor(row * 32 / 5), y1 = Math.floor((row + 1) * 32 / 5);
+      for (let yy = y0; yy < y1; yy++) for (let q = x; q < x + w; q++){
+        const edge = yy === y1 - 1 || q === x + w - 1;
+        ids[yy * 32 + ((q + 32) % 32)] = edge ? -1 : id;
+      }
+      x += w;
+    }
+  }
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++){
+    const id = ids[y * 32 + x], n = (r() - 0.5) * 16;
+    put(x, y, id < 0 ? [92, 86, 76] : shade([158, 152, 140], tones[id], n));
+  }
+});
+// sawn and adzed oak: grain along the timber
+const timberTexture = () => pixels(0x7188, (r, put) => {
+  const rows = Array.from({ length: 32 }, () => 0.86 + r() * 0.28);
+  for (let y = 0; y < 32; y++) for (let x = 0; x < 32; x++){
+    const n = (r() - 0.5) * 16, knot = Math.hypot((x - 20) * 0.5, y - 12) < 2.2 ? 0.7 : 1;
+    put(x, y, shade([196, 186, 172], rows[y] * knot, n));
+  }
+});
+
+// a wattle hurdle: rods woven through uprights, with daylight through it (one tile is a panel)
+const wattleTexture = () => makeTexture(32, 16, (g, w, h) => {
+  const r = mulberry32(0x3a771e), im = g.createImageData(w, h), d = im.data;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++){
+    const o = (y * w + x) * 4, row = y >> 1, over = ((x >> 2) + row) % 2 === 0, gap = (y % 2 === 1 && !over) || x % 8 === 0 && y % 2 === 1 && r() < 0.5;
+    const k = (over ? 150 : 104) + (r() - 0.5) * 34;
+    d[o] = k; d[o + 1] = k * 0.8; d[o + 2] = k * 0.55; d[o + 3] = gap ? 0 : 255;
+  }
+  g.putImageData(im, 0, 0);
+}, { repeat: [1, 1] });
+
+// the crops' cards (crop-view.js paints them). Both faces are lit from above: three.js would flip
+// the normal on the back, and half of every crossed pair would go dark.
+function cardMaterial(){
+  const A = paintAtlas();
+  const t = makeTexture(A.w, A.h, g => { const im = g.createImageData(A.w, A.h); im.data.set(A.data); g.putImageData(im, 0, 0); });
+  const m = new THREE.MeshLambertMaterial({ map: t, vertexColors: true, side: THREE.DoubleSide, alphaTest: 0.5 });
+  m.onBeforeCompile = sh => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <normal_fragment_begin>', 'float faceDirection = 1.0; vec3 normal = normalize( vNormal ); vec3 nonPerturbedNormal = normal;');
+  };
+  return m;
+}
+
 let MATS = null;
 function materials(){
   if (MATS) return MATS;
   const mat = (map, side = THREE.FrontSide) => new THREE.MeshLambertMaterial({ map, vertexColors: true, side });
   return MATS = {
-    logs: mat(logsTexture()), boards: mat(boardsTexture()),
+    logs: mat(logsTexture()), boards: mat(boardsTexture()), daub: mat(daubTexture()), stone: mat(stoneTexture()), timber: mat(timberTexture()),
     thatch: mat(thatchTexture(), THREE.DoubleSide), shingle: mat(shingleTexture(), THREE.DoubleSide),
+    // the well's brickwork: the cathedrals' own ashlar (js/stone-tex.js), so it takes the light the same way
+    brick: (t => new THREE.MeshLambertMaterial({ map: t.map, normalMap: t.normalMap, normalScale: new THREE.Vector2(0.9, 0.9), vertexColors: true }))(
+      ashlar(0xb41c, { courses: 12, len: [9, 17], wear: 1.2, tone: [150, 112, 86], moss: 0.25 })),
     detail: new THREE.MeshLambertMaterial({ vertexColors: true }),
     windows: new THREE.MeshBasicMaterial({ vertexColors: true }),           // unlit: a lamp shows at night
     crops: new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide }),
+    cards: cardMaterial(),
+    wattle: new THREE.MeshLambertMaterial({ map: wattleTexture(), vertexColors: true, side: THREE.DoubleSide, alphaTest: 0.5 }),
     logpile: new THREE.MeshLambertMaterial({ color: 0x6b5236 }),
     smoke: new THREE.PointsMaterial({ map: puffTexture(), size: 2.6, vertexColors: true, transparent: true, depthWrite: false }),
   };
@@ -109,6 +176,51 @@ export class Geo {
     }
   }
   quad(a, b, c, d, ua, ub, uc, ud, out, col){ this.tri(a, b, c, ua, ub, uc, out, col); this.tri(a, c, d, ua, uc, ud, out, col); }
+  // A smooth-shaded sheet (a thatched slope): rows of points, with a uv and a colour at each.
+  // Normals are averaged across each point's neighbours; `out` says which side is the outside.
+  grid(pts, uv, col, out){
+    const R = pts.length, C = pts[0].length;
+    const at = (i, j) => pts[Math.max(0, Math.min(R - 1, i))][Math.max(0, Math.min(C - 1, j))];
+    const nrm = pts.map((row, i) => row.map((_, j) => {
+      const a = at(i + 1, j), b = at(i - 1, j), c = at(i, j + 1), d = at(i, j - 1);
+      const e1 = [a[0] - b[0], a[1] - b[1], a[2] - b[2]], e2 = [c[0] - d[0], c[1] - d[1], c[2] - d[2]];
+      let n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      if (n[0] * out[0] + n[1] * out[1] + n[2] * out[2] < 0) n = n.map(v => -v);
+      const l = Math.hypot(...n);
+      return l > 1e-6 ? n.map(v => v / l) : (() => { const m = Math.hypot(...out) || 1; return out.map(v => v / m); })();
+    }));
+    const emit = (i0, j0, i1, j1, i2, j2) => {
+      const a = pts[i0][j0], b = pts[i1][j1], c = pts[i2][j2];
+      const e1 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], e2 = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      const g = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      if (Math.abs(g[0]) + Math.abs(g[1]) + Math.abs(g[2]) < 1e-9) return;      // a hip's collapsed corner
+      const flip = g[0] * out[0] + g[1] * out[1] + g[2] * out[2] < 0;
+      for (const [i, j] of flip ? [[i0, j0], [i2, j2], [i1, j1]] : [[i0, j0], [i1, j1], [i2, j2]]){
+        this.p.push(...pts[i][j]); this.n.push(...nrm[i][j]); this.uv.push(...uv[i][j]); this.c.push(...col[i][j]);
+      }
+    };
+    for (let i = 0; i < R - 1; i++) for (let j = 0; j < C - 1; j++){ emit(i, j, i, j + 1, i + 1, j + 1); emit(i, j, i + 1, j + 1, i + 1, j); }
+  }
+  // A cut-out picture on a quad: corners counter-clockwise from lower left, rect [u0, v0, u1, v1] from the
+  // atlas. The normal is straight up on every card, so a plant takes the light as one soft mass and
+  // not as flat planes that flash when you walk round them.
+  card(a, b, c, d, [u0, v0, u1, v1], tone = 1, flip = false){
+    const L = flip ? u1 : u0, R = flip ? u0 : u1, col = [tone, tone, tone];
+    for (const [p, u, v] of [[a, L, v0], [b, R, v0], [c, R, v1], [a, L, v0], [c, R, v1], [d, L, v1]]){
+      this.p.push(...p); this.n.push(0, 1, 0); this.uv.push(u, v); this.c.push(...col);
+    }
+  }
+  // box() with its faces textured to scale
+  tbox(x, z, y0, y1, sx, sz, a, col, tile){
+    const c = Math.cos(a), s = Math.sin(a), P = (u, v, y) => [x + c * u - s * v, y, z + s * u + c * v];
+    const hx = sx / 2, hz = sz / 2;
+    for (const [u0, v0, u1, v1, ox, oz, len] of [[-hx, -hz, hx, -hz, 0, -1, sx], [hx, -hz, hx, hz, 1, 0, sz], [hx, hz, -hx, hz, 0, 1, sx], [-hx, hz, -hx, -hz, -1, 0, sz]]){
+      const ua = x / tile, ub = ua + len / tile, va = y0 / tile, vb = y1 / tile;
+      this.quad(P(u0, v0, y0), P(u1, v1, y0), P(u1, v1, y1), P(u0, v0, y1), [ua, va], [ub, va], [ub, vb], [ua, vb], [c * ox - s * oz, 0, s * ox + c * oz], col);
+    }
+    const Z = [0, 0];
+    this.quad(P(-hx, -hz, y1), P(hx, -hz, y1), P(hx, hz, y1), P(-hx, hz, y1), Z, Z, Z, Z, [0, 1, 0], col);
+  }
   // an upright box (no bottom) centred at (x, z), from y0 to y1, turned to angle a
   box(x, z, y0, y1, sx, sz, a, col){
     const c = Math.cos(a), s = Math.sin(a), P = (u, v, y) => [x + c * u - s * v, y, z + s * u + c * v];
@@ -129,91 +241,6 @@ export class Geo {
   }
 }
 
-// One building into the per-material geometries.
-function addBuilding(G, b, r){
-  const k = KINDS[b.kind], { hl, hw } = b;
-  const lx = Math.cos(b.a), lz = Math.sin(b.a), cx = -lz, cz = lx;
-  const P = (u, v, y) => [b.x + lx * u + cx * v, y, b.z + lz * u + cz * v];
-  const out = (u, v, y = 0) => [lx * u + cx * v, y, lz * u + cz * v];
-  const floor = b.y + (k.raised || 0) * M, y0 = k.raised ? floor : b.y - SINK;
-  const E = floor + k.eaves * M, pitch = Math.tan(k.pitch * Math.PI / 180), R = E + hw * pitch;
-  // weathering: each building a little lighter or darker, greyer or warmer
-  const t = 0.82 + b.tint * 0.24, warm = r() * 0.08;
-  const wallC = [t + warm, t, t - warm], roofC = [t, t, t];
-  const W = G[k.wall], RF = G[k.roof], D = G.detail;
-  const uvW = (along, y) => [along / TILE, (y - y0) / TILE];
-  // the long walls
-  for (const s of [-1, 1]){
-    const v = s * hw;
-    W.quad(P(-hl, v, y0), P(hl, v, y0), P(hl, v, E), P(-hl, v, E), uvW(0, y0), uvW(2 * hl, y0), uvW(2 * hl, E), uvW(0, E), out(0, s), wallC);
-  }
-  // the gable ends: a wall and the triangle up to the ridge
-  for (const s of [-1, 1]){
-    const u = s * hl;
-    W.quad(P(u, -hw, y0), P(u, hw, y0), P(u, hw, E), P(u, -hw, E), uvW(0, y0), uvW(2 * hw, y0), uvW(2 * hw, E), uvW(0, E), out(s, 0), wallC);
-    W.tri(P(u, -hw, E), P(u, hw, E), P(u, 0, R), uvW(0, E), uvW(2 * hw, E), uvW(hw, R), out(s, 0), wallC);
-  }
-  // the roof: two slopes, overhanging walls and gables
-  const ue = hl + OVER_GABLE, ve = hw + OVER_EAVE, yE = E - OVER_EAVE * pitch, slant = Math.hypot(ve, R - yE);
-  for (const s of [-1, 1]){
-    RF.quad(P(-ue, s * ve, yE), P(ue, s * ve, yE), P(ue, 0, R), P(-ue, 0, R),
-      [0, 0], [2 * ue / TILE, 0], [2 * ue / TILE, slant / TILE], [0, slant / TILE], out(0, s * pitch, 1), roofC);
-  }
-  // corner posts
-  for (const u of [-1, 1]) for (const v of [-1, 1]){
-    const [x, , z] = P(u * (hl - POST * 0.3), v * (hw - POST * 0.3), 0);
-    D.box(x, z, y0, E, POST, POST, b.a, POSTC);
-  }
-  // up on posts: the stilts, and a floor to hide the underside
-  if (k.raised){
-    for (const u of [-1, 1]) for (const v of [-1, 1]){
-      const [x, , z] = P(u * (hl - POST), v * (hw - POST), 0);
-      D.box(x, z, b.y - SINK, floor, POST * 1.2, POST * 1.2, b.a, POSTC);
-    }
-    const Z = [0, 0];
-    D.quad(P(-hl, -hw, floor), P(hl, -hw, floor), P(hl, hw, floor), P(-hl, hw, floor), Z, Z, Z, Z, [0, -1, 0], POSTC);
-  }
-  // the door, on the long side toward the green or yard; a barn's is a wide double one
-  const big = b.kind === 'barn', dw = (big ? 2.6 : k.raised ? 0.7 : 0.95) * M, dh = Math.min(E - floor - 0.2, (big ? 2.4 : k.raised ? 1.1 : 1.8) * M);
-  const du = b.dwelling ? b.du : big || k.raised ? 0 : (r() - 0.5) * hl * 0.6, dv = b.door * (hw + 0.04), Z = [0, 0];
-  const dFloor = k.raised ? floor + 0.1 : b.y;
-  D.quad(P(du - dw / 2, dv, dFloor), P(du + dw / 2, dv, dFloor), P(du + dw / 2, dv, dFloor + dh), P(du - dw / 2, dv, dFloor + dh), Z, Z, Z, Z, out(0, b.door), DARK);
-  if (!b.dwelling) return null;
-  // a dwelling's windows: either side of the door and one at the back. They're
-  // their own mesh, unlit, so they can glow when someone is home after dark
-  // (update below); the record says which vertices are this house's.
-  const wy = b.y + 1.0 * M, wh = 0.5 * M, ww = 0.6 * M, from = G.windows.p.length / 3;
-  for (const [u, side] of [[du - hl * 0.5, b.door], [du + hl * 0.5, b.door], [-du * 0.6, -b.door]]){
-    if (Math.abs(u) > hl - 0.8 * M || Math.abs(u - du) < dw) continue;
-    const v = side * (hw + 0.05);
-    G.windows.quad(P(u - ww / 2, v, wy), P(u + ww / 2, v, wy), P(u + ww / 2, v, wy + wh), P(u - ww / 2, v, wy + wh), Z, Z, Z, Z, out(0, side), WIN_DARK);
-  }
-  const rec = { b, win: [from, G.windows.p.length / 3], flicker: r() * 10 };
-  // the chimney: a stone stack up through the ridge over the hearth
-  const cs = 0.75 * M;
-  D.box(b.x, b.z, R - 1.2, R + 1.1 * M, cs, cs, b.a, STONE.map(c => c * (0.9 + r() * 0.15)));
-  rec.top = [b.x, R + 1.1 * M + 0.1, b.z];
-  // where the woodpile stacks up: against the gable end away from the door
-  const ge = (du > 0 ? -1 : 1) * (hl + 0.45);
-  rec.pile = { x: P(ge, 0, 0)[0], z: P(ge, 0, 0)[2], y: b.y, a: b.a, ge };
-  return rec;
-}
-
-// A timber well-head: a cribbed square curb, two posts, a windlass beam, a little roof.
-function addWell(G, w){
-  const D = G.detail, y = w.y, s = 1.5 * M, h = 0.8 * M, t = 0.2 * M, Z = [0, 0];
-  for (const [ox, oz, sx, sz] of [[0, -s / 2, s, t], [0, s / 2, s, t], [-s / 2, 0, t, s], [s / 2, 0, t, s]])
-    D.box(w.x + ox, w.z + oz, y - SINK, y + h, sx, sz, 0, [0.42, 0.34, 0.24]);
-  D.quad([w.x - s / 2, y + 0.3, w.z - s / 2], [w.x + s / 2, y + 0.3, w.z - s / 2], [w.x + s / 2, y + 0.3, w.z + s / 2], [w.x - s / 2, y + 0.3, w.z + s / 2], Z, Z, Z, Z, [0, 1, 0], [0.06, 0.07, 0.08]);
-  const top = y + 2.1 * M;
-  for (const sx of [-1, 1]) D.box(w.x + sx * s / 2, w.z, y - SINK, top, t, t, 0, POSTC);
-  D.box(w.x, w.z, top - 0.9 * M, top - 0.75 * M, s, 0.14 * M, 0, POSTC);     // the windlass
-  const R = G.shingle, half = s * 0.75, ry = top + 0.45 * M;
-  for (const sz of [-1, 1])
-    R.quad([w.x - half, top - 0.1, w.z + sz * half], [w.x + half, top - 0.1, w.z + sz * half], [w.x + half, ry, w.z], [w.x - half, ry, w.z],
-      [0, 0], [2 * half / TILE, 0], [2 * half / TILE, 0.5], [0, 0.5], [0, 1, sz], [0.9, 0.9, 0.9]);
-}
-
 // a soft puff of smoke, pixel-edged like everything else
 const puffTexture = () => makeTexture(16, 16, (g, w, h) => {
   const img = g.createImageData(w, h), d = img.data;
@@ -224,33 +251,9 @@ const puffTexture = () => makeTexture(16, 16, (g, w, h) => {
   g.putImageData(img, 0, 0);
 });
 
-// ---- the crops ----------------------------------------------------------------------
-// A field's rows, as low ridges following the ground along its length, in five
-// stages from ploughed earth to ripe grain. Rebuilt only when the stage changes.
-const CROP_STAGES = [
-  { h: 0.10, c: [0.30, 0.22, 0.14] },       // sown: ridged earth
-  { h: 0.30, c: [0.38, 0.52, 0.20] },       // shoots
-  { h: 0.65, c: [0.33, 0.50, 0.18] },       // in leaf
-  { h: 0.95, c: [0.56, 0.54, 0.24] },       // turning
-  { h: 1.15, c: [0.74, 0.62, 0.28] },       // ripe
-];
-function cropGeometry(f, stage){
-  const G = new Geo(), { h, c } = CROP_STAGES[stage], lx = Math.cos(f.a), lz = Math.sin(f.a), cx = -lz, cz = lx;
-  const P = (u, v) => { const x = f.x + lx * u + cx * v, z = f.z + lz * u + cz * v; return [x, height(x, z), z]; };
-  const Z = [0, 0], rows = Math.max(2, Math.floor(2 * f.hw / 1.5)), gap = 2 * f.hw / rows, half = 0.35;
-  for (let k = 0; k < rows; k++){
-    const v = -f.hw + gap * (k + 0.5);
-    for (let u = -f.hl + 0.6; u < f.hl - 0.6; u += 2){
-      const u1 = Math.min(f.hl - 0.6, u + 2);
-      const a0 = P(u, v - half), a1 = P(u1, v - half), b0 = P(u, v + half), b1 = P(u1, v + half);
-      const r0 = P(u, v), r1 = P(u1, v); r0[1] += h; r1[1] += h;
-      const shade = c.map(x => x * (0.9 + 0.1 * Math.sin(u * 1.7 + k)));
-      G.quad(a0, a1, r1, r0, Z, Z, Z, Z, [cx * -1, 1, cz * -1], shade);
-      G.quad(b1, b0, r0, r1, Z, Z, Z, Z, [cx, 1, cz], shade);
-    }
-  }
-  return G;
-}
+// the per-material buffers one settlement draws into, and meshes from them (also the probe's way in)
+export const settlementGeos = () => ({ logs: new Geo(), boards: new Geo(), daub: new Geo(), stone: new Geo(), timber: new Geo(), brick: new Geo(), wattle: new Geo(), thatch: new Geo(), shingle: new Geo(), detail: new Geo(), windows: new Geo() });
+export const settlementMaterials = () => materials();
 
 const PUFFS = 8, PUFF_LIFE = 7;     // smoke puffs per chimney, and how long each drifts
 
@@ -260,9 +263,10 @@ export function buildSettlements(scene){
   const winGeos = [];
   S.places.forEach((p, i) => {
     const r = mulberry32(0x5e77 + i * 7919);
-    const G = { logs: new Geo(), boards: new Geo(), thatch: new Geo(), shingle: new Geo(), detail: new Geo(), windows: new Geo() };
-    for (const b of p.buildings){ const rec = addBuilding(G, b, r); if (rec) recs.set(b, rec); }
-    if (p.well) addWell(G, p.well);
+    const G = settlementGeos();
+    for (const b of p.buildings){ const rec = addDressed(G, b, r, height); if (rec) recs.set(b, rec); }
+    if (p.well) addWell(G, p.well, height, p.green ? p.green.a : 0);
+    for (const f of p.fields || []) croftInto(G, f, height, f.house, r);
     for (const k of Object.keys(G)){
       const m = G[k].mesh(mats[k]); if (!m) continue;
       group.add(m);
@@ -285,7 +289,22 @@ export function buildSettlements(scene){
   smoke.frustumCulled = false;
   group.add(smoke);
   // the fields
-  const crops = S.fields.map(f => { const m = new THREE.Mesh(cropGeometry(f, 0).mesh(mats.crops).geometry, mats.crops); m.userData = { f, stage: 0 }; group.add(m); return m; });
+  // a field is two meshes: its earth, poles and any geometry plants, and its cards
+  const redraw = (m, st) => {
+    const A = new Geo(), B = new Geo();
+    fieldInto(A, m.userData.f, height, st, B);
+    m.geometry.dispose(); m.geometry = A.mesh(mats.crops).geometry;
+    const c = m.userData.cards;
+    c.geometry.dispose();
+    const cm = B.mesh(mats.cards);
+    c.geometry = cm ? cm.geometry : new THREE.BufferGeometry(); c.visible = !!cm;
+  };
+  const crops = S.fields.map(f => {
+    const m = new THREE.Mesh(new THREE.BufferGeometry(), mats.crops), cards = new THREE.Mesh(new THREE.BufferGeometry(), mats.cards);
+    m.userData = { f, key: '', cards }; group.add(m); group.add(cards);
+    redraw(m, { crop: null, sown: true });
+    return m;
+  });
   scene.add(group);
 
   let t = 0, cropT = 0;
@@ -346,11 +365,11 @@ export function buildSettlements(scene){
         for (const m of crops){
           const fd = m.userData.sim || (m.userData.sim = houses.map(h => h.field).find(x => x && x.f === m.userData.f));
           if (!fd) continue;
-          const stage = Math.min(4, Math.floor(fd.growth * 4 + 0.001));
-          if (stage !== m.userData.stage){
-            m.userData.stage = stage;
-            m.geometry.dispose();
-            m.geometry = cropGeometry(m.userData.f, stage).mesh(mats.crops).geometry;
+          const st = { crop: fd.crop, stage: Math.min(4, Math.floor(fd.growth * 4 + 0.001)), up: Math.ceil(fd.supports * 8) / 8, sown: fd.sown, weeds: fd.care < 0.12 ? 2 : fd.care < 0.28 ? 1 : 0 };
+          const key = `${st.crop}.${st.stage}.${st.up}.${st.sown}.${st.weeds}`;
+          if (key !== m.userData.key){
+            m.userData.key = key;
+            redraw(m, st);
           }
         }
       }

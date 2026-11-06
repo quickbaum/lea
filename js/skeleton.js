@@ -80,7 +80,7 @@ export function makeSkeleton(kit, o = {}){
     object, x: o.x ?? 0, z: o.z ?? 0, yaw: 0, state: 'up', anim: 'idle', speed: 1, talking: false, stir: 0, at: null,
     seed: o.seed ?? 1, faceCamera: o.faceCamera !== false,
   };
-  let t = 0, animT = 0, prev = null, prevT = 0, fadeK = 1, back = null, clock = 0;
+  let t = 0, animT = 0, prev = null, prevT = 0, fadeK = 1, back = null, clock = 0, fallArc = 0;
   const cam = new THREE.Vector3(S.x, 0, S.z + 5);
   const M = R.pieces.map(() => new Float64Array(6));
   const q = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ'), sc = new THREE.Vector3();
@@ -117,13 +117,17 @@ export function makeSkeleton(kit, o = {}){
   // where each bone comes to lie: on its side, its long way along the floor, resting on it.
   // In a heap about (x, z), the big ones under and the rest on top, the skull last; or strewn
   // within `scatter.r`, on ground scatter.ok allows
-  function lay(scatter){
+  // or `into` a tomb { x, z, y, hl, hw, a }: on its floor, within its long sides
+  function lay(scatter, into){
     const order = bones.slice().sort((a, b) => b.p.w * b.p.h - a.p.w * a.p.h);
     let pile = 0;
     for (const b of order){
       const id = b.p.id, head = id === 'skull' || id === 'jaw', to = b.to;
       let x = S.x, z = S.z;
-      if (scatter){
+      if (into){
+        const u = (rnd() * 2 - 1) * (into.hl - 0.3), v = (rnd() * 2 - 1) * (into.hw - 0.25), c = Math.cos(into.a), s = Math.sin(into.a);
+        x = into.x + c * u - s * v; z = into.z + s * u + c * v;
+      } else if (scatter){
         for (let n = 0; n < 16; n++){
           const a = rnd() * Math.PI * 2, d = Math.sqrt(rnd()) * scatter.r, px = S.x + Math.cos(a) * d, pz = S.z + Math.sin(a) * d;
           if (!scatter.ok || scatter.ok(px, pz)){ x = px; z = pz; break; }
@@ -138,18 +142,20 @@ export function makeSkeleton(kit, o = {}){
         : wide ? (rnd() < 0.5 ? 0 : Math.PI) + (rnd() - 0.5) * 0.5 : rnd() * Math.PI * 2;
       to.sx = to.sy = R.unit;
       const half = (Math.abs(b.p.w * Math.sin(to.roll)) + Math.abs(b.p.h * Math.cos(to.roll))) / 2 * R.unit * 0.85;   // its drawn edge, not its box's
-      to.p.set(x, floorAt(x, z) + half + (scatter ? 0 : pile), z);
-      if (!scatter) pile += 0.012;                                                     // a heap builds up
+      to.p.set(x, (into ? into.y : floorAt(x, z)) + half + (scatter || into ? 0 : pile), z);
+      if (!scatter && !into) pile += 0.012;                                                     // a heap builds up
       to.yaw = towardCam(to.p);
     }
   }
 
-  S.collapse = ({ scatter = null, now = false } = {}) => {   // now: lying there already, no fall
+  S.collapse = ({ scatter = null, now = false, into = null } = {}) => {   // now: lying there already, no fall; into: back in a tomb, over its side
     if (S.state === 'pile' || S.state === 'falling') return S;
     if (S.state === 'up'){ rigCards(); for (const b of bones) copy(b.at, b.rig); }
-    lay(scatter);
+    lay(scatter, into);
+    fallArc = into ? 1 : 0;
     for (const b of bones){
       copy(b.from, b.at);
+      b.arc = 0.9;
       const h = Math.max(0.05, b.from.p.y - b.to.p.y);
       b.dur = 0.35 + Math.sqrt(2 * h / 9.8) * 1.3 + rnd() * 0.15;
       b.delay = rnd() * 0.12 + (b.p.id === 'skull' || b.p.id === 'jaw' ? 0.1 : 0);
@@ -186,7 +192,7 @@ export function makeSkeleton(kit, o = {}){
         const k = Math.min(1, Math.max(0, (clock - b.delay) / b.dur)), a = b.at, f = b.from, g = b.to;
         if (k < 1) done = false;
         const kx = 1 - (1 - k) * (1 - k);
-        a.p.lerpVectors(f.p, g.p, kx); a.p.y = f.p.y + (g.p.y - f.p.y) * easeOutBounce(k);
+        a.p.lerpVectors(f.p, g.p, kx); a.p.y = f.p.y + (g.p.y - f.p.y) * easeOutBounce(k) + fallArc * b.arc * Math.sin(k * Math.PI);
         a.roll = f.roll + (g.roll - f.roll) * smooth(Math.min(1, k * 1.2));
         a.sx = f.sx + (g.sx - f.sx) * k; a.sy = f.sy + (g.sy - f.sy) * k;
         a.yaw = lerpA(f.yaw, towardCam(a.p), smooth(k));
@@ -221,7 +227,7 @@ export function makeSkeleton(kit, o = {}){
   };
 
   // start lying (in a heap, or strewn), or standing
-  if (o.pile || o.scatter){ lay(o.scatter); for (const b of bones) copy(b.at, b.to); S.state = 'pile'; S.update(0); }
+  if (o.pile || o.scatter || o.into){ lay(o.scatter, o.into); for (const b of bones) copy(b.at, b.to); S.state = 'pile'; S.update(0); }
   else S.update(0);
   S.dispose = () => { object.removeFromParent(); };
   return S;

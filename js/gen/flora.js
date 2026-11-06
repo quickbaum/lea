@@ -1,12 +1,12 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { WATER, WORLD_R, AREA } from '../config.js';
+import { WATER, WORLD_R, AREA, WORLD_SEED } from '../config.js';
 import { height, terrainType, soilRichness, groundSink, treeCover, habitat, roadBand, builtBand } from '../terrain.js';
-import { rand, randint, fork } from '../rng.js';
-import { makeGrassTexture, makePussywillowTexture, makeCattailTexture, makeAcornTexture, makeMushroomTexture, makeTrinketTexture, makeVineTexture, makeFernTexture, makeRedwoodFoliageTexture, makeSedgeTexture, makeCottonGrassTexture, makeHeatherTexture } from '../textures.js';
-import { makeLeafAtlas } from './leaf.js';
+import { rand, randint, fork, mulberry32 } from '../rng.js';
+import { makeGrassTexture, makePussywillowTexture, makeCattailTexture, makeAcornTexture, makeMushroomTexture, makeTrinketTexture, makeVineTexture, makeFernTexture, makeRedwoodFoliageTexture, makeSedgeTexture, makeCottonGrassTexture, makeHeatherTexture, crisp } from '../textures.js';
+import { makeLeafAtlas, makeWillowAtlas, makeClumpAtlas } from './leaf.js';
 import { makeBark, makeBirchBark, makeRedwoodBark, makeRowanBark } from './bark.js';
-import { generateTree, leafMaterial, TREE_SPECIES, SHRUB_SPECIES, REDWOOD_SPECIES, OAK_SPECIES, BIRCH_SPECIES, ROWAN_SPECIES, PINE_SPECIES, ALDER_SPECIES } from './tree.js';
+import { generateTree, leafMaterial, TREE_SPECIES, SHRUB_SPECIES, REDWOOD_SPECIES, OAK_SPECIES, BIRCH_SPECIES, ROWAN_SPECIES, PINE_SPECIES, ALDER_SPECIES, WILLOW_SPECIES, SPRUCE_SPECIES, JUNIPER_SPECIES, YEW_SPECIES } from './tree.js';
 
 // ground kept clear of trees and scrub: the Old Road's verge, and the settlements' cleared ground and lanes
 const kept = (x, z) => roadBand(x, z) || builtBand(x, z);
@@ -250,11 +250,17 @@ const ZERO_MTX = new THREE.Matrix4().makeScale(0, 0, 0);
 // `allowed` is a Set of surface types, or a (x, z) => bool for anything finer.
 // `coverK` (0..1) is how much the habitat's tree cover decides where they take
 // hold: 1 puts nearly all of them in woodland and carr, 0 ignores it.
-function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scaleRange, choose, extraMat, collect, flareR = 1.4, coverK = 0.95){
+// `count` may instead be a list of [x, z, scale] already chosen by the caller (stands).
+// `cleared(x, z)` says a spot is taken by something else (a spruce forest): the tree
+// still takes all its random draws and stays in the returned list, so no other plant
+// shifts, and it just isn't drawn. Callers filter the list before handing it on.
+function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scaleRange, choose, extraMat, collect, flareR = 1.4, coverK = 0.95, cleared = null){
   const buckets = archetypes.map(() => []);
   const placed = [];
-  for (let i = 0; i < count; i++){
+  const preset = Array.isArray(count) ? count : null;
+  for (let i = 0; i < (preset ? preset.length : count); i++){
     let x, z, ok = false;
+    if (preset){ [x, z] = preset[i]; ok = true; }
     for (let t = 0; t < 60 && !ok; t++){
       x = (rng() - 0.5) * WORLD_R * 2; z = (rng() - 0.5) * WORLD_R * 2;
       if (Math.hypot(x, z) < WORLD_R && !kept(x, z)       // the Old Road's verge and the settlements' ground are kept clear
@@ -263,11 +269,12 @@ function scatter(scene, rng, archetypes, barkMat, leafMat, count, allowed, scale
     }
     if (!ok) continue;
     const ai = choose ? choose(x, z, rng) : Math.floor(rng() * archetypes.length);
-    const sc = rand(rng, scaleRange[0], scaleRange[1]);
-    buckets[ai].push([x, z, rand(rng, 0, Math.PI*2), sc]);
+    const sc = preset ? preset[i][2] : rand(rng, scaleRange[0], scaleRange[1]);
+    const yawHere = rand(rng, 0, Math.PI*2);
+    if (!cleared || !cleared(x, z)) buckets[ai].push([x, z, yawHere, sc]);
     // entries stay [x, z, …]: every consumer destructures the first two, so the
     // trailing scale + species + trunk metrics ride along for the mycelium/face layer
-    placed.push([x, z, sc, archetypes[ai].name, archetypes[ai].trunkR, archetypes[ai].trunkH]);
+    placed.push([x, z, sc, archetypes[ai].name, archetypes[ai].trunkR, archetypes[ai].trunkH, archetypes[ai].rootR]);
   }
 
   const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), v = new THREE.Vector3();
@@ -417,7 +424,7 @@ function makeFruitInst(mat, spots, size){
 }
 
 // an item's picture (ingredients.js `pic`) as a card's texture
-const itemTexture = src => { const t = new THREE.TextureLoader().load(src); t.colorSpace = THREE.SRGBColorSpace; return t; };
+const itemTexture = src => { const t = crisp(new THREE.TextureLoader().load(src)); t.colorSpace = THREE.SRGBColorSpace; return t; };
 
 // A fairy ring (main.js picks which mushroom patches are rings): its caps become a circle
 // of fairy mushrooms round the middle, where a door opens to the salve (gen/faerie.js)
@@ -440,13 +447,23 @@ function forageable(scene, grp, harvest, { x, z, kind, yieldRange, regrow, rng, 
   grp.add(harvest);
   grp.position.set(x, height(x, z), z);
   scene.add(grp);
+  let aim = null;
   return {
     x, z, kind, ripe: true, timer: 0,
     // grow something else here instead: new cards (a fairy ring's circle: makeFairyRing)
     reshape(mat, spots, size, newKind){
       grp.remove(harvest); harvest.dispose();
       harvest = makeFruitInst(mat, spots, size); harvest.visible = this.ripe; grp.add(harvest);
-      fruitSpots = spots; fruitSize = size; this.kind = newKind;
+      fruitSpots = spots; fruitSize = size; this.kind = newKind; aim = null;
+    },
+    // where it's drawn, off its foot (x, z, ground): the middle of its fruit. What you aim at.
+    aim(){
+      if (aim) return aim;
+      if (!fruitSpots?.length) return aim = { dx: 0, y: 0.5, dz: 0 };
+      const c = { dx: 0, y: 0, dz: 0 };
+      for (const q of fruitSpots){ c.dx += q.x; c.y += q.y; c.dz += q.z; }
+      c.dx /= fruitSpots.length; c.y /= fruitSpots.length; c.dz /= fruitSpots.length;
+      return aim = c;
     },
     grp,                                      // so the per-frame pass can hide the whole plant when it's out of sight
     mat: basicMat ? harvest.material : null,  // non-null only for MeshBasicMaterial items that need sky tinting
@@ -506,19 +523,78 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
                                          hazels = D(56), daisies = D(120), roots = D(72), mushrooms = D(80), acornPatches = D(64),
                                          cattailRoots = D(48), elders = D(48),
                                          shells = D(96), stones = D(120), ambers = D(40), quartzes = D(48),
-                                         pines = D(150), alders = D(120), sedges = D(6000), cottongrass = D(2500), heather = D(9000) } = {}){
+                                         pines = D(150), alders = D(120), willows = D(40), spruceForests = D(0.8), spruceStands = D(4), juniperGroups = D(15), yews = D(8), sedges = D(6000), cottongrass = D(2500), heather = D(9000) } = {}){
   const atlas = makeLeafAtlas(fork(rng));
   const bark  = makeBark(fork(rng));
 
   const barkMat = new THREE.MeshLambertMaterial({ map: bark });
   const leafMat = leafMaterial({ map: atlas.texture });   // crown-lit (see tree.js)
 
-  const treeArch    = buildArchetypes(rng, TREE_SPECIES, atlas);   // [rich, mid, lean]
-  const shrubArch   = buildArchetypes(rng, SHRUB_SPECIES, atlas);
+  // --- where the spruce forests will stand. Decided first, from their own seed, because
+  // the broadleaves and pines they replace are planted long before the spruces are.
+  // Each forest is a few overlapping discs with wavering edges, clipped to cold ground
+  // (so it follows the contours and stops at rock): 0 outside, rising inward.
+  const SPRUCE_LOW = 11, SPRUCE_HIGH = 30;                 // height above the water
+  const spruceGround = (x, z) => {
+    if (Math.hypot(x, z) >= WORLD_R || kept(x, z)) return false;
+    const d = height(x, z) - WATER, h = habitat(x, z);
+    return d > SPRUCE_LOW && d < SPRUCE_HIGH && (h === 'woodland' || h === 'heath');
+  };
+  // height rises to the south (+z) on a slope that faces north
+  const facesNorth = (x, z) => Math.max(0, Math.min(1, 0.5 + (height(x, z + 6) - height(x, z - 6)) * 0.25));
+  const forestDiscs = [];
+  {
+    const r = mulberry32((WORLD_SEED ^ 0x5b7c3e) >>> 0), centres = [];
+    for (let i = 0; i < spruceForests * 400 && centres.length < spruceForests; i++){
+      const cx = (r() - 0.5) * WORLD_R * 2, cz = (r() - 0.5) * WORLD_R * 2;
+      if (!spruceGround(cx, cz) || r() > 0.2 + 0.8 * facesNorth(cx, cz)) continue;
+      if (centres.some(c => Math.hypot(c[0] - cx, c[1] - cz) < 260)) continue;
+      centres.push([cx, cz]);
+      const R = 60 + r() * 70;
+      forestDiscs.push([cx, cz, R]);
+      for (let k = 2 + (r() * 3 | 0); k > 0; k--){
+        const a = r() * Math.PI * 2, o = R * (0.6 + r() * 0.5);
+        forestDiscs.push([cx + Math.cos(a) * o, cz + Math.sin(a) * o, R * (0.45 + r() * 0.4)]);
+      }
+    }
+  }
+  const forestDepth = (x, z) => {
+    let best = 0;
+    for (const [cx, cz, R] of forestDiscs){
+      const dx = x - cx, dz = z - cz;
+      if (Math.abs(dx) > R * 1.3 || Math.abs(dz) > R * 1.3) continue;
+      const wave = 1 + 0.16 * Math.sin(x * 0.043 + z * 0.021) + 0.1 * Math.sin(x * 0.019 - z * 0.057);
+      const t = 1 - Math.hypot(dx, dz) / (R * wave);
+      if (t > best) best = t;
+    }
+    return best > 0 && spruceGround(x, z) ? best : 0;
+  };
+  // deep enough in that the forest has displaced what was here; the edge stays mixed
+  const replaced = (x, z) => forestDepth(x, z) > 0.14;
+  const standsOn = ([x, z]) => !replaced(x, z);
+  // a little of the understorey survives under the spruces
+  const shrubGone = (x, z) => replaced(x, z) && (Math.sin(x * 12.9898 + z * 78.233) * 43758.5453 % 1 + 1) % 1 < 0.8;
+
+  // Each broadleaf wears sprigs of its own leaf. These atlases have their own seeds
+  // rather than forks: a draw from `rng` here would move every plant grown after
+  // this line, and they're only art. (`atlas`'s single leaves still dress the cards
+  // of ground plants, below.)
+  const sprigs = (kind, seed, color) => {
+    const a = makeClumpAtlas(mulberry32(seed), { kind });
+    return { atlas: a, mat: leafMaterial(color ? { map: a.texture, color } : { map: a.texture }) };
+  };
+  const maple = sprigs('maple', 0x5A1BE8), apple = sprigs('apple', 0x5A1BE9);
+  const alderLeaf = sprigs('alder', 0x5A1BEA, new THREE.Color(0.55, 0.72, 0.48));
+  const birchLeaf = sprigs('birch', 0x5A1BEB, new THREE.Color(0.82, 1.0, 0.68));
+  const rowanLeaf = sprigs('rowan', 0x5A1BEC, new THREE.Color(0.78, 0.95, 0.60));
+  const treeArch    = buildArchetypes(rng, TREE_SPECIES, maple.atlas);   // [rich, mid, lean]
+  const clumpAtlas = makeClumpAtlas(mulberry32(0x5A1BE7));
+  const clumpLeafMat = leafMaterial({ map: clumpAtlas.texture });
+  const shrubArch   = buildArchetypes(rng, SHRUB_SPECIES, clumpAtlas);
   // redwoodArch built below with the conifer atlas, after coniferAtlas is created
 
   // oaks have their own round-lobed leaves, acorns, and a broad gnarled form
-  const oakAtlas   = makeLeafAtlas(fork(rng), { kind: 'oak' });
+  const oakAtlas   = makeClumpAtlas(fork(rng), { kind: 'oak' });
   const oakLeafMat = leafMaterial({ map: oakAtlas.texture });
   const acornMat   = new THREE.MeshLambertMaterial({ map: makeAcornTexture(), alphaTest: 0.5, side: THREE.DoubleSide });
   const oakArch    = buildArchetypes(rng, OAK_SPECIES, oakAtlas);
@@ -528,9 +604,9 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
 
   // wide per-instance scale ranges so heights form a continuum (saplings up to
   // giants) rather than clustering around each archetype's set height
-  const treePos = scatter(scene, fork(rng), treeArch,    barkMat, leafMat, trees,    new Set(['grass','mud']),        [0.55, 1.55], bySoil);
+  const treePos = scatter(scene, fork(rng), treeArch,    barkMat, maple.mat, trees,    new Set(['grass','mud']),        [0.55, 1.55], bySoil, null, null, 1.4, 0.95, replaced);
   const shrubRecs = [];   // removable: each shrub can be chopped down for firewood
-  scatter(scene, fork(rng), shrubArch,   barkMat, leafMat, shrubs,   new Set(['grass','mud','sand']), [0.65, 1.5], null, null, shrubRecs, 0.6, 0.6);   // shrubs edge out into the open
+  scatter(scene, fork(rng), shrubArch,   barkMat, clumpLeafMat, shrubs,   new Set(['grass','mud','sand']), [0.65, 1.5], null, null, shrubRecs, 0.6, 0.6, shrubGone);   // shrubs edge out into the open
   const redwoodBarkMat  = new THREE.MeshLambertMaterial({ map: makeRedwoodBark(fork(rng)) });
   // flat horizontal disc foliage — leafStyle:'flat' ignores the atlas entirely,
   // so pass a dummy; the material uses the blob texture directly.
@@ -554,7 +630,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
     gr.addColorStop(0.72, 'rgba(0,0,0,0.25)');
     gr.addColorStop(1,    'rgba(0,0,0,0)');
     bg.fillStyle = gr; bg.fillRect(0, 0, 64, 64);
-    const blobTex = new THREE.CanvasTexture(bc);
+    const blobTex = crisp(new THREE.CanvasTexture(bc));
     const blobMat = new THREE.MeshBasicMaterial({ map: blobTex, transparent: true, depthWrite: false });
     const blobFoot = new THREE.PlaneGeometry(19, 19);   // the widest blob, for the tile's cull sphere
 
@@ -587,7 +663,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       scene.add(blobMesh);
     }
   }
-  const oakPos     = scatter(scene, fork(rng), oakArch,     barkMat, oakLeafMat, oaks,  new Set(['grass','mud']),        [0.6, 1.45], null, acornMat, null, 2.4);
+  const oakPos     = scatter(scene, fork(rng), oakArch,     barkMat, oakLeafMat, oaks,  new Set(['grass','mud']),        [0.6, 1.45], null, acornMat, null, 2.4, 0.95, replaced);
 
   // Scots pine on the heath, alder in the carr — each only in its own habitat.
   // Pine needles reuse the redwood foliage disc, tinted to a pine's grey-green;
@@ -597,10 +673,10 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
   const pineFoliageMat = new THREE.MeshLambertMaterial({ map: makeRedwoodFoliageTexture({ seed: fork(rng) }),
     color: new THREE.Color(0.70, 0.86, 0.80), alphaTest: 0.35, side: THREE.DoubleSide });
   const pinePos = scatter(scene, fork(rng), pineArch, pineBarkMat, pineFoliageMat, pines,
-    (x, z) => habitat(x, z) === 'heath', [0.7, 1.25], null, null, null, 1.6, 0);
-  const alderArch = buildArchetypes(rng, ALDER_SPECIES, atlas);
+    (x, z) => habitat(x, z) === 'heath', [0.7, 1.25], null, null, null, 1.6, 0, replaced);
+  const alderArch = buildArchetypes(rng, ALDER_SPECIES, alderLeaf.atlas);
   const alderBarkMat = new THREE.MeshLambertMaterial({ map: makeBark(fork(rng)), color: new THREE.Color(0.55, 0.53, 0.52) });
-  const alderLeafMat = leafMaterial({ map: atlas.texture, color: new THREE.Color(0.55, 0.72, 0.48) });
+  const alderLeafMat = alderLeaf.mat;
   const alderPos = scatter(scene, fork(rng), alderArch, alderBarkMat, alderLeafMat, alders,
     (x, z) => habitat(x, z) === 'carr', [0.7, 1.3], null, null, null, 1.6, 0);
 
@@ -617,9 +693,9 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
   // Placed AFTER underTree is computed so we can actively avoid existing canopy shade.
   // Cluster centres are found on open ground (low underTree); individual trees scatter
   // around each centre with a uniform-disc distribution (sqrt for even spread).
-  const birchArch    = buildArchetypes(rng, BIRCH_SPECIES, atlas);
+  const birchArch    = buildArchetypes(rng, BIRCH_SPECIES, birchLeaf.atlas);
   const birchBarkMat = new THREE.MeshLambertMaterial({ map: makeBirchBark(fork(rng)) });
-  const birchLeafMat = leafMaterial({ map: atlas.texture, color: new THREE.Color(0.82, 1.0, 0.68) });
+  const birchLeafMat = birchLeaf.mat;
   const BIRCH_CLUSTERS = D(56), CLUSTER_R = 9;
   const birchCenters = [];
   for (let i = 0; i < BIRCH_CLUSTERS * 8 && birchCenters.length < BIRCH_CLUSTERS; i++){
@@ -650,7 +726,8 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       const [x, z] = rec;
       const sc = rand(rng, 0.6, 1.3);
       rec[2] = sc;                       // record the age alongside the position
-      bkts[rng() * birchArch.length | 0].push([x, z, rand(rng, 0, Math.PI*2), sc]);
+      const bi = rng() * birchArch.length | 0, by = rand(rng, 0, Math.PI*2);
+      if (!replaced(x, z)) bkts[bi].push([x, z, by, sc]);
     }
     const bm = new THREE.Matrix4(), bq = new THREE.Quaternion(), bv = new THREE.Vector3(), bs = new THREE.Vector3();
     for (let ai = 0; ai < birchArch.length; ai++){
@@ -673,9 +750,9 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
   // --- rowan: small forest-edge trees, shade-intolerant, individual or pairs ---
   // Grow where canopy is partial (underTree 0.08–0.40) — forest margins and
   // clearings edges. Greyer and lighter than maple; no prominent surface roots.
-  const rowanArch    = buildArchetypes(rng, ROWAN_SPECIES, atlas);
+  const rowanArch    = buildArchetypes(rng, ROWAN_SPECIES, rowanLeaf.atlas);
   const rowanBarkMat = new THREE.MeshLambertMaterial({ map: makeRowanBark(fork(rng)) });
-  const rowanLeafMat = leafMaterial({ map: atlas.texture, color: new THREE.Color(0.78, 0.95, 0.60) });
+  const rowanLeafMat = rowanLeaf.mat;
   const rowanPos = [];
   {
     const rm = new THREE.Matrix4(), rq = new THREE.Quaternion(), rv = new THREE.Vector3(), rs = new THREE.Vector3();
@@ -688,7 +765,8 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       if (u < 0.08 || u > 0.42) continue;   // forest edge — partial light
       const rsc = rand(rng, 0.65, 1.2);
       rowanPos.push([x, z, rsc]);
-      bkts[rng() * rowanArch.length | 0].push([x, z, rand(rng, 0, Math.PI*2), rsc]);
+      const ri = rng() * rowanArch.length | 0, ry = rand(rng, 0, Math.PI*2);
+      if (!replaced(x, z)) bkts[ri].push([x, z, ry, rsc]);
     }
     for (let ai = 0; ai < rowanArch.length; ai++){
       const list = bkts[ai]; if (!list.length) continue;
@@ -734,7 +812,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
         vv.set(vx, vy, vz);
         const sc = baseSc * (0.75 + rng() * 0.5);
         vs.set(sc, sc * (0.8 + rng() * 0.45), sc);        // vary drop length more than width
-        vines.push([vx, vz, new THREE.Matrix4().compose(vv, vq, vs), sc]);
+        if (!replaced(tx, tz)) vines.push([vx, vz, new THREE.Matrix4().compose(vv, vq, vs), sc]);   // no host, no vine
       }
     }
     for (const tile of tileEntries(vines).values()){
@@ -855,25 +933,25 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
   // Bodies come from a few shared variants per kind: generating one per plant
   // was ~2,700 unique meshes at 3200u (and most of the boot's tree-growing).
   const VARIANTS = 6;
-  const variants = (spec) => Array.from({ length: VARIANTS }, () => {
-    const b = generateTree(fork(frng), spec, atlas); b.leafGeo.computeBoundingBox(); return b; });
+  const variants = (spec, leaves = clumpAtlas) => Array.from({ length: VARIANTS }, () => {
+    const b = generateTree(fork(frng), spec, leaves); b.leafGeo.computeBoundingBox(); return b; });
   const pickBody = (vs) => vs[frng() * vs.length | 0];
   const bushBodies = variants({ ...SHRUB_SPECIES[0], targetHeight: 1.5 });
-  const appleBodies = variants({ ...TREE_SPECIES[1], targetHeight: 6, leavesPerTip: 14 });
+  const appleBodies = variants({ ...TREE_SPECIES[1], targetHeight: 6, leavesPerTip: 3, leavesMid: 2, leafFinal: 0.8 }, apple.atlas);
   const hazelBodies = variants({ ...SHRUB_SPECIES[0], targetHeight: 1.7 });
   for (let i = 0; i < bushes; i++){                          // waist-high berry bushes
     const s = landSpot(new Set(['grass','mud'])); if (!s) continue;
     const body = pickBody(bushBodies);
     const berryMat = frng() < 0.5 ? fruitMats.red : fruitMats.blue;
     const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 12, 0.2, 0.95, frng);
-    plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat,
+    plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat: clumpLeafMat,
       fruitMat: berryMat, fruitSpots, fruitSize: 0.22, kind: 'berries', yieldRange: [2, 4], regrow: 24 }));
   }
   for (let i = 0; i < fruitTrees; i++){                      // small apple trees
     const s = landSpot(new Set(['grass','mud'])); if (!s) continue;
     const body = pickBody(appleBodies);
     const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 10, 0.45, 0.95, frng);
-    plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat,
+    plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat: apple.mat,
       fruitMat: fruitMats.apple, fruitSpots, fruitSize: 0.5, kind: 'apples', yieldRange: [1, 2], regrow: 40 }));
   }
 
@@ -888,7 +966,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
     const s = landSpot(new Set(['grass','mud'])); if (!s) continue;
     const body = pickBody(hazelBodies);
     const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 9, 0.25, 0.9, frng);
-    plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat,
+    plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat: clumpLeafMat,
       fruitMat: hazelMat, fruitSpots, fruitSize: 0.18, kind: 'hazelnuts', yieldRange: [2, 4], regrow: 60 }));
   }
   {                                                           // chamomile daisies (flowers 41 + 13) — gatherable
@@ -1074,27 +1152,117 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       const s = landSpot(new Set(['grass', 'mud'])); if (!s) continue;
       const body = pickBody(elderBodies);
       const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 8, 0.3, 0.9, frng);
-      plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat,
+      plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat: clumpLeafMat,
         fruitMat: fruitMats.blue, fruitSpots, fruitSize: 0.2, kind: 'elder', yieldRange: [1, 2], regrow: 50 }));
     }
   }
 
+  // --- weeping willows, on the banks: a little above the water, never the beach.
+  // Planted last, and only from a fork taken here, so nothing above shifts: every
+  // existing tree, plant and find keeps its place in the seeded world. (That's also
+  // why the grass above doesn't know about them, and why their duff is its own pass.)
+  const willowAtlas = makeWillowAtlas(fork(rng));
+  const willowArch = buildArchetypes(rng, WILLOW_SPECIES, willowAtlas);
+  const willowLeafMat = leafMaterial({ map: willowAtlas.texture });
+  const willowBarkMat = new THREE.MeshLambertMaterial({ map: makeBark(fork(rng)), color: new THREE.Color(0.92, 0.86, 0.76) });
+  const BANK = new Set(['carr', 'wetmeadow', 'meadow', 'woodland', 'marsh']);
+  const willowPos = scatter(scene, fork(rng), willowArch, willowBarkMat, willowLeafMat, willows, (x, z) => {
+    const above = height(x, z) - WATER;
+    return above > 0.15 && above < 1.8 && BANK.has(habitat(x, z));
+  }, [0.8, 1.25], null, null, null, 1.8, 0);
+
+  // --- Norway spruce, on the cold high ground: real forests (forestDepth, above), and
+  // a few small stands out beyond them where seed has carried. They start above the
+  // broadleaf belt and take to north-facing slopes, the cooler and damper ones, and
+  // they shrink toward the tree line. Planted after the willows for the same reason.
+  const sprucePos = [];
+  {
+    const srng = fork(rng);
+    const sizeAt = (x, z) => lerp(1.1, 0.5, (height(x, z) - WATER - SPRUCE_LOW) / (SPRUCE_HIGH - SPRUCE_LOW)) * (0.85 + srng() * 0.3);
+    const fits = (x, z) => spruceGround(x, z) && forestDepth(x, z) === 0;
+    // the forests: a jittered grid, thinner at the edge, with the odd gap
+    const STEP = 8.5, seen = new Set();
+    for (const [cx, cz, R] of forestDiscs){
+      for (let gx = cx - R * 1.3; gx < cx + R * 1.3; gx += STEP) for (let gz = cz - R * 1.3; gz < cz + R * 1.3; gz += STEP){
+        const ax = Math.round(gx / STEP) * STEP, az = Math.round(gz / STEP) * STEP, k = ax + ',' + az;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        const x = ax + (srng() - 0.5) * STEP * 0.8, z = az + (srng() - 0.5) * STEP * 0.8, keep = srng();
+        const depth = forestDepth(x, z);
+        if (depth > 0 && keep < 0.5 + Math.min(0.42, depth * 2.5)) sprucePos.push([x, z, sizeAt(x, z)]);
+      }
+    }
+    for (let i = 0, stands = 0; i < spruceStands * 60 && stands < spruceStands; i++){
+      const cx = (srng() - 0.5) * WORLD_R * 2, cz = (srng() - 0.5) * WORLD_R * 2;
+      if (!fits(cx, cz) || srng() > 0.2 + 0.8 * facesNorth(cx, cz)) continue;
+      stands++;
+      const n = 6 + (srng() * 13 | 0), R = 9 + srng() * 12, here = [];
+      for (let t = 0; t < n * 6 && here.length < n; t++){
+        const a = srng() * Math.PI * 2, r = Math.sqrt(srng()) * R, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+        if (!fits(x, z) || here.some(p => Math.hypot(p[0] - x, p[1] - z) < 3.4)) continue;
+        here.push([x, z, sizeAt(x, z)]);
+      }
+      sprucePos.push(...here);
+    }
+    const spruceAtlas = makeClumpAtlas(fork(rng), { kind: 'spruce' });
+    const spruceArch = buildArchetypes(rng, SPRUCE_SPECIES, spruceAtlas);
+    const spruceBarkMat = new THREE.MeshLambertMaterial({ map: makeBark(fork(rng)), color: new THREE.Color(0.74, 0.60, 0.52) });
+    const pickAge = (x, z, r) => { const v = r(); return v < 0.22 ? 2 : v < 0.38 ? 1 : 0; };   // [spruce, old, young]
+    const planted = scatter(scene, fork(rng), spruceArch, spruceBarkMat, leafMaterial({ map: spruceAtlas.texture }), sprucePos,
+      null, null, pickAge, null, null, 1.6, 0);
+    sprucePos.length = 0; sprucePos.push(...planted);
+  }
+
+  // --- juniper, in loose groups on the open heath, among the pines ---
+  const juniperPos = [];
+  {
+    const jrng = fork(rng);
+    const fits = (x, z) => Math.hypot(x, z) < WORLD_R && !kept(x, z) && habitat(x, z) === 'heath' && !replaced(x, z);
+    for (let i = 0, groups = 0; i < juniperGroups * 60 && groups < juniperGroups; i++){
+      const cx = (jrng() - 0.5) * WORLD_R * 2, cz = (jrng() - 0.5) * WORLD_R * 2;
+      if (!fits(cx, cz)) continue;
+      groups++;
+      const n = 2 + (jrng() * 6 | 0), R = 6 + jrng() * 14;
+      for (let t = 0; t < n; t++){
+        const a = jrng() * Math.PI * 2, r = Math.sqrt(jrng()) * R, x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+        if (fits(x, z)) juniperPos.push([x, z, 0.65 + jrng() * 0.65]);
+      }
+    }
+    const atlas = makeClumpAtlas(fork(rng), { kind: 'juniper' });
+    const arch = buildArchetypes(rng, JUNIPER_SPECIES, atlas);
+    const barkM = new THREE.MeshLambertMaterial({ map: makeBark(fork(rng)), color: new THREE.Color(0.72, 0.62, 0.55) });
+    const planted = scatter(scene, fork(rng), arch, barkM, leafMaterial({ map: atlas.texture }), juniperPos, null, null, null, null, null, 0.4, 0);
+    juniperPos.length = 0; juniperPos.push(...planted);
+  }
+
+  // --- yew: rare, alone, in the old woodland and the groves, on ground that isn't
+  // wet. A yew shades out what's under it, so it won't stand in a neighbour's trunk.
+  const yewAtlas = makeClumpAtlas(fork(rng), { kind: 'yew' });
+  const yewArch = buildArchetypes(rng, YEW_SPECIES, yewAtlas);
+  const yewBarkMat = new THREE.MeshLambertMaterial({ map: makeRedwoodBark(fork(rng)), color: new THREE.Color(0.85, 0.62, 0.55) });
+  const yewPos = scatter(scene, fork(rng), yewArch, yewBarkMat, leafMaterial({ map: yewAtlas.texture }), yews, (x, z) => {
+    const h = habitat(x, z), d = height(x, z) - WATER;
+    return (h === 'woodland' || h === 'grove') && d > 1.5 && d < 14 && underTree(x, z) < 0.3 && !forestDepth(x, z);
+  }, [0.8, 1.2], null, null, null, 2.4, 0);
+
+  if (ground) shadeGroundUnderTrees(ground, spotGrid([...willowPos, ...sprucePos].map(([x, z]) => [x, z, 3.6]).concat(yewPos.map(([x, z]) => [x, z, 6]))));
+
   return {
     plants,
     valuables,                                        // rare finds: shells, stones, amber, quartz
-    flowers,                                          // individually-pickable wildflowers (for elf crown agents)
-    trees: [...treePos, ...redwoodPos, ...oakPos, ...birchPos, ...rowanPos, ...pinePos, ...alderPos],
+    flowers,                                          // individually-pickable wildflowers (for the women's crowns, agents.js)
+    trees: [...treePos.filter(standsOn), ...redwoodPos, ...oakPos.filter(standsOn), ...birchPos.filter(standsOn), ...rowanPos.filter(standsOn), ...pinePos.filter(standsOn), ...alderPos, ...willowPos, ...sprucePos, ...juniperPos, ...yewPos],
     // the same trunks, but with identity: species and age. The mycelium network is
     // built over these (js/mycelium.js) — guild membership follows species, and the
     // link graph follows position, so this is all it needs.
     // scale is the per-instance size; trunkR/trunkH are the archetype's base trunk
     // radius and height (so actual = ×scale) — the face shells fit the real trunk.
     treeRecords: [
-      ...treePos   .map(([x, z, sc, sp, tr, th]) => ({ x, z, scale: sc || 1, species: sp || 'maple',   trunkR: tr, trunkH: th })),
+      ...treePos.filter(standsOn).map(([x, z, sc, sp, tr, th]) => ({ x, z, scale: sc || 1, species: sp || 'maple',   trunkR: tr, trunkH: th })),
       ...redwoodPos.map(([x, z, sc, sp, tr, th]) => ({ x, z, scale: sc || 1, species: sp || 'redwood', trunkR: tr, trunkH: th })),
-      ...oakPos    .map(([x, z, sc, sp, tr, th]) => ({ x, z, scale: sc || 1, species: sp || 'oak',     trunkR: tr, trunkH: th })),
-      ...birchPos  .map(([x, z, sc])             => ({ x, z, scale: sc || 1, species: 'birch', trunkR: birchArch[0].trunkR, trunkH: birchArch[0].trunkH })),
-      ...rowanPos  .map(([x, z, sc])             => ({ x, z, scale: sc || 1, species: 'rowan', trunkR: rowanArch[0].trunkR, trunkH: rowanArch[0].trunkH })),
+      ...oakPos.filter(standsOn).map(([x, z, sc, sp, tr, th]) => ({ x, z, scale: sc || 1, species: sp || 'oak',     trunkR: tr, trunkH: th })),
+      ...birchPos.filter(standsOn).map(([x, z, sc]) => ({ x, z, scale: sc || 1, species: 'birch', trunkR: birchArch[0].trunkR, trunkH: birchArch[0].trunkH })),
+      ...rowanPos.filter(standsOn).map(([x, z, sc]) => ({ x, z, scale: sc || 1, species: 'rowan', trunkR: rowanArch[0].trunkR, trunkH: rowanArch[0].trunkH })),
     ],
     grass: null,
     reeds: reedGrass,                                 // [{ inst, items }] per tile — tall swamp grass, also hidden along trails
@@ -1103,14 +1271,19 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
     shrubs: shrubRecs,                                // choppable shrubs (firewood) — see agents.js
     // obstacles people walk around: trunks, plus shrubs (which vanish when chopped:
     // the shrub records carry .alive, and the avoidance code skips dead ones)
+    // roots: how far its roots spread. People step over them; a sheep goes round (js/dodge.js)
     obstacles: [
-      ...treePos.map(([x, z])    => ({ x, z, r: 0.9 })),
-      ...redwoodPos.map(([x, z]) => ({ x, z, r: 1.4 })),
-      ...oakPos.map(([x, z])     => ({ x, z, r: 1.0 })),
-      ...birchPos.map(([x, z])   => ({ x, z, r: 0.6 })),
-      ...rowanPos.map(([x, z])   => ({ x, z, r: 0.5 })),
-      ...pinePos.map(([x, z])    => ({ x, z, r: 0.85 })),   // (pines and alders were missing: walked through, built over)
-      ...alderPos.map(([x, z])   => ({ x, z, r: 0.85 })),
+      ...treePos.filter(standsOn).map(([x, z, sc, , , , rr]) => ({ x, z, r: 0.9, roots: rr * sc })),
+      ...redwoodPos.map(([x, z, sc, , , , rr]) => ({ x, z, r: 1.4, roots: rr * sc })),
+      ...oakPos.filter(standsOn).map(([x, z, sc, , , , rr]) => ({ x, z, r: 1.0, roots: rr * sc })),
+      ...birchPos.filter(standsOn).map(([x, z]) => ({ x, z, r: 0.6 })),
+      ...rowanPos.filter(standsOn).map(([x, z]) => ({ x, z, r: 0.5 })),
+      ...pinePos.filter(standsOn).map(([x, z, sc, , , , rr]) => ({ x, z, r: 0.85, roots: rr * sc })),   // (pines and alders were missing: walked through, built over)
+      ...alderPos.map(([x, z, sc, , , , rr])   => ({ x, z, r: 0.85, roots: rr * sc })),
+      ...willowPos.map(([x, z, sc, , , , rr])  => ({ x, z, r: 1.0, roots: rr * sc })),
+      ...sprucePos.map(([x, z])  => ({ x, z, r: 0.8 })),
+      ...juniperPos.map(([x, z]) => ({ x, z, r: 0.5 })),
+      ...yewPos.map(([x, z, sc, , , , rr])     => ({ x, z, r: 1.4, roots: rr * sc })),
       ...shrubRecs,
     ],
     update(dt){ for (const p of plants) p.tick(dt); for (const v of valuables) v.tick(dt); for (const f of flowers) f.tick(dt); },

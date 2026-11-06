@@ -32,7 +32,7 @@ export function hourWord(h){
   if (h < 19) return 'at dusk';
   return 'at nightfall';
 }
-const HOW = { picked: 'Picked', found: 'Found', fished: 'Caught', traded: 'Traded for', given: 'Given you' };
+const HOW = { picked: 'Picked', found: 'Found', fished: 'Caught', shorn: 'Shorn', traded: 'Traded for', given: 'Given you', cooked: 'Cooked' };
 const FROM = { traded: 'with', given: 'by' };   // "Traded for with Tam", "Given you by Tam"
 const THIN_AT = { 'fairy ring': 'inside a fairy ring', 'sacred tree': 'under a sacred tree', 'stone circle': 'within a stone circle', barrow: 'by a barrow', 'the deep': 'in the deep' };
 
@@ -47,6 +47,7 @@ export function describe(p){
   if (p.moon && !p.under) parts.push(`under a ${phaseName(p.moon.illum, p.moon.waxing)} in the House of the ${p.moon.house}`);
   if (!p.under && p.rain > 0.3) parts.push('in the rain');
   let s = parts.join(', ') + '.';
+  if (p.dirt != null) s += p.dirt > 0.6 ? ' Matted with dirt.' : p.dirt > 0.3 ? ' Rather dirty.' : ' Quite clean.';   // a fleece (js/shear.js)
   if (p.fasting == null || p.fasting >= 12) s += ' You were fasting.';
   return s;
 }

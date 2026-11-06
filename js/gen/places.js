@@ -221,9 +221,19 @@ function build(){
     }
   }
   for (const g of REG) g.neighbours = Object.entries(edge.get(g.id)).sort((p, q) => q[1] - p[1]).map(([id]) => byId.get(+id));
+  // the land round a settlement goes by the settlement's name: a place has one name,
+  // not "Meden" standing in "Gonell Wood". `town` is its index in settlements().places;
+  // the kind stays, since the land is still a wood. If two ever shared a region, the
+  // first (the larger) names it.
+  const sn = settlementNames();
+  settlements().places.forEach((p, i) => {
+    const g = placeAt(p.x, p.z);
+    if (g.town != null) return;
+    g.town = i; g.name = sn[i].name; g.word = sn[i].word; g.at = p.kind === 'farmstead' ? 'at' : 'in';
+  });
 }
 
-// every region: { id, kind, name, word, at, x, z (label point), area, neighbours }
+// every region: { id, kind, name, word, at, x, z (label point), area, neighbours, town? (settlement index) }
 export function places(){ if (!REG) build(); return REG; }
 
 // the region at a point
@@ -245,8 +255,8 @@ function _byId(){ if (!_idx){ _idx = []; for (const g of REG) _idx[g.id] = g; } 
 const SETTLED = /(ton|wick|ham|by|ley|stead|cot|ford|field|well|combe|den|holt|dale)$/;
 let SNAMES = null;
 export function settlementNames(){
+  if (!REG) build();                                   // build() names its towns' regions by calling this, so it may fill SNAMES
   if (SNAMES) return SNAMES;
-  if (!REG) build();
   const r = mulberry32((WORLD_SEED ^ 0x5e77a3e) >>> 0), used = new Set(REG.map(g => g.word));
   SNAMES = settlements().places.map(p => {
     let w; do w = makeWord(r); while (used.has(w) || !SETTLED.test(w));
@@ -254,6 +264,15 @@ export function settlementNames(){
     return { word: w, name: p.kind === 'farmstead' ? `${w} Farm` : w, lane: `${w} Lane` };
   });
   return SNAMES;
+}
+
+// foreign parts, off each end of the Old Road: two names, their own seed stream, used nowhere in the Lea
+let FNAMES = null;
+export function farNames(){
+  if (FNAMES) return FNAMES;
+  const r = mulberry32((WORLD_SEED ^ 0xfa4a3e) >>> 0), used = new Set([...REG.map(g => g.word), ...settlementNames().map(n => n.word)]);
+  FNAMES = [0, 1].map(() => { let w; do w = makeWord(r); while (used.has(w)); used.add(w); return w; });
+  return FNAMES;
 }
 
 // the ruins' names (gen/ruins.js), in the same order: { name, at } — "the Tarrow

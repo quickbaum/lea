@@ -21,7 +21,7 @@ import { Project, projectOf } from './projects.js';
 import { foresight } from './larder.js';
 import { lack } from './trade.js';
 import { RECIPES, stepsKnown, learnRecipe, carries, potNeeds, potHelp, potLeft, potStep, potDish } from './recipes.js';
-import { FELLOWSHIPS } from './fellowships.js';
+import { FELLOWSHIPS, mayHear } from './fellowships.js';
 
 const PART_R     = 9;       // apart further than this, someone has left the talk
 const JOIN_R     = 5;       // close enough to ask to join
@@ -116,7 +116,7 @@ const knowsAll   = (n, s, now) => { const e = lore(n).get(s.id); return !!e && (
 const knowsStart = (n, s, now) => { const e = lore(n).get(s.id); return !!e && (e.heritage || now - e.t < LORE_GONE); };
 const learn = (n, s, now) => { const e = lore(n).get(s.id); if (!e || !e.heritage) lore(n).set(s.id, { t: now }); };
 
-const KIND_WORDS = new Set(['proj-ack-good', 'proj-yes', 'proj-claim', 'praise-cook', 'praise-other', 'praise-thanks', 'pot-offer', 'a-pot-help', 'give-food', 'thanks-food', 'lore-learnt', 'a-help', 'a-stuck', 'meh-reply']);
+const KIND_WORDS = new Set(['proj-ack-good', 'proj-yes', 'proj-claim', 'praise-cook', 'praise-other', 'praise-thanks', 'pot-offer', 'a-pot-help', 'give-food', 'thanks-food', 'lore-learnt', 'a-help', 'a-stuck', 'meh-reply', 'crown-nice', 'crown-thanks', 'crown-yours', 'crown-wilting', 'crown-pretty']);
 
 // what a move is about, for answering it with a saying
 const THEME = {
@@ -204,9 +204,10 @@ export class Conversation {
 
   // A trade at a village door (agents.js callAt): a talk that opens with the
   // haggle, and holds both of them there till it's done (see _steer).
-  static haggle(w, a, b, h){
+  static haggle(w, a, b, h, came = false){
     for (const n of [a, b]) if (n.convo) n.convo.leave(n);
     const c = new Conversation(w, a, b);
+    c.came = came;      // b came over to a trader's cry
     c.chain = c.trading = (function*(){ yield* opening(c, a, b); yield* haggleChain(c, a, b, h); })();
     return c;
   }
@@ -327,7 +328,7 @@ export class Conversation {
       if (o === m.who) continue;
       o.needs.company = clamp01(o.needs.company - TALK_COMPANY);
       if (o !== m.to) nudge(o, m.who, TALK_FAM * 0.5, 0);        // overheard
-      if (m.fact && o !== m.fact.subj){
+      if (m.fact && o !== m.fact.subj && mayHear(m.fact, o)){
         addNews(o, { ...m.fact, from: m.who, hops: (m.fact.hops || 0) + 1 });   // the news passes as it's said
         if (m.fact.kind === 'kind' && regard(o, m.fact.subj) > -0.3) nudge(o, m.fact.subj, 0, TALK_REP);
       }
@@ -462,6 +463,7 @@ function pickTopic(w, sp, to, c){
   if (meal && now - meal.t < 0.2 && meal.cook && meal.cook !== sp && quiet(sp, praiseKey(meal), now, 0.5)) return praiseChain(w, sp, to);
   if (pot && ask('pot') && (pot.potCook() === sp || pot.pot.raw > 0 || need(sp, 'food') > 0.3)) return potChain(w, sp, to, pot);
   if (pot && pot.potCook() !== sp && cookingWanted(w, sp, pot)) return cookingChain(w, sp, pot.potCook() && pot.potCook().convo === sp.convo && pot.potCook() !== sp ? pot.potCook() : to, pot);
+  if (crownNoticed(sp, to, now)) return crownChain(w, sp, to);
   const heard = heardDish(sp, to, now);
   if (heard) return teachChain(w, sp, to, heard.recipe);
   if ((w.evening > 0.25 || w.rain > 0.2) && !hasRoof(w, sp) && ask('hut')) return hutChain(w, sp, to);
@@ -471,11 +473,11 @@ function pickTopic(w, sp, to, c){
   const evening = w.night > 0.5 && w.fires.some(f => f.lit && Math.hypot(f.x - sp.x, f.z - sp.z) < 9);   // night, by a fire
   if (evening && c && c.members.some(m => m.atGathering) && ask('sing')) { const g = singChain(c, sp, to); if (g) return g; }
   if (evening){                                      // the day's doings, told as a story, before any omen
-    const day = newsFor(sp, to, c && c.told, x => x.kind !== 'omen' && w.time - x.t < 0.5);
+    const day = newsFor(sp, to, c && c.told, x => x.kind !== 'omen' && w.time - x.t < 0.5 && sayable(x, c));
     if (day && quiet(sp, 'st:' + day.key, now, 0.5)){ if (!sp._said) sp._said = new Map(); sp._said.set('st:' + day.key, now); return storyChain(w, sp, to, day); }
   }
   if (evening && ask('tomorrow')) return tomorrowChain(w, sp, to);
-  const f = newsFor(sp, to, c && c.told);
+  const f = newsFor(sp, to, c && c.told, x => sayable(x, c));
   if (f) return newsChain(w, sp, to, f, c);
   if (INTENT[to.actionLabel] && quiet(to, 'i:' + to.actionLabel, now, SAY_GAP) && ask('doing')) return doingChain(w, sp, to);
   if (INTENT[sp.actionLabel] && quiet(sp, 'i:' + sp.actionLabel, now, SAY_GAP)) return selfChain(w, sp, to);
@@ -483,6 +485,30 @@ function pickTopic(w, sp, to, c){
   const st = smallTopic(w, sp);
   if (quiet(sp, 's:' + st, now, SAY_GAP)) return smallChain(w, sp, to, st);
   return null;
+}
+
+// A flower crown on the person you're talking to (docs/crowns.md). Each person
+// remarks on a given crown at most once, and not everyone does: more often if they
+// care for pretty things, never if they think badly of her. The choice is hashed,
+// not rolled, because worthIt asks pickTopic too and the two must agree.
+const crownKey = (sp, to) => 'cr:' + to.id + ':' + to.crown.t;
+function crownNoticed(sp, to, now){
+  if (!to.crown || !quiet(sp, crownKey(sp, to), now, Infinity) || regard(sp, to) < -0.25) return false;
+  return hash01('crn' + sp.id, to.id + ':' + to.crown.t) < 0.25 + 0.4 * ((sp.persona && sp.persona.beauty) ?? 1);
+}
+function* crownChain(w, A, B){
+  const cr = B.crown, mark = crownKey(A, B);
+  const couldMake = A.gender === 'female' && A.race === 'human' && A.role !== 'child';
+  if (!A.crown && hash01('crq' + A.id, B.id + ':' + cr.t) < (couldMake ? 0.75 : 0.4)){   // those who'd make one are likelier to ask where
+    yield M(A, B, 'q-crown-where', 'flower', { mark, ask: true });                       // "Where did you get those flowers?"
+    yield M(B, A, 'a-crown-where', 'place', { x: cr.x, z: cr.z });                       // "I picked them out on the Tackey Marshes."
+    nudge(B, A, 0.03, 0.04);
+    yield M(A, B, 'crown-pretty', 'flower', { feel: true });                             // "They're lovely."
+    return;
+  }
+  yield M(A, B, 'crown-nice', 'flower', { mark, feel: true });                           // "That's a lovely crown."
+  nudge(B, A, 0.03, 0.08); nudge(A, B, 0, 0.04);
+  yield M(B, A, A.crown ? 'crown-yours' : B.crownUntil - w.time < 0.5 ? 'crown-wilting' : 'crown-thanks', 'flower', { feel: true });
 }
 
 const hasRoof = (w, n) => w.huts.some(h => h.mayUse(n) && h.built > 0.99);
@@ -543,11 +569,13 @@ const LEAVE_D = 8;
 export const PART_DAYS = 0.1;                         // ~a minute: a goodbye holds this long
 function part(a, b, now){ if (!a._parted) a._parted = new Map(); a._parted.set(b, now); }
 export const parted = (a, b, now) => !!a._parted && now - (a._parted.get(b) ?? -1) < PART_DAYS;
+// nobody says what a fellowship keeps in front of someone who isn't in it
+const sayable = (f, c) => !c?.members || c.members.every(o => mayHear(f, o));
 function willLeave(n){
   const b = n.brain;
   if (!b) return false;
   const held = b.target;
-  b.choose();                                        // what would I do next, if not this?
+  b._asking = true; b.choose(); b._asking = false;   // what would I do next, if not this?
   const t = b.target; b.target = held;               // (just asking — the talk still has our feet)
   return !!t && t.kind !== 'greet' && Math.hypot(t.x - n.x, t.z - n.z) > LEAVE_D;
 }
@@ -684,12 +712,18 @@ function* hungerChain(w, A, B, c){
 // Whatever B says they're short of, A remembers (a plan to bring it).
 function* haggleChain(c, A, B, h){
   const w = c.w, t = w.tradeTerms(A, B, h);
+  t.came = c.came;
   if (!t.want){ yield M(B, A, 'tr-none', 'trade'); w.tradeDone(A, B, h, null, t); return; }
-  yield M(A, B, 'tr-ask', 'trade', { ask: true, item: t.want });           // "Any onions to spare?"
-  yield M(B, A, 'tr-what', 'trade', { ask: true });                        // "Some. What have you brought?"
+  if (A.trader){                                                           // a trader says what they've got
+    if (c.came) yield M(B, A, 'tr-wares-ask', 'trade', { ask: true });     // "What've you got?"
+    yield M(A, B, 'tr-wares', 'trade', { item: t.show });                  // "Salt, if you're short."
+  } else {
+    yield M(A, B, 'tr-ask', 'trade', { ask: true, item: t.want });         // "Any onions to spare?"
+    yield M(B, A, 'tr-what', 'trade', { ask: true });                      // "Some. What have you brought?"
+  }
   const d = t.deal;
   if (!d){
-    yield M(A, B, 'tr-show', 'trade', { item: t.show });                   // "Acorns, mostly."
+    if (!A.trader) yield M(A, B, 'tr-show', 'trade', { item: t.show });    // "Acorns, mostly."
     yield M(B, A, 'tr-no', 'trade', { item: t.show, wish: t.wish, feel: true });   // "No use for acorns. Bring meat."
     w.tradeDone(A, B, h, null, t);
     return;
@@ -883,7 +917,7 @@ function* potChain(w, A, B, f){
 // is there a cooking question A would ask about this pot now? (cookingChain's tests)
 function cookingWanted(w, A, f){
   const p = f.pot, now = w.time;
-  if (!RECIPES[p.recipe] || p.raw <= 0) return false;
+  if (p.mine || !RECIPES[p.recipe] || p.raw <= 0) return false;   // (the player's pot: not theirs to help with)
   if (potNeeds(p).length && quiet(A, 'q:need' + p.recipe, now, ASK_GAP)) return true;
   if (potHelp(p) && need(A, 'rest') < 0.6 && quiet(A, 'q:help' + p.recipe, now, ASK_GAP)) return true;
   return stepsKnown(A, p.recipe, now) < RECIPES[p.recipe].steps.length && quiet(A, 'q:how' + p.recipe, now, ASK_GAP);
@@ -894,7 +928,7 @@ function cookingWanted(w, A, f){
 // can I help (a real hand at the work); how do you make it (and now I know).
 function* cookingChain(w, A, cook, f){
   const p = f.pot;
-  if (!RECIPES[p.recipe] || p.raw <= 0) return;
+  if (p.mine || !RECIPES[p.recipe] || p.raw <= 0) return;
   const id = p.recipe, dish = potDish(p), now = w.time, len = RECIPES[id].steps.length;   // the dish, fixed now: the pot may be emptied mid-talk
   if (stepsKnown(cook, id, now) < len){       // they don't know the dish: send A to whoever's cooking it
     const owner = f.potCook();
@@ -1025,6 +1059,7 @@ function singChain(c, A, B){
 // for a remark to the player: what they're up to, or how they are, if not said lately
 export function idleMove(w, n, to){
   const now = w.time;
+  if (n.crown && quiet(n, 's:crown' + n.crown.t, now, Infinity)) return M(n, to, 's-crown', 'flower', { mark: 's:crown' + n.crown.t });
   if (INTENT[n.actionLabel] && quiet(n, 'i:' + n.actionLabel, now, SAY_GAP)) return intentMove(w, n, to);
   const st = smallTopic(w, n);
   return quiet(n, 's:' + st, now, SAY_GAP) ? M(n, to, 's-' + st, st, { mark: 's:' + st }) : null;

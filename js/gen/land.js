@@ -24,8 +24,9 @@
 
 import { SIZE, WATER, WORLD_SEED, WORLD, WORLD_R } from '../config.js';
 import { mulberry32 } from '../rng.js';
-import { planRoad, gradeWeight, ROAD_W, VERGE, BANK } from './road.js';
-import { planSettlements, inBuilding, LANE_W } from './settle.js';
+import { planRoad, gradeWeight, ROAD_W, VERGE, BANK, CROWN } from './road.js';
+import { planSettlements, inBuilding, LANE_W, POST_R } from './settle.js';
+import { dressSettlements } from './house.js';
 import { planRuins, standing } from './ruins.js';
 import { planUnder, mouthShape, halfWidth, mouthFloor } from './under.js';
 import { arcadeField } from './arcade.js';
@@ -182,7 +183,8 @@ function build(){
   }
   ROAD = planRoad({ size: SIZE, seed: (WORLD_SEED ^ 0x70ad) >>> 0, height, water: WATER, fields });
   gradeRoad();
-  SETTLE = planSettlements({ size: SIZE, seed: (WORLD_SEED ^ 0x5e771e) >>> 0, height, habitat, water: WATER, road: ROAD, worldR: WORLD_R });
+  SETTLE = planSettlements({ size: SIZE, seed: (WORLD_SEED ^ 0x5e771e) >>> 0, height, habitat, water: WATER, road: ROAD, worldR: WORLD_R, roadW: ROAD_W });
+  dressSettlements(SETTLE, { height, habitat, seed: WORLD_SEED });   // before grading: a house reads the slope it was built on
   gradeSettlements();
   RUINS = planRuins({ size: SIZE, seed: (WORLD_SEED ^ 0x7a1d5) >>> 0, height, habitat, water: WATER, road: ROAD, settle: SETTLE, worldR: WORLD_R });
   placeRuins();
@@ -238,7 +240,8 @@ function cutMouths(){
   }
 }
 
-// Grade the land to the road: across the paving it takes the road's height,
+// Grade the land to the road: across the paving it takes the road's height and
+// camber (so height() is the top of the stones, and whoever stands there stands on them),
 // over the embankment's skirt it eases back to its own. Each cell also learns
 // its band — 2 paved (the shoulder just past the kerb included, so the ground's
 // colour meets the stones), 1 the cleared verge, 0 off the road.
@@ -261,7 +264,8 @@ function gradeRoad(){
     const d = D[i];
     if (d > reach) continue;
     const w = gradeWeight(d);
-    if (w > 0) H[i] += (ROAD.heightAt(S[i]) - H[i]) * w;
+    const camber = d < ROAD_W ? CROWN * (1 - (d / ROAD_W) ** 2) : 0;
+    if (w > 0) H[i] += (ROAD.heightAt(S[i]) + camber - H[i]) * w;
     RB[i] = d <= ROAD_W + 0.8 ? 2 : d <= ROAD_W + VERGE ? 1 : 0;
   }
 }
@@ -330,8 +334,9 @@ function gradeSettlements(){
     pad(b, p.well.y);
   }
   // what's solid, bucketed so solidAt() looks at a handful
-  for (const b of SETTLE.buildings) addSolid(b, Math.hypot(b.hl, b.hw));
-  for (const p of SETTLE.places) if (p.well) addSolid({ x: p.well.x, z: p.well.z, a: 0, hl: p.well.r, hw: p.well.r }, p.well.r * 1.5);
+  for (const b of SETTLE.buildings) for (const o of [b, ...(b.parts || [])]) addSolid(o, Math.hypot(o.hl, o.hw));   // a wing, a wagon porch (house.js)
+  for (const p of SETTLE.places) if (p.well) addSolid({ x: p.well.x, z: p.well.z, a: 0, hl: p.well.r, hw: p.well.r, round: p.well.r }, p.well.r * 1.5);
+  for (const j of SETTLE.junctions) for (const q of [j, j.box]) addSolid({ x: q.x, z: q.z, a: 0, hl: POST_R, hw: POST_R }, POST_R * 1.5);   // the signpost and the mailbox's post
 }
 // The ruins aren't graded: the ground has grown up round them. Their walls and
 // standing stones are solid where they stand too high to step over, and no tree
@@ -353,7 +358,7 @@ const inGreen = (e, x, z) => {
 };
 const SOLID = new Map(), SC = 32;
 const skey = (i, j) => (i + 2048) * 4096 + (j + 2048);
-function addSolid(b, rad){
+export function addSolid(b, rad){
   for (let i = Math.floor((b.x - rad - 2) / SC); i <= Math.floor((b.x + rad + 2) / SC); i++)
     for (let j = Math.floor((b.z - rad - 2) / SC); j <= Math.floor((b.z + rad + 2) / SC); j++){
       const k = skey(i, j);
@@ -380,7 +385,7 @@ export function builtAt(x, z, pad = 0){
   if (!H) build();
   const list = SOLID.get(skey(Math.floor(x / SC), Math.floor(z / SC)));
   if (!list) return false;
-  for (const b of list) if (inBuilding(b, x, z, pad)) return true;
+  for (const b of list) if (b.round ? Math.hypot(x - b.x, z - b.z) < b.round + pad : inBuilding(b, x, z, pad)) return true;
   return false;
 }
 export const solidAt = builtAt;

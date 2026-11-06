@@ -45,6 +45,7 @@ export const KINDS = {
   house:   { w: [4.4, 5.4], l: [8, 12],    eaves: 2.1, pitch: 50, wall: 'logs',   roof: 'thatch' },
   cottage: { w: [3.8, 4.4], l: [5.5, 7],   eaves: 2.0, pitch: 50, wall: 'logs',   roof: 'thatch' },
   barn:    { w: [5.5, 7],   l: [9, 13],    eaves: 2.8, pitch: 45, wall: 'boards', roof: 'shingle' },
+  hut:     { w: [2.4, 2.4], l: [3.2, 3.2], eaves: 1.85, pitch: 52, wall: 'logs',  roof: 'thatch' },   // a shepherd's (gen/common.js)
   shed:    { w: [2.8, 3.4], l: [3.6, 5],   eaves: 1.9, pitch: 40, wall: 'boards', roof: 'shingle' },
   granary: { w: [2.4, 2.8], l: [2.6, 3.2], eaves: 1.6, pitch: 45, wall: 'boards', roof: 'thatch', raised: 0.8 },
 };
@@ -95,7 +96,7 @@ export function inBuilding(b, x, z, pad = 0){
   return Math.abs(dx * lx + dz * lz) < b.hl + pad && Math.abs(dx * cx + dz * cz) < b.hw + pad;
 }
 // do two buildings come within `gap` of each other? (separating axes)
-function overlaps(p, q, gap){
+export function overlaps(p, q, gap){
   for (const b of [p, q]){
     const [lx, lz, cx, cz] = axes(b);
     for (const [ux, uz] of [[lx, lz], [cx, cz]]){
@@ -122,7 +123,7 @@ function footprint(b, pad = 0){
 // size: the world's side; height / habitat: the land as graded for the road;
 // water: the water plane; road: the Old Road (road.js); worldR: how far out
 // things may stand
-export function planSettlements({ size, seed, height, habitat, water, road, worldR }){
+export function planSettlements({ size, seed, height, habitat, water, road, worldR, roadW = 3.6 }){
   const r = mulberry32(seed >>> 0);
   const half = size / 2;
 
@@ -253,7 +254,8 @@ export function planSettlements({ size, seed, height, habitat, water, road, worl
   }
 
   const lanes = planLanes({ size, places, buildings: all, fields, height, water, road });
-  return { places, buildings: all, lanes, fields };
+  const junctions = planJunctions({ lanes, road, roadW, buildings: all, fields, height, water });
+  return { places, buildings: all, lanes, fields, junctions };
 }
 
 // A household's field, behind its house: the croft beyond the toft, as an
@@ -494,6 +496,60 @@ function planLanes({ size, places, buildings, fields, height, water, road }){
     }
   }
   return lanes;
+}
+
+// ---- where a lane ends ------------------------------------------------------------
+// A signpost and a mailbox beside the lane, just up from where it meets the Old Road (or, if it
+// joins another lane, that lane): js/junction-view.js draws them, js/mail.js fills the boxes.
+// Plans from what's already been laid and draws nothing from the rng, so no world shifts for it.
+const POST_CLEAR = 2.4;        // the posts stand this far from the paving's edge, at least
+const POST_OFF = 1.4;          // and this far from the lane's edge
+const BOX_ALONG = 2.2;         // the box stands this far on up the lane from the sign
+export const POST_R = 0.2;     // half-width of either post
+function planJunctions({ lanes, road, roadW, buildings, fields, height, water }){
+  const out = [];
+  const clear = (x, z) => road.nearest(x, z).d >= roadW + POST_CLEAR
+    && lanes.every(l => l.nearest(x, z).d >= LANE_W + POST_OFF * 0.7)
+    && height(x, z) > water + 0.5
+    && !buildings.some(b => inBuilding(b, x, z, 2)) && !fields.some(f => inBuilding(f, x, z, 1))
+    && out.every(j => Math.hypot(j.x - x, j.z - z) > 5 && Math.hypot(j.box.x - x, j.box.z - z) > 3);
+  for (const lane of lanes){
+    const n = lane.xs.length, ex = lane.xs[n - 1], ez = lane.zs[n - 1];
+    const at = k => [lane.xs[k], lane.zs[k]];
+    let found = null;
+    // from the junction back up the lane, to the first spot both posts will stand
+    for (let k = n - 2; k > 0 && !found && (n - 1 - k) * STEP < Math.min(40, lane.length * 0.7); k--){
+      const [x, z] = at(k), [ux, uz] = at(k - 1);
+      const d = Math.hypot(ux - x, uz - z) || 1, tx = (ux - x) / d, tz = (uz - z) / d;   // up the lane, toward the place
+      for (const side of [1, -1]){
+        const off = LANE_W + POST_OFF, sx = x - tz * side * off, sz = z + tx * side * off;
+        const bx = sx + tx * BOX_ALONG, bz = sz + tz * BOX_ALONG;
+        if (!clear(sx, sz) || !clear(bx, bz)) continue;
+        // a: the way the sign points. box.a: the way the box's door faces, at the lane. box.flag: which
+        // side of the box the flag's on, out toward the road (+1 is to the left of the door's facing)
+        const fx = tz * side, fz = -tx * side;                   // from the post to the lane
+        const a = Math.atan2(fz, fx);
+        const flag = (-Math.sin(a)) * (ex - bx) + Math.cos(a) * (ez - bz) >= 0 ? 1 : -1;
+        found = { place: lane.place, lane, x: sx, z: sz, a: Math.atan2(tz, tx), endX: ex, endZ: ez, box: { x: bx, z: bz, a, flag } };
+        break;
+      }
+    }
+    if (found) out.push(found);
+  }
+  // what else lies along the road, each way: the nearest first. A plank per place, across the lane's sign
+  const AHEAD = 2;
+  for (const j of out) j.s = road.nearest(j.endX, j.endZ).s;
+  for (const j of out){
+    const k = Math.max(1, Math.min(road.xs.length - 2, Math.round(j.s / road.step)));
+    const tx = road.xs[k + 1] - road.xs[k - 1], tz = road.zs[k + 1] - road.zs[k - 1];
+    // perpendicular to the lane's sign; `forward` the one of the two that runs on along the road
+    let px = -Math.sin(j.a), pz = Math.cos(j.a);
+    if (px * tx + pz * tz < 0){ px = -px; pz = -pz; }
+    const forward = Math.atan2(pz, px), back = Math.atan2(-pz, -px);
+    const way = (list, a) => list.sort((p, q) => Math.abs(p.s - j.s) - Math.abs(q.s - j.s)).slice(0, AHEAD).map((o, row) => ({ place: o.place, a, row }));
+    j.along = [...way(out.filter(o => o !== j && o.s > j.s), forward), ...way(out.filter(o => o !== j && o.s <= j.s), back)];
+  }
+  return out;
 }
 
 function nearestOn(x, z, road, lanes){

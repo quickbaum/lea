@@ -48,6 +48,7 @@ export function wornPace(ground, w){
 }
 let wearAt = null;                                  // (x, z) => wear; main.js hands over the trail field
 export function setWearSource(fn){ wearAt = fn; }
+export const wearHere = (x, z) => wearAt ? wearAt(x, z) : 0;
 // walking from (x, z) in direction (dx, dz)
 export function pace(x, z, dx, dz){
   const l = Math.hypot(dx, dz);
