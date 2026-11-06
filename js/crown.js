@@ -51,9 +51,7 @@ export async function generateCrown(flowerIds){
   const cv = document.createElement('canvas');
   cv.width = P.cvW; cv.height = P.cvH + overflow;
   cv._nominalH = P.cvH;
-  cv._arc = { x: P.arcX, y: P.arcY, r: P.arcR };   // the wreath's circle: wearCrown seats it on the head
   const ctx = cv.getContext('2d');
-  ctx.imageSmoothingEnabled = false;   // Lea art stays pixelated
   ctx.clearRect(0, 0, P.cvW, P.cvH + overflow);
   const n = flowerIds.length;
   // Sweep from angS° (left side) down through angP° in canvas coords:

@@ -11,7 +11,6 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { height } from './terrain.js';
 import { WOOD_CAP, STORE_CAP } from './agents.js';
 import { KIN_DYES as THATCH_DYES, kinMark, patternMask } from './kin-mark.js';
-import { crisp } from './textures.js';
 
 const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
 const _emberCol = new THREE.Color();
@@ -104,7 +103,8 @@ function shadeTexture(){
   grad.addColorStop(0.85, 'rgba(34,28,18,0.38)');
   grad.addColorStop(1.0,  'rgba(34,28,18,0)');
   g.fillStyle = grad; g.fillRect(0, 0, s, s);
-  const t = crisp(new THREE.CanvasTexture(cv));
+  const t = new THREE.CanvasTexture(cv);
+  t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
   return t;
 }
 let SHADE_TEX = null;
@@ -528,7 +528,7 @@ export class CampfireView {
     const nLogs = B < 1 ? Math.round(styleMaxLogs * clamp01((B - 0.25) / 0.35)) : styleFullLogs;
     // when a pot is set over the fire, hide fuel that would poke up into it —
     // cooking happens over the coals, with the tall stack burnt down.
-    const potted = (fire.pot.raw + fire.pot.ready) > 0 || fire.hands;   // (empty, it's shown only to whoever's sat at it)
+    const potted = (fire.pot.raw + fire.pot.ready) > 0;
     for (let i = 0; i < this.logs.length; i++)
       this.logs[i].visible = i < nLogs && !(potted && this.logs[i]._top > this._potClear);
     const nEmber = 4 + Math.round(L * 10);     // a lone fire glows with a few coals; a big one, a full bed
@@ -607,7 +607,6 @@ export class CampfireView {
     // dish, bubbling gently while it cooks over a live flame.
     this.potGroup.visible = potted;
     if (potted){
-      this.potBroth.visible = fire.pot.raw + fire.pot.ready > 0 && !fire.pot.board;   // (still on the board: nothing's in the pot yet)
       this.potBroth.material.color.setHex(BROTH_TINT[fire.pot.kind] || 0x6b5230);
       if (fire.pot.raw > 0 && fire.lit){
         const bub = 0.5 + 0.5 * Math.sin(this._t = (this._t || 0) + dt * 6);  // gentle bubbling

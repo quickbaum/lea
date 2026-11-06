@@ -11,8 +11,8 @@ import { makeTexture } from './textures.js';
 import { mulberry32 } from './rng.js';
 
 const ACROSS = [-1, -0.6, -0.2, 0.2, 0.6, 1];   // vertices across, as fractions of the half-width
-const LIFT = 0.03;                               // above the graded ground, which already carries the camber (land.js).
-                                                 // Only enough to clear it: everyone stands at height(), so more buries their feet.
+const LIFT = 0.07;                               // above the graded ground
+const CROWN = 0.12;                              // the camber: the middle stands this much higher
 const CHUNK = 64;                                // samples per mesh (128u of road)
 const TEX_LEN = ROAD_W * 4;                      // road length one texture tile covers
 
@@ -62,7 +62,7 @@ export function buildRoad(scene){
   const R = road(), n = R.xs.length, A = ACROSS.length;
   const map = pavingTexture();
   map.wrapT = THREE.RepeatWrapping;
-  const mat = new THREE.MeshLambertMaterial({ map, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+  const mat = new THREE.MeshLambertMaterial({ map, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const group = new THREE.Group();
   for (let k0 = 0; k0 < n - 1; k0 += CHUNK){
     const k1 = Math.min(n - 1, k0 + CHUNK), rows = k1 - k0 + 1;
@@ -75,7 +75,7 @@ export function buildRoad(scene){
       for (let q = 0; q < A; q++){
         const f = ACROSS[q], x = R.xs[k] - tz * f * ROAD_W, z = R.zs[k] + tx * f * ROAD_W;
         const v = ((k - k0) * A + q);
-        P[v * 3] = x; P[v * 3 + 1] = height(x, z) + LIFT; P[v * 3 + 2] = z;
+        P[v * 3] = x; P[v * 3 + 1] = height(x, z) + LIFT + CROWN * (1 - f * f); P[v * 3 + 2] = z;
         U[v * 2] = (f + 1) / 2; U[v * 2 + 1] = k * R.step / TEX_LEN;
       }
     }

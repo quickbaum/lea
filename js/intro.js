@@ -26,8 +26,8 @@ const SIZE_WORD = { 800: 'small', 1600: 'medium', 3200: 'large' };
 
 const $ = id => document.getElementById(id);
 const TOUCH = document.documentElement.classList.contains('touch');
-// the gear and rest are main.js's; until it loads they'd be dead buttons
-const ingame = ['gear', 'rest-btn'];
+// the gear and pack are main.js's; until it loads they'd be dead buttons
+const ingame = ['gear', 'inv-btn', 'journal-btn', 'rest-btn'];
 let saved = {};
 try { saved = JSON.parse(localStorage.getItem('lea.world') || '{}') || {}; } catch (_){ saved = {}; }
 

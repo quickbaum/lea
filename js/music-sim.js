@@ -119,12 +119,6 @@ export function teachTune(n, id, now){
   return { had, got: learnTune(n, id, now, ear === 'good' ? phraseCount(id) : had + (ear === 'fair' ? E.teach : E.teachNone)), ear };
 }
 
-// someone arrives already knowing a tune, and has it in their hands: no news, they've always had it
-export function bringTune(n, id, now, hands = 0.85){
-  tunebook(n).set(id, { t: now, k: phraseCount(id) });
-  (n.hands ??= new Map()).set(id, { f: hands, t: now });
-}
-
 export const isHeritage = (n, id) => !!tunebook(n).get(id)?.heritage;
 
 // ---- the hands, and practice ---------------------------------------------------------
@@ -175,46 +169,6 @@ function newGo(n, S, now){
     f, whoOf(n) + S.id + S.goes + Math.floor(now * 600), { solo: true });
   return { kind: S.kind, notes: s.notes, length: s.length, left: s.length };
 }
-// the whole of what n knows of a tune, at speed, as well as they can: { kind, id, notes, length, left }, sounded by main.js
-// as a go at practice is (a shepherd on their pipe, js/shepherd.js). Playing it keeps it
-export function playThrough(n, id, now){
-  const k = phrasesKnown(n, id, now), kind = instrumentOf(n);
-  if (!k || !kind) return null;
-  const base = schedule(id, knownSet(k)), up = liftFor(schedule(id).notes, kind);
-  const s = roughen({ notes: base.notes.map(x => ({ ...x, midi: x.midi + up })), length: base.length }, fluencyOf(n, id, now), whoOf(n) + id + Math.floor(now * 600), { solo: true });
-  learnTune(n, id, now, k); drilled(n, id, now, HAND_PLAYED);
-  return { kind, id, notes: s.notes, length: s.length, left: s.length };
-}
-// ---- playing on the road ----------------------------------------------------------------
-// A trader plays as they walk (docs/economy.md): a tune, a while's quiet, another. Sounded by main.js as a shepherd's pipe is
-// (n.piping). A tune broken off teaches nobody; one played out teaches whoever's in earshot where it ends.
-//   on    free to play: walking, nobody to talk to      dt  seconds since last asked      roll()  0..1, the caller's own stream
-//   gap   [least, most] seconds between tunes (a musician's set at a well goes quicker)
-// Returns { id, k, f, learnt } when a tune's just been played out, so whoever's paying can pay.
-export const ROAD_GAP = [30, 100], SET_GAP = [6, 16];
-const roadGap = (roll, g = ROAD_GAP) => g[0] + roll() * (g[1] - g[0]);
-export function roadTune(n, w, on, dt, roll, gap = ROAD_GAP){
-  const P = n.piping ??= { go: null, id: null, last: null, gap: roadGap(roll, gap) };
-  if (!on){ P.go = null; return; }
-  const st = w.musicStats ??= { played: 0, learnt: 0, tunes: {} }, R = st.road ??= { played: 0, finished: 0, learnt: 0 };
-  if (P.go){
-    P.go.left -= dt;
-    if (P.go.left > 0) return;
-    R.finished++;
-    const k = phrasesKnown(n, P.id, w.time), learnt = heardAt(n.x, n.z, w, P.id, k);
-    R.learnt += learnt;
-    P.go = null; P.gap = roadGap(roll, gap);
-    return { id: P.id, k, f: fluencyOf(n, P.id, w.time), learnt };
-  }
-  P.gap = Math.min(P.gap, gap[1]);                 // (come from the road to a set, the next one's sooner)
-  if ((P.gap -= dt) > 0) return;
-  const known = tunesOf(n, w.time), choice = known.length > 1 ? known.filter(id => id !== P.last) : known;
-  if (!choice.length || !instrumentOf(n) || DRUMS.has(n.instrument)){ P.gap = gap[1]; return; }
-  P.id = P.last = choice[Math.floor(roll() * choice.length)];
-  P.go = playThrough(n, P.id, w.time);
-  R.played++;
-}
-
 // a moment's practice, from the Brain, at the spot. True when the session's over.
 export function stepPractice(n, w, dt, id){
   const now = w.time, st = w.musicStats ??= { played: 0, learnt: 0, tunes: {} }, P = st.practice ??= { sessions: 0, goes: 0, alone: 0, gained: 0 };
@@ -360,17 +314,13 @@ const sittingAt = (f, w) => w.npcs.filter(n => n.sitting && Math.hypot(n.x - f.x
 // at the end of a tune, everyone in earshot may learn by ear what was played: a good ear all
 // of it, a fair one the next phrase or so (a simple tune all of it), none nothing (or, of a
 // simple tune, a phrase)
-function heard(f, w, M){ heardAt(f.x, f.z, w, M.tune, Math.max(...M.players.map(p => p.k))); }
-// how many of the folk picked some of it up
-function heardAt(x, z, w, id, most){
-  const E = EASE[easeOf(id)];
-  let got = 0;
+function heard(f, w, M){
+  const most = Math.max(...M.players.map(p => p.k)), E = EASE[easeOf(M.tune)];
   for (const n of w.npcs){
-    if (Math.hypot(n.x - x, n.z - z) > EARSHOT || n._indoors || n.sleeping) continue;
-    const ear = earOf(n), had = phrasesKnown(n, id, w.time), gain = ear === 'good' ? most : ear === 'fair' ? E.ear : E.none;
+    if (Math.hypot(n.x - f.x, n.z - f.z) > EARSHOT) continue;
+    const ear = earOf(n), had = phrasesKnown(n, M.tune, w.time), gain = ear === 'good' ? most : ear === 'fair' ? E.ear : E.none;
     if (!gain || had >= most) continue;
-    learnTune(n, id, w.time, Math.min(most, had + gain));
-    w.musicStats.learnt++; got++;
+    learnTune(n, M.tune, w.time, Math.min(most, had + gain));
+    w.musicStats.learnt++;
   }
-  return got;
 }

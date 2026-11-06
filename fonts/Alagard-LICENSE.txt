@@ -1,3 +1,0 @@
-Alagard, by Hewett Tsoi. https://www.dafont.com/alagard.font
-Licensed by its author as free to use, with this condition: "Give credit if used. That's it."
-Credited in the settings panel (index.html).

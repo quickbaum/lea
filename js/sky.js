@@ -587,17 +587,6 @@ export class Sky {
     this.moonLon += days * (2 * Math.PI / 27.32);
   }
 
-  // the salve's sight (main.js): Faerie's light (under-view.js FAERIE_LIGHT) over this sky,
-  // k from 0 (none) to 1. Everything lit by the sky follows: the ground, the sprites, the
-  // haze, the clouds. The stars and the moon stay as they are
-  setGlamour(k, F){
-    this.glamour = k;
-    if (this._fae || !k) return;
-    const U = this.domeU, sky = new THREE.Color(F.hemi[0]);
-    this._fae = { sky, ground: new THREE.Color(F.hemi[1]), i: F.hemi[2], lit: sky.clone().multiplyScalar(F.hemi[2]),
-      haze: new THREE.Color(F.haze), zenith: new THREE.Color(F.zenith),
-      nightH: U.uNightHoriz.value.clone(), nightZ: U.uNightZenith.value.clone(), hemiGround: this.hemi.groundColor.clone() };
-  }
   update(dt, camera){
     const rate = dt / this.dayLength;
     this.time += rate;
@@ -657,14 +646,6 @@ export class Sky {
     this.moonLight.intensity = clamp(this.moonDir.y, 0, 1) * 0.22 * moonIllum * night;
     this.hemi.intensity = 0.10 + 1.25 * day;
     this.hemi.color.setRGB(0.22 + 0.78 * day, 0.26 + 0.74 * day, 0.36 + 0.64 * day);
-    const fae = this._fae, g = fae ? this.glamour : 0;
-    if (fae){
-      this.hemi.color.lerp(fae.sky, g);
-      this.hemi.intensity += (fae.i - this.hemi.intensity) * g;
-      this.hemi.groundColor.copy(fae.hemiGround).lerp(fae.ground, g);
-      this.domeU.uNightHoriz.value.copy(fae.nightH).lerp(fae.haze, g);
-      this.domeU.uNightZenith.value.copy(fae.nightZ).lerp(fae.zenith, g);
-    }
 
     // Light reaching flat (up-facing) ground: the hemisphere sky term in full plus
     // the sun/moon weighted by how high they sit — i.e. exactly what the Lambert
@@ -690,8 +671,7 @@ export class Sky {
     // continuous with the mountains' nearest ridge so the layers read as one haze.
     // At night the multiplier collapses toward zero so distant objects fade to black
     // rather than a visible grey haze.
-    let fogMul = 0.63 * clamp(0.08 + 0.92 * day, 0.08, 1);
-    fogMul += (1 - fogMul) * g;                            // Faerie's haze doesn't fade to black: it stands off, violet
+    const fogMul = 0.63 * clamp(0.08 + 0.92 * day, 0.08, 1);
     const fogCol = skyHoriz.clone().multiplyScalar(fogMul);
     if (this.scene.fog) this.scene.fog.color.copy(fogCol);
 
@@ -706,7 +686,6 @@ export class Sky {
       .lerp(this.domeU.uSunColor.value, sunset * 0.5)
       .lerp(this._spriteNight ||= new THREE.Color(0.30, 0.40, 0.68), (1 - day) * 0.5)
       .multiplyScalar(b);
-    if (fae) this.spriteTint.lerp(fae.lit, g);
 
     // clouds (the scrolling dome layer): relight from the sun/day, drift with wind.
     // Replaces the 16 billboards — colours feed the dome shader's cloud uniforms.
@@ -714,7 +693,6 @@ export class Sky {
     this.domeU.uCloudLight.value.setRGB(1, 1, 1).lerp(this.domeU.uSunColor.value, sunset * 0.7)
       .multiplyScalar(0.04 + moonBright + 0.74 * day);
     this.domeU.uCloudShadow.value.setRGB(0.50, 0.58, 0.74).multiplyScalar(0.02 + moonBright * 0.5 + 0.55 * day);
-    if (fae){ this.domeU.uCloudLight.value.lerp(fae.lit, g * 0.4); this.domeU.uCloudShadow.value.lerp(fae.lit, g * 0.12); }
     this.domeU.uCloudOpacity.value = 0.45 + 0.5 * day;
     // scroll the ceiling UV with the wind (small rate — this is the infinite layer)
     this.domeU.uCloudScroll.value.x += this.wind.x * dt * 0.004;

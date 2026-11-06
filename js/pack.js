@@ -2,9 +2,8 @@
 // holds one ingredient and takes the cells its size says (ingredients.js `size`), up
 // to its `stack` (a handful of berries in one cell; one eel across three). Things
 // added go first into a box of the same kind with room, then into the first free
-// place, scanning rows top to bottom. The pack has no bottom: it gets as many rows
-// as you fill, and js/pack-view.js scrolls them. A pack given a height still refuses what
-// doesn't fit (add returns how many went in). Boxes can be moved, and dropped onto a box of the same kind to
+// place, scanning rows top to bottom. What doesn't fit stays out (add returns how
+// many went in). Boxes can be moved, and dropped onto a box of the same kind to
 // merge. Within a box, its units are kept as lots, each with its provenance (where, how
 // and under what sky it was got: js/provenance.js), so a rite can ask for the right
 // ones; a box's n is always the sum of its lots. What's taken without asking comes from
@@ -16,7 +15,7 @@
 import { ingredient } from './ingredients.js';
 import { sameLot } from './provenance.js';
 
-export const PACK_W = 10, PACK_H = Infinity;
+export const PACK_W = 10, PACK_H = 6;
 const sizeOf = kind => (ingredient(kind) && ingredient(kind).size) || [1, 1];
 const stackOf = kind => (ingredient(kind) && ingredient(kind).stack) || 1;
 
@@ -47,7 +46,6 @@ export function makePack(w = PACK_W, h = PACK_H){
     size: sizeOf, stack: stackOf, at,
     // how many more of `kind` would fit, at most `upto`
     room(kind, upto = Infinity){
-      if (h === Infinity) return upto;
       let r = items.filter(it => it.kind === kind).reduce((a, it) => a + stackOf(kind) - it.n, 0);
       if (r >= upto) return upto;
       // free places: count by filling a scratch copy (boxes don't overlap, so this is exact)

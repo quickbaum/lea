@@ -27,7 +27,6 @@ const NAMES = {
   },
 };
 
-export const humanSurnames = () => NAMES.human.surnames;
 // a race-appropriate surname (for sharing across a family/clan)
 export function surnameFor(race = 'human', rng = Math.random){
   const set = NAMES[race] || NAMES.human;

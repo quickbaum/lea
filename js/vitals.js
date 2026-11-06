@@ -45,11 +45,9 @@ export function eatValue(v, kind, now){
   return { stamina: (e.eat.stamina || 0) * f, health: (e.eat.health || 0) * f, sp: (e.eat.sp || 0) * f, f };
 }
 // eat one: returns what it actually gave (after the caps), or null if it can't be eaten
-// (`k` scales it: a botched pot fills you less)
-export function eat(v, kind, now, k = 1){
+export function eat(v, kind, now){
   const g = eatValue(v, kind, now);
   if (!g) return null;
-  g.stamina *= k; g.health *= k; g.sp *= k;
   const before = { st: v.st, hp: v.hp, sp: v.sp };
   v.st = Math.min(ST_MAX, v.st + g.stamina); v.hp = Math.min(HP_MAX, v.hp + g.health); v.sp = Math.min(SP_MAX, v.sp + g.sp);
   if (ingredient(kind).group === 'dish') (v._diet || (v._diet = {}))['dish:' + kind] = now; else ate(v, kind, now);

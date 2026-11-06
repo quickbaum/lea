@@ -3,10 +3,6 @@ import { COLORS } from './ingredients.js';
 
 // Render a canvas into a THREE texture. Nearest filtering keeps the crisp,
 // grainy, pixel look across the whole world.
-// Nothing in this game is blurry: three.js filters a texture smoothly unless told not to, so every
-// picture goes through here or makeTexture. tools/check-pixels.mjs fails on one that doesn't.
-export const crisp = t => { t.magFilter = t.minFilter = THREE.NearestFilter; t.generateMipmaps = false; return t; };
-
 export function makeTexture(w, h, draw, {repeat = null, colorSpace = THREE.SRGBColorSpace} = {}){
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;

@@ -8,36 +8,23 @@
 // (ingredients.js `pic`) shows it in place of its name.
 
 import { ingredient, edible } from './ingredients.js';
-import { closeX } from './close-x.js';
 
 let CELL = 52;     // shrinks to fit a small screen (render)
-const VIEW_ROWS = 6, SPARE_ROWS = 2;   // rows on show at once; empty rows kept below the last box, to drop into
-const SCROLL_EDGE = 0.7, SCROLL_SPEED = 6;   // a dragged box near the top or bottom scrolls: how near (cells), how fast (px a frame)
 const TOUCH = document.documentElement.classList.contains('touch');
 const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 
-// el: the panel; pack: makePack(); onClose: its X; onEat(box) → a line to show, or null;
+// el: the panel; pack: makePack(); onEat(box) → a line to show, or null;
 // says(box) → what eating one gives now, and where the box's things came from
-// onDropOut(box, ev) → true if something outside the grid took the drop (the pot: cook-view.js)
-export function packView(el, pack, { onEat, says, onClose, onDropOut }){
+export function packView(el, pack, { onEat, says }){
   let drag = null, hoverId = null, note = '';
-  let maxCell = 52;                                    // (the fire's view asks for a smaller pack when it's short of room)
   let lastTap = { id: null, t: 0 }, touched = false;   // a finger has no hover and no right button: a tap says what it is, two eat it
 
-  let rows = VIEW_ROWS + SPARE_ROWS;                    // as many as the grid has now
-
   function render(){
-    const top = el.querySelector('.pack-scroll')?.scrollTop ?? 0;   // (redrawing mustn't lose your place)
-    CELL = Math.max(30, Math.min(maxCell, Math.floor((innerHeight - 170) / VIEW_ROWS), Math.floor((innerWidth - 72) / pack.w)));
-    const used = pack.items.reduce((a, it) => Math.max(a, it.y + pack.size(it.kind)[1]), 0);
-    rows = Math.min(pack.h, Math.max(VIEW_ROWS, used) + SPARE_ROWS);
-    el.innerHTML = `<h3>YOUR PACK</h3><div class="pack-scroll" style="height:${Math.min(rows, VIEW_ROWS) * CELL}px;overflow-x:hidden;overflow-y:scroll">` +
-      `<div class="pack-grid" style="width:${pack.w * CELL}px;height:${rows * CELL}px;background-size:${CELL}px ${CELL}px"></div></div>` +
+    CELL = Math.max(30, Math.min(52, Math.floor((innerHeight - 170) / pack.h), Math.floor((innerWidth - 60) / pack.w)));
+    el.innerHTML = `<h3>YOUR PACK</h3><div class="pack-grid" style="width:${pack.w * CELL}px;height:${pack.h * CELL}px;background-size:${CELL}px ${CELL}px"></div>` +
       `<div class="pack-foot" style="width:${pack.w * CELL}px"><div class="pack-desc"></div><div class="pack-hint">drag to move<br>${TOUCH ? 'double-tap' : 'right-click'} to eat or use</div></div>`;
-    if (onClose) el.append(closeX(onClose, 'Close (I or Esc)'));
     const grid = el.querySelector('.pack-grid');
-    el.querySelector('.pack-scroll').scrollTop = top;
     for (const it of pack.items){
       const [w, h] = pack.size(it.kind), e = ingredient(it.kind) || {};
       const b = document.createElement('div');
@@ -77,7 +64,7 @@ export function packView(el, pack, { onEat, says, onClose, onDropOut }){
     if (ev.pointerType === 'touch'){ touched = true; hoverId = b.id; note = ''; foot(); }
     const grid = el.querySelector('.pack-grid'), r = grid.getBoundingClientRect();
     const node = grid.querySelector(`.pack-box[data-id="${b.id}"]`);
-    drag = { it: b, node, grid, scroller: grid.parentElement, ox: ev.clientX - r.left - b.x * CELL, oy: ev.clientY - r.top - b.y * CELL, sx: ev.clientX, sy: ev.clientY, moved: false, tx: b.x, ty: b.y };
+    drag = { it: b, node, grid, ox: ev.clientX - r.left - b.x * CELL, oy: ev.clientY - r.top - b.y * CELL, sx: ev.clientX, sy: ev.clientY, moved: false, tx: b.x, ty: b.y };
     try { grid.setPointerCapture(ev.pointerId); } catch (_){}   // (a synthetic event has no real pointer)
     grid.addEventListener('pointermove', move);
     grid.addEventListener('pointerup', up, { once: true });
@@ -86,41 +73,21 @@ export function packView(el, pack, { onEat, says, onClose, onDropOut }){
   function move(ev){
     if (!drag) return;
     if (!drag.moved && Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) < 4) return;
-    if (!drag.moved) requestAnimationFrame(edgeScroll);
     drag.moved = true;
-    drag.last = ev;
-    document.body.classList.add('pack-dragging');
-    carry();
-  }
-  // the lifted box goes where the pointer is, `fixed` so the scrolling grid doesn't clip it (it can leave for the pot)
-  function carry(){
-    const ev = drag.last, r = drag.grid.getBoundingClientRect(), x = ev.clientX - r.left - drag.ox, y = ev.clientY - r.top - drag.oy;
+    const r = drag.grid.getBoundingClientRect(), x = ev.clientX - r.left - drag.ox, y = ev.clientY - r.top - drag.oy;
     drag.node.classList.add('lifted');
-    drag.node.style.position = 'fixed';
-    drag.node.style.left = `${r.left + x}px`; drag.node.style.top = `${r.top + y}px`;
+    drag.node.style.left = `${x}px`; drag.node.style.top = `${y}px`;
     drag.tx = Math.round(x / CELL); drag.ty = Math.round(y / CELL);
-    const [w, h] = pack.size(drag.it.kind), ok = drag.ty + h <= rows && !!pack.dropAt(drag.it.id, drag.tx, drag.ty);
-    drag.ok = ok;
+    const ok = !!pack.dropAt(drag.it.id, drag.tx, drag.ty), [w, h] = pack.size(drag.it.kind);
     let ghost = drag.grid.querySelector('.pack-ghost');
     if (!ghost){ ghost = document.createElement('div'); ghost.className = 'pack-ghost'; drag.grid.appendChild(ghost); }
     ghost.style.cssText = `left:${drag.tx * CELL}px;top:${drag.ty * CELL}px;width:${w * CELL - 3}px;height:${h * CELL - 3}px`;
     ghost.classList.toggle('bad', !ok);
   }
-  // held near the top or bottom of the window onto the grid, it scrolls, so a box can reach any row
-  function edgeScroll(){
-    if (!drag) return;
-    const s = drag.scroller.getBoundingClientRect(), { clientX: x, clientY: y } = drag.last, edge = CELL * SCROLL_EDGE;
-    const over = x >= s.left && x <= s.right;
-    const dir = !over ? 0 : y < s.top + edge && y > s.top - CELL ? -1 : y > s.bottom - edge && y < s.bottom + CELL ? 1 : 0;
-    if (dir){ drag.scroller.scrollTop += dir * SCROLL_SPEED; carry(); }
-    requestAnimationFrame(edgeScroll);
-  }
   function up(ev){
     const d = drag; drag = null;
     d.grid.removeEventListener('pointermove', move);
-    document.body.classList.remove('pack-dragging');
-    if (d.moved && onDropOut?.(d.it, ev)){ render(); return; }
-    if (d.moved && d.ok) pack.move(d.it.id, d.tx, d.ty);   // where it can't go, it goes back
+    if (d.moved) pack.move(d.it.id, d.tx, d.ty);   // where it can't go, it goes back
     else if (ev.pointerType === 'touch' && ev.type === 'pointerup'){
       const again = lastTap.id === d.it.id && ev.timeStamp - lastTap.t < 400;
       lastTap = again ? { id: null, t: 0 } : { id: d.it.id, t: ev.timeStamp };
@@ -129,5 +96,5 @@ export function packView(el, pack, { onEat, says, onClose, onDropOut }){
     render();
   }
 
-  return { render, get dragging(){ return !!drag; }, set maxCell(n){ maxCell = n; } };
+  return { render, get dragging(){ return !!drag; } };
 }

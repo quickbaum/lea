@@ -24,7 +24,6 @@ const DEFAULTS = {
   continuity: 0.45,     // how much a child keeps its parent's heading (higher = straighter scaffold)
   elevBase: 62,         // branch angle above horizontal near the trunk (reach up)
   elevTip: 22,          // angle at the canopy edge (spread out); lower = wider/flatter
-  elevVary: 8,          // how far a branch strays from those: high fills a crown's depth with twigs
   arch: 14,             // extra downward droop at the outermost tips
   outwardPull: 0.6,     // phototropism at the canopy (tapered to ~0 near the trunk)
   azJitter: 0.6,
@@ -37,17 +36,15 @@ const DEFAULTS = {
 
 // A bush is leafy down its inner stems and its outer stems droop (arch), so the
 // leaves come down toward the ground rather than sitting as a ball on a stalk.
-// (Shortening trunkLen alone can't lower it: every later length derives from it and
-// the whole bush is scaled to reach targetHeight, so the proportions don't change.
-// That's what stemLen is for.)
+// (Don't shorten trunkLen to get there: the whole bush is scaled so its branches
+// reach targetHeight, so a shorter stem scales everything else — leaf spread
+// included — up.)
 const SHRUB = {
-  trunkLen: 0.06, stemLen: 0.24, baseRad: 0.032, depth: 4, stems: 4, childMin: 2, childMax: 2,   // a root crown, stems fanning from it, forking to many twigs
-  continuity: 0.25, elevBase: 55, elevTip: 22, arch: 32, outwardPull: 0.3, azJitter: 0.9,
-  lenFalloff: 0.74, radFalloff: 0.66, taper: 0.7, radial: 4,
-  clump: true,          // cards are whole sprigs (makeClumpAtlas), each growing off a twig: see sprigCard
-  wallLit: true,        // low enough to the eye that a dark underside reads as a hole
-  leavesPerTip: 3, leavesMid: 2, leafDepth: 3,
-  leafFinal: 0.42, targetHeight: 1.7,
+  trunkLen: 0.4, baseRad: 0.12, depth: 3, childMin: 3, childMax: 4,
+  continuity: 0.25, elevBase: 55, elevTip: 12, arch: 22, outwardPull: 0.7, azJitter: 0.9,
+  lenFalloff: 0.74, radFalloff: 0.62, taper: 0.7, radial: 4,
+  leavesPerTip: 6, leavesMid: 6, leafDepth: 3, leafSpread: 0.4, leafOut: 0.25,
+  leafFinal: 0.32, targetHeight: 1.7,
   rootCount: 0,         // shrubs are too small/twiggy to bother with visible roots
 };
 
@@ -61,50 +58,8 @@ function dirAzEl(az, elDeg){
 // a soft bell (about -1..1, most near 0): a sum of three uniforms
 const bell = (rng) => (rng() + rng() + rng() - 1.5) / 1.5;
 
-// A spruce's habit, nothing like a broadleaf's forking: one straight leader, with
-// whorls of branches round it, longest at the bottom of the crown and shortening to
-// the tip for the cone. Low branches sweep down then lift at the end, high ones rise.
-// Boughs hang from each branch as sprigs, so they start on the wood like any other.
-function growWhorled(rng, P){
-  const segs = [], sprigs = [];
-  const n = P.whorls, H = P.trunkLen, lean = rand(rng, 0, Math.PI * 2);
-  let a = new THREE.Vector3(), r = P.baseRad;
-  for (let i = 0; i < n; i++){
-    const t = (i + 1) / n;
-    const b = new THREE.Vector3(Math.cos(lean) * t * H * 0.012, t * H, Math.sin(lean) * t * H * 0.012);
-    const r1 = P.baseRad * Math.pow(1 - t, 0.85) + 0.012;
-    segs.push({ a: a.clone(), b, r0: r, r1 });
-    if (t >= P.crownBase){
-      const c = (t - P.crownBase) / (1 - P.crownBase);       // 0 bottom of the crown .. 1 the tip
-      const len = P.spread * Math.pow(1 - c, 0.85) + 0.35;
-      const az0 = rand(rng, 0, Math.PI * 2), k = randint(rng, P.childMin, P.childMax);
-      for (let j = 0; j < k; j++){
-        const az = az0 + j / k * Math.PI * 2 + rand(rng, -0.3, 0.3), l = len * rand(rng, 0.82, 1.12);
-        const out = new THREE.Vector3(Math.cos(az), 0, Math.sin(az));
-        const el = lerp(-14, 34, c) + rand(rng, -6, 6);      // degrees, first run of the branch
-        const mid = b.clone().addScaledVector(dirAzEl(az, el), l * 0.62);
-        const end = mid.clone().addScaledVector(dirAzEl(az, el + lerp(26, 12, c)), l * 0.38);   // the tip lifts
-        const rb = Math.max(0.018, r1 * 0.55);
-        segs.push({ a: b.clone(), b: mid, r0: rb, r1: rb * 0.55 }, { a: mid, b: end, r0: rb * 0.55, r1: 0.008 });
-        const m = Math.max(1, Math.round(l * P.boughsPerMetre));
-        for (let q = 0; q < m; q++){
-          const f = rand(rng, 0.25, 1) * l;
-          const at = f < l * 0.62 ? b.clone().addScaledVector(dirAzEl(az, el), f)
-                                  : mid.clone().addScaledVector(dirAzEl(az, el + lerp(26, 12, c)), f - l * 0.62);
-          // heading: out along the branch, falling away from it
-          const along = out.clone().multiplyScalar(0.8).add(new THREE.Vector3(0, -rand(rng, 0.25, 0.8), 0)).normalize();
-          sprigs.push({ at, along, out });
-        }
-      }
-    }
-    a = b; r = r1;
-  }
-  return { segs, leaves: [], strands: [], sprigs };
-}
-
 function grow(rng, P){
-  if (P.whorled) return growWhorled(rng, P);
-  const segs = [], leaves = [], strands = [], sprigs = [];
+  const segs = [], leaves = [];
   // Leaves grow as a spray ALONG the outer part of a twig (from `from` to a
   // little past `to`), bell-scattered around it — dense where the twig is and
   // thinning out, with no cube-shaped edge and few strays. Outward bias builds
@@ -126,23 +81,14 @@ function grow(rng, P){
     if (out.lengthSq() < 1e-3) out.set(Math.cos(az), 0, Math.sin(az));
     out.normalize();
 
-    // a weeping tree hangs strands from its twigs rather than spraying leaves round them
-    const foliage = (n) => {
-      if (P.clump) for (let i = 0; i < n; i++)         // a sprig's foot is ON the twig
-        sprigs.push({ at: new THREE.Vector3().lerpVectors(pos, end, rand(rng, 0.35, 1)), along: new THREE.Vector3().subVectors(end, pos).normalize(), out: out.clone() });
-      else if (P.weep) for (let i = 0; i < P.strandsPerTwig; i++) strands.push({ from: end.clone(), out: out.clone() });
-      else cluster(pos, end, n, P.leafSpread, out);
-    };
-    if (depth <= 0){ foliage(P.leavesPerTip); return; }
+    if (depth <= 0){ cluster(pos, end, P.leavesPerTip, P.leafSpread, out); return; }
 
-    const nb = P.stems && depth === P.depth ? P.stems : randint(rng, P.childMin, P.childMax);
+    const nb = randint(rng, P.childMin, P.childMax);
     const t = depth / P.depth;                          // 1 near trunk .. ~0 at tips
     for (let i = 0; i < nb; i++){
       // opposite branching: children fan out ~180deg from the parent's azimuth
-      const splits = P.stemRad && depth === P.depth;    // the bole divides into its stems
-      const childAz = splits ? az + i / nb * Math.PI * 2 + rand(rng, -0.25, 0.25)
-        : az + Math.PI + (i - (nb-1)/2) * (Math.PI*0.6) + rand(rng,-P.azJitter,P.azJitter);
-      let elDeg = lerp(P.elevTip, P.elevBase, t) + rand(rng,-P.elevVary,P.elevVary);
+      const childAz = az + Math.PI + (i - (nb-1)/2) * (Math.PI*0.6) + rand(rng,-P.azJitter,P.azJitter);
+      let elDeg = lerp(P.elevTip, P.elevBase, t) + rand(rng,-8,8);
       if (depth <= 1) elDeg -= P.arch;                  // droop the outer tips
       const outF = Math.max(0, 1 - t * 1.15);           // keep trunk/scaffold upright; spread only the canopy
       const nd = dirAzEl(childAz, elDeg)
@@ -150,19 +96,12 @@ function grow(rng, P){
         .addScaledVector(dir, P.continuity)
         .addScaledVector(out, P.outwardPull * outF);
       if (nd.lengthSq() < 1e-6) nd.copy(UP);
-      // stemLen frees the first stems from the trunk's length, which every later length derives from
-      const parentLen = P.stemLen && depth === P.depth ? P.stemLen : len;
-      // Stems that split a bole start round its rim, sunk into it. Branches are open
-      // tubes, so stems at the centre of a wider bole sit in a visible hollow.
-      const childRad = rad * (splits ? P.stemRad : P.radFalloff);
-      const foot = splits ? end.clone().add(new THREE.Vector3(
-        Math.cos(childAz) * Math.max(0, rad * P.taper - childRad * 0.7), -childRad, Math.sin(childAz) * Math.max(0, rad * P.taper - childRad * 0.7))) : end;
-      branch(foot, nd.normalize(), parentLen * P.lenFalloff * rand(rng,0.85,1.12), childRad, depth-1, childAz);
+      branch(end, nd.normalize(), len * P.lenFalloff * rand(rng,0.85,1.12), rad * P.radFalloff, depth-1, childAz);
     }
-    if (depth <= P.leafDepth) foliage(P.leavesMid);
+    if (depth <= P.leafDepth) cluster(pos, end, P.leavesMid, P.leafSpread, out);
   };
   branch(new THREE.Vector3(0,0,0), UP.clone(), P.trunkLen, P.baseRad, P.depth, rand(rng, 0, Math.PI*2));
-  return { segs, leaves, strands, sprigs };
+  return { segs, leaves };
 }
 
 function segmentCyl(s, radial){
@@ -236,71 +175,6 @@ function leafBunch(pos, size, count, rng, atlas){
     geos.push(leafQuad(p, size, rng, atlas));
   }
   return mergeGeometries(geos, false);
-}
-
-// A weeping crown: each strand leaves its twig arching outward and falls toward
-// the ground as a chain of long cards (the atlas paints twig and leaves on them,
-// so a strand costs no branch geometry). Strands at the rim fall nearly to the
-// ground and the inner ones stop well above it, leaving a room under the curtain
-// around the trunk. All sizes in P are final metres; `s` converts to grow() space.
-function weepingCards(strands, s, P, rng, atlas){
-  const rim = Math.max(...strands.map(t => Math.hypot(t.from.x, t.from.z)), 1e-3);
-  const w = P.strandW / s, h = P.strandH / s;
-  const geos = [], m = new THREE.Matrix4();
-  const dir = new THREE.Vector3(), across = new THREE.Vector3(), face = new THREE.Vector3(), up = new THREE.Vector3();
-  for (const { from, out } of strands){
-    const k = Math.hypot(from.x, from.z) / rim;
-    const floor = (lerp(P.roomHeight, P.hemHeight, Math.min(1, k * k * 1.4)) + rand(rng, 0, P.hemVary)) / s;
-    const twist = rand(rng, -1.2, 1.2);            // so no strand is edge-on from every side
-    const yaw = rand(rng, -0.35, 0.35), c = Math.cos(yaw), sn = Math.sin(yaw);
-    const ox = out.x * c - out.z * sn, oz = out.x * sn + out.z * c;
-    const p = from.clone();
-    let a = rand(rng, 0.9, 1.35);                  // radians off plumb: out along the arch, then falling
-    for (;;){
-      dir.set(ox * Math.sin(a), -Math.cos(a), oz * Math.sin(a));
-      if (p.y + dir.y * h < floor) break;          // the next link would pass the hem
-      up.copy(dir).negate();
-      across.set(-oz, 0, ox).applyAxisAngle(dir, twist + rand(rng, -0.3, 0.3)).normalize();
-      face.crossVectors(across, up).normalize();
-      const geo = new THREE.PlaneGeometry(w, h);
-      m.makeBasis(across, up, face);
-      m.setPosition(p.x + dir.x * h / 2, p.y + dir.y * h / 2, p.z + dir.z * h / 2);
-      geo.applyMatrix4(m);
-      const cell = Math.floor(rng() * atlas.count), uv = geo.attributes.uv;
-      for (let i = 0; i < uv.count; i++) uv.setX(i, (cell + uv.getX(i)) / atlas.count);
-      geos.push(geo);
-      p.addScaledVector(dir, h * 0.82);            // links overlap, so the twig reads as continuous
-      a *= 0.5;
-    }
-  }
-  return geos.length ? mergeGeometries(geos, false) : null;
-}
-
-// One leaf clump, growing off its twig: the card's foot (where the atlas paints the
-// sprig's stem) sits exactly on the wood and the card leans away from the twig's
-// heading to one side, turned to face out of the bush. Nothing is scattered, so no
-// clump can float; a clump is only ever as far from the wood as its own stem.
-const _a = new THREE.Vector3(), _u = new THREE.Vector3(), _f = new THREE.Vector3(), _m = new THREE.Matrix4();
-function sprigCard({ at, along, out }, size, rng, atlas, leanRange = [0.5, 1.1]){
-  const side = rand(rng, 0, Math.PI * 2), lean = rand(rng, leanRange[0], leanRange[1]);
-  _a.set(along.y, along.z, along.x).cross(along).normalize().applyAxisAngle(along, side);   // some direction square to the twig
-  _u.copy(along).multiplyScalar(Math.cos(lean)).addScaledVector(_a, Math.sin(lean)).normalize();
-  _u.y -= 0.15; _u.normalize();                   // a little of the weight of the leaves
-  _f.copy(out).addScaledVector(UP, 0.4);
-  _f.addScaledVector(_u, -_f.dot(_u));            // facing out of the bush, square to its own heading
-  if (_f.lengthSq() < 1e-3) _f.set(_u.y, _u.z, _u.x).cross(_u);
-  _f.normalize().applyAxisAngle(_u, bell(rng) * 0.8);
-  _a.crossVectors(_u, _f);
-  const geo = new THREE.PlaneGeometry(size, size);
-  geo.translate(0, size / 2, 0);                  // the card's foot at the origin
-  geo.applyMatrix4(_m.makeBasis(_a, _u, _f));
-  geo.translate(at.x, at.y, at.z);
-  const idx = Math.floor(rng() * atlas.count), cx = idx % atlas.cols, r = Math.floor(idx / atlas.cols), uv = geo.attributes.uv;
-  for (let i = 0; i < uv.count; i++){
-    const u = uv.getX(i), v = uv.getY(i);
-    uv.setXY(i, (cx + u) / atlas.cols, 1 - (r + 1 - v) / atlas.rows);
-  }
-  return geo;
 }
 
 // crossed quads for a hanging fruit/acorn (an "X", so it reads from any angle)
@@ -388,11 +262,8 @@ export function leafMaterial(opts){
 
 // Fit an ellipsoid to a cloud of leaf positions (centre = mean, radii = spread
 // per axis) and hand back its outward normal at any point, tipped a little
-// toward the sky so the top of a crown reads as the lit top. With `curtain` the
-// part below the centre is lit as an upright wall, not a dark underside: a weeping
-// crown's lower half is hanging strands that face outward. (A bush's clumps too;
-// a tree keeps its dark underside, which is what makes its crown a dome.)
-function crownShape(pts, curtain = false){
+// toward the sky so the top of a crown reads as the lit top.
+function crownShape(pts){
   if (!pts.length) return null;
   const c = new THREE.Vector3();
   for (const p of pts) c.add(p);
@@ -402,7 +273,7 @@ function crownShape(pts, curtain = false){
   const k = 1 / pts.length;
   const rx = Math.sqrt(sx * k) + 1e-3, ry = Math.sqrt(sy * k) + 1e-3, rz = Math.sqrt(sz * k) + 1e-3;
   return { c, normal: (p, out = new THREE.Vector3()) => {
-    out.set((p.x - c.x) / (rx * rx), curtain && p.y < c.y ? 0 : (p.y - c.y) / (ry * ry), (p.z - c.z) / (rz * rz));
+    out.set((p.x - c.x) / (rx * rx), (p.y - c.y) / (ry * ry), (p.z - c.z) / (rz * rz));
     if (out.lengthSq() < 1e-12) out.set(0, 1, 0);
     return out.normalize().addScaledVector(UP, 0.35).normalize();
   } };
@@ -423,7 +294,7 @@ function crownNormals(geo, crown){
 
 export function generateTree(rng, params, atlas){
   const P = { ...DEFAULTS, ...params };
-  const { segs, leaves, strands, sprigs } = grow(rng, P);
+  const { segs, leaves } = grow(rng, P);
 
   let branchGeo = mergeGeometries(segs.map(s => segmentCyl(s, P.radial)), false);
   branchGeo.computeBoundingBox();
@@ -442,18 +313,16 @@ export function generateTree(rng, params, atlas){
     : P.leafBunch
       ? p => leafBunch(p, leafNat, P.leafBunch, rng, atlas)
       : p => leafQuad(p, leafNat, rng, atlas, faceOf(p));
-  const leafGeo = P.weep ? weepingCards(strands, s, P, rng, atlas)
-    : P.clump ? mergeGeometries(sprigs.map(sp => sprigCard(sp, leafNat, rng, atlas, P.sprigLean)), false)
-    : leaves.length ? mergeGeometries(leaves.map(leafFn), false)
+  const leafGeo = leaves.length
+    ? mergeGeometries(leaves.map(leafFn), false)
     : null;
   const crownLit = leafGeo && P.leafStyle !== 'flat' && !P.leafBunch;
 
   // acorns: a scattering of small nuts tucked among the leaves (oaks only)
   let acornGeo = null;
-  const nutSpots = P.clump ? sprigs.map(sp => sp.at) : leaves;   // on the twig, like the sprigs
-  if (P.acorns && nutSpots.length){
-    const spots = nutSpots.filter(() => rng() < 0.07).slice(0, 40);
-    if (spots.length) acornGeo = mergeGeometries(spots.map(p => acornQuad(p, 0.25 / s)), false);
+  if (P.acorns && leaves.length){
+    const spots = leaves.filter(() => rng() < 0.07).slice(0, 40);
+    if (spots.length) acornGeo = mergeGeometries(spots.map(p => acornQuad(p, leafNat * 0.5)), false);
   }
 
   branchGeo.scale(s, s, s);
@@ -475,7 +344,7 @@ export function generateTree(rng, params, atlas){
 
   branchGeo.computeVertexNormals();
   if (leafGeo){
-    if (crownLit) crownNormals(leafGeo, crownShape(leafCentres(leafGeo), P.weep || P.wallLit));   // re-fit in final space
+    if (crownLit) crownNormals(leafGeo, crownShape(leafCentres(leafGeo)));   // re-fit in final space
     else leafGeo.computeVertexNormals();
   }
   if (acornGeo) acornGeo.computeVertexNormals();
@@ -504,13 +373,7 @@ export function generateTree(rng, params, atlas){
   }
   rs.sort((a, b) => a - b);
   const trunkR = rs.length ? rs[Math.floor(rs.length * 0.85)] : P.baseRad * s;
-  // how far its roots show above the ground, for anything that shouldn't walk on them. (Below the ground they run on further)
-  let rootR = trunkR;
-  if (P.rootCount) for (let i = 0; i < pos.count; i++){
-    const y = pos.getY(i);
-    if (y > 0.05 && y < yLo) rootR = Math.max(rootR, Math.hypot(pos.getX(i), pos.getZ(i)));
-  }
-  return { branchGeo, leafGeo, acornGeo, branchGeoFar, leafGeoFar, trunkR, trunkH: P.targetHeight, rootR };
+  return { branchGeo, leafGeo, acornGeo, branchGeoFar, leafGeoFar, trunkR, trunkH: P.targetHeight };
 }
 
 // Species presets — form follows soil. flora.js places rich on moist lowland,
@@ -518,9 +381,9 @@ export function generateTree(rng, params, atlas){
 export const TREE_SPECIES = [
   // leaves spread over the outer three branch levels (leafDepth 3), fewer per
   // tip, so the crown is a deep dome rather than a cap on the outermost twigs
-  { name: 'maple-rich', clump: true, trunkLen: 1.7, stemLen: 2.6, elevVary: 32, leafFinal: 1.05, targetHeight: 13, outwardPull: 0.6,  elevTip: 18, leavesPerTip: 3, leavesMid: 2, leafDepth: 4 },
-  { name: 'maple',      clump: true, trunkLen: 1.7, stemLen: 2.6, elevVary: 32, leafFinal: 1.0,  targetHeight: 11, outwardPull: 0.48, elevTip: 22, leavesPerTip: 3, leavesMid: 1, leafDepth: 4 },
-  { name: 'maple-lean', clump: true, trunkLen: 1.7, stemLen: 2.4, elevVary: 28, leafFinal: 0.95, targetHeight: 9,  outwardPull: 0.3,  elevTip: 30, elevBase: 68, leavesPerTip: 2, leavesMid: 1, leafDepth: 4 },
+  { name: 'maple-rich', targetHeight: 13, outwardPull: 0.6,  elevTip: 18, leavesPerTip: 11, leavesMid: 6, leafDepth: 3, leafSpread: 1.2 },
+  { name: 'maple',      targetHeight: 11, outwardPull: 0.48, elevTip: 22, leavesPerTip: 8,  leavesMid: 5, leafDepth: 3 },
+  { name: 'maple-lean', targetHeight: 9,  outwardPull: 0.3,  elevTip: 30, elevBase: 68, leavesPerTip: 6, leavesMid: 3, leafDepth: 3 },
 ];
 export const SHRUB_SPECIES = [
   { ...SHRUB, name: 'shrub-a' },
@@ -555,20 +418,20 @@ export const REDWOOD_SPECIES = [
 // Open airy crown, grey bark, relatively upright with moderate outward spread.
 // Shade-intolerant — grows where canopy is partial, not under heavy oak/maple.
 const ROWAN = {
-  trunkLen: 1.1, stemLen: 1.6, elevVary: 25, baseRad: 0.15, depth: 4, childMin: 2, childMax: 3,
+  trunkLen: 1.6, baseRad: 0.15, depth: 4, childMin: 2, childMax: 3,
   continuity: 0.44,
   elevBase: 62, elevTip: 28,
   arch: 14,
   outwardPull: 0.40,
   azJitter: 0.60,
   lenFalloff: 0.75, radFalloff: 0.58, taper: 0.74, radial: 4,
-  clump: true, leavesPerTip: 4, leavesMid: 2, leafDepth: 3,
-  leafFinal: 0.8, targetHeight: 9,
+  leavesPerTip: 6, leavesMid: 3, leafDepth: 2, leafSpread: 0.58, leafOut: 0.24,
+  leafFinal: 0.30, targetHeight: 9,
   rootCount: 0,
 };
 export const ROWAN_SPECIES = [
   { ...ROWAN, name: 'rowan' },
-  { ...ROWAN, name: 'rowan-tall', targetHeight: 11, baseRad: 0.17 },
+  { ...ROWAN, name: 'rowan-tall', targetHeight: 11, baseRad: 0.17, leavesPerTip: 7 },
 ];
 
 // Oak: a sturdy, gnarled, wide-spreading tree. A thick trunk and heavy, low,
@@ -576,36 +439,36 @@ export const ROWAN_SPECIES = [
 // dome (very horizontal canopy edge, strong outward pull, heavy droop). Shorter
 // and far broader than a maple, with its own round-lobed leaves and acorns.
 const OAK = {
-  trunkLen: 2.0, stemLen: 3.0, elevVary: 28, baseRad: 0.50, depth: 5, childMin: 2, childMax: 4,
+  trunkLen: 3.0, baseRad: 0.50, depth: 5, childMin: 2, childMax: 4,
   continuity: 0.38,            // crooked, zig-zag scaffold
   elevBase: 55, elevTip: 12,   // reach up at the trunk, spread flat at the edge → broad dome
   arch: 18,                    // heavy drooping outer limbs
   outwardPull: 0.75,           // wide spreading crown
   azJitter: 0.8,               // gnarled branching
   lenFalloff: 0.80, radFalloff: 0.64, taper: 0.82, radial: 6,
-  clump: true, leavesPerTip: 2, leavesMid: 1, leafDepth: 3,
-  leafFinal: 1.0, targetHeight: 12, acorns: true,
+  leavesPerTip: 14, leavesMid: 6, leafDepth: 2, leafSpread: 1.0, leafOut: 0.55,
+  leafFinal: 0.5, targetHeight: 12, acorns: true,
   rootCount: 6,                // gnarled, prominent surface roots
 };
 export const OAK_SPECIES = [
   { ...OAK, name: 'oak' },
   { ...OAK, name: 'oak-broad', targetHeight: 13, outwardPull: 0.85, elevTip: 9,  baseRad: 0.58 },
-  { ...OAK, name: 'oak-young', targetHeight: 9,  outwardPull: 0.6 },
+  { ...OAK, name: 'oak-young', targetHeight: 9,  outwardPull: 0.6,  leavesPerTip: 12 },
 ];
 
 // Birch: a slender, upright tree with a thin trunk, high branching scaffold, and
 // characteristic drooping outer tips. Small delicate leaves, pale bark. Often grows
 // in clusters; shorter and more elegant than a maple, narrower than a redwood.
 const BIRCH = {
-  trunkLen: 1.6, stemLen: 2.2, elevVary: 22, baseRad: 0.17, depth: 5, childMin: 2, childMax: 3,
+  trunkLen: 2.2, baseRad: 0.17, depth: 5, childMin: 2, childMax: 3,
   continuity: 0.54,         // upright scaffold — keeps the slender silhouette
   elevBase: 70, elevTip: 36,
   arch: 24,                 // drooping outer tips — the elegant birch curve
   outwardPull: 0.40,        // moderate — birch is upright, not spreading
   azJitter: 0.52,
   lenFalloff: 0.79, radFalloff: 0.62, taper: 0.76, radial: 5,
-  clump: true, leavesPerTip: 3, leavesMid: 1, leafDepth: 3,
-  leafFinal: 0.72, targetHeight: 12,
+  leavesPerTip: 8, leavesMid: 3, leafDepth: 2, leafSpread: 0.65, leafOut: 0.30,
+  leafFinal: 0.36, targetHeight: 12,
   rootCount: 2,
 };
 export const BIRCH_SPECIES = [
@@ -641,15 +504,15 @@ export const PINE_SPECIES = [
 // several from one base in life; an oval, fairly narrow crown of dark, dense
 // leaves held to the end of autumn.
 const ALDER = {
-  trunkLen: 1.4, stemLen: 2.4, elevVary: 20, baseRad: 0.24, depth: 5, childMin: 2, childMax: 3,
+  trunkLen: 2.4, baseRad: 0.24, depth: 5, childMin: 2, childMax: 3,
   continuity: 0.58,          // keeps a leader: oval, not domed
   elevBase: 64, elevTip: 32,
   arch: 10,
   outwardPull: 0.35,
   azJitter: 0.55,
   lenFalloff: 0.76, radFalloff: 0.62, taper: 0.78, radial: 5,
-  clump: true, leavesPerTip: 3, leavesMid: 1, leafDepth: 3,
-  leafFinal: 0.85, targetHeight: 14,
+  leavesPerTip: 11, leavesMid: 5, leafDepth: 2, leafSpread: 0.8, leafOut: 0.35,
+  leafFinal: 0.42, targetHeight: 14,
   rootCount: 4,              // stilted roots in waterlogged ground
 };
 export const ALDER_SPECIES = [
@@ -658,85 +521,11 @@ export const ALDER_SPECIES = [
   { ...ALDER, name: 'alder-young', targetHeight: 9, baseRad: 0.16, depth: 4, rootCount: 2 },
 ];
 
-// Weeping willow (the banks): a short stout bole forking low into a few big rising
-// limbs, wider than it is tall, its leaves all on hanging strands (weepingCards).
-const WILLOW = {
-  trunkLen: 2.2, baseRad: 0.42, depth: 4, childMin: 2, childMax: 3,
-  continuity: 0.4,
-  elevBase: 58, elevTip: 30,
-  arch: 8,
-  outwardPull: 0.75,
-  azJitter: 0.7,
-  lenFalloff: 0.84, radFalloff: 0.62, taper: 0.74, radial: 5,
-  weep: true, strandsPerTwig: 2, leafDepth: 1,
-  strandW: 0.8, strandH: 2.0,    // one card of a strand, in metres
-  hemHeight: 0.4, hemVary: 1.0,  // where the rim's strands stop above the ground
-  roomHeight: 4.2,               // where the strands nearest the trunk stop
-  targetHeight: 13,
-  rootCount: 6,                  // gripping the bank
-};
-export const WILLOW_SPECIES = [
-  { ...WILLOW, name: 'willow' },
-  { ...WILLOW, name: 'willow-old', targetHeight: 16, baseRad: 0.5 },
-  { ...WILLOW, name: 'willow-young', targetHeight: 9, baseRad: 0.26, childMin: 3, roomHeight: 3.0, rootCount: 4 },   // childMin: with few limbs it grew lopsided
-];
-
-// Norway spruce (the cold high ground, in stands): a tall narrow cone on a straight
-// bole, its low limbs shed once it's crowded, with dark boughs hanging from whorled
-// branches. See growWhorled; placement is in flora.js.
-const SPRUCE = {
-  whorled: true, trunkLen: 22, baseRad: 0.34, radial: 4,
-  whorls: 19, childMin: 4, childMax: 5,
-  crownBase: 0.2, spread: 4.4,      // the crown starts this far up; its lowest branches' length in metres
-  clump: true, wallLit: true, boughsPerMetre: 2.4, sprigLean: [0.05, 0.4],
-  leafFinal: 2.0, targetHeight: 22,
-  rootCount: 3,
-};
-export const SPRUCE_SPECIES = [
-  { ...SPRUCE, name: 'spruce' },
-  { ...SPRUCE, name: 'spruce-old', trunkLen: 28, targetHeight: 28, baseRad: 0.44, whorls: 23, crownBase: 0.28, spread: 5.0 },
-  { ...SPRUCE, name: 'spruce-young', trunkLen: 9, targetHeight: 9, baseRad: 0.13, whorls: 12, crownBase: 0.06, spread: 2.5, leafFinal: 1.4, rootCount: 0 },
-];
-
-// Common juniper (open heath, in loose groups): a slim grey-green column, several
-// near-upright stems from the ground, foliage all the way down.
-const JUNIPER = {
-  trunkLen: 0.15, stemLen: 0.9, baseRad: 0.05, depth: 3, stems: 5, childMin: 2, childMax: 2,
-  continuity: 0.75, elevBase: 84, elevTip: 72, elevVary: 7, arch: 4, outwardPull: 0.05, azJitter: 0.9,
-  lenFalloff: 0.78, radFalloff: 0.7, taper: 0.72, radial: 4,
-  clump: true, wallLit: true, sprigLean: [0.15, 0.6],
-  leavesPerTip: 3, leavesMid: 2, leafDepth: 2,
-  leafFinal: 0.95, targetHeight: 4.5,
-  rootCount: 0,
-};
-export const JUNIPER_SPECIES = [
-  { ...JUNIPER, name: 'juniper' },
-  { ...JUNIPER, name: 'juniper-tall', targetHeight: 6.5, leafFinal: 1.1 },
-  { ...JUNIPER, name: 'juniper-squat', targetHeight: 2.6, elevBase: 72, elevTip: 58, leafFinal: 0.8 },
-];
-
-// Yew (old woodland, alone): a short vast bole forking low into many limbs under a
-// broad, heavy, nearly black dome that comes down close to the ground.
-const YEW = {
-  trunkLen: 0.9, stemLen: 2.0, stemRad: 0.62, baseRad: 0.4, depth: 4, stems: 6, childMin: 2, childMax: 3,
-  continuity: 0.32, elevBase: 54, elevTip: 16, elevVary: 30, arch: 42, outwardPull: 0.4, azJitter: 0.8,
-  lenFalloff: 0.74, radFalloff: 0.6, taper: 0.76, radial: 5,
-  clump: true, wallLit: true, sprigLean: [0.2, 0.7],
-  leavesPerTip: 4, leavesMid: 3, leafDepth: 3,
-  leafFinal: 1.8, targetHeight: 11,
-  rootCount: 6,
-};
-export const YEW_SPECIES = [
-  { ...YEW, name: 'yew' },
-  { ...YEW, name: 'yew-ancient', targetHeight: 13, baseRad: 0.52, stems: 7 },
-  { ...YEW, name: 'yew-young', targetHeight: 6.5, baseRad: 0.3, stems: 4, leafFinal: 1.3, rootCount: 3 },
-];
-
 definePattern({
   name: 'tree.maple', scale: SCALE.TREE, uses: ['leaf.maple', 'bark.generic'],
   generate: ({ rng, atlas, params }) => generateTree(fork(rng), params || {}, atlas),
 });
 definePattern({
-  name: 'plant.shrub', scale: SCALE.PLANT, uses: ['leaf.clump', 'bark.generic'],
+  name: 'plant.shrub', scale: SCALE.PLANT, uses: ['leaf.maple', 'bark.generic'],
   generate: ({ rng, atlas, params }) => generateTree(fork(rng), { ...SHRUB, ...params }, atlas),
 });

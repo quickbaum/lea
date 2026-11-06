@@ -61,7 +61,13 @@
   content: '⁋'; position: absolute; left: -16px; top: -2px; font-family: 'IM Fell English', serif; font-size: 16px;
 }
 
-/* what you can do with it: outside the page, in the ordinary voice */
+.page-close {
+  margin-top: 18px; text-align: center; cursor: pointer;
+  font: italic 15px 'IM Fell English', Georgia, serif; color: var(--ink-faded);
+}
+.page-close:hover { color: var(--ink); text-decoration: underline; }
+
+/* what the game says about reading it: outside the page, in the ordinary voice */
 .page-aside { font: italic 15px Georgia, serif; color: #dccfa0; text-shadow: 0 1px 3px #000; }
 .page-action { cursor: pointer; text-decoration: underline dotted; margin-top: 4px; }
 .page-action:hover { color: #fff4cc; }
@@ -126,53 +132,8 @@
 }
 .vellum .page-margin { font-size: 12.5px; opacity: .8; right: 30px; width: 128px; }
 .old-page.vellum.bare { padding: 44px 72px 34px; }   /* no notes in the margin: no wide outer margin to keep for them */
+.vellum .page-close { font: italic 500 16px 'Cormorant Garamond', Georgia, serif; }
 
 @media (max-width: 560px) {
   .old-page.vellum, .old-page.vellum.bare { padding: 34px 28px 26px; font-size: 18.5px; }
 }
-
-/* ---- sitting at a fire (js/cook-view.js): the leaf of a recipe, pinned, with no dimming ---- */
-#cook { position: fixed; inset: 0; z-index: 38; pointer-events: none; font: 15px Georgia, serif; --ink: #2a1c0e; --ink-faded: #5b4630; --hand: #7a2b17; }
-#cook.hide { display: none; }
-#cook > * { pointer-events: auto; }
-.cook-zone { position: fixed; pointer-events: none !important; border-radius: 50%; }
-body.pack-dragging .cook-zone { outline: 2px dashed #ffe9b0cc; outline-offset: -2px; background: #ffd98a1f; }
-.cook-paper.old-page {
-  position: fixed; left: 16px; top: 16px; width: min(330px, 34vw); max-height: calc(100dvh - 32px);
-  padding: 20px 24px 18px; font-size: 16px; line-height: 1.35; transform: rotate(-1deg); transform-origin: top left;
-}
-.cook-paper .page-title { font-size: 21px; margin-bottom: 8px; }
-.cook-paper .page-running { margin-bottom: 8px; }
-.cook-paper p { hyphens: manual; }
-.cook-take { text-indent: 0 !important; margin: 0 0 6px !important; }
-.cook-steps { list-style: none; margin: 0; padding: 0; }
-.cook-steps li { position: relative; padding: 3px 0 3px 22px; }
-.cook-steps li.todo .say { color: var(--ink-faded); }
-.cook-steps li.done .say { color: var(--ink-faded); }
-.cook-steps li.now::before { content: '☞'; position: absolute; left: 0; top: 2px; color: var(--hand); }
-.cook-steps li.now .say { background: linear-gradient(var(--hand), var(--hand)) left bottom / calc(var(--frac, 0) * 100%) 1.5px no-repeat; }   /* a pencil line, drawn on as the step runs */
-.cook-steps .tick { position: absolute; left: 2px; top: 1px; font-family: 'Homemade Apple', cursive; color: var(--hand); font-size: 13px; }
-.cook-steps .slip { display: block; font: 11px/1.5 'Homemade Apple', cursive; color: var(--hand); }
-.cook-list { list-style: none; margin: 0; padding: 0; }
-.cook-list li { padding: 3px 0; cursor: pointer; color: var(--ink-faded); }
-.cook-list li.have { color: var(--ink); }
-.cook-list li:hover { color: var(--hand); text-decoration: underline; }
-.cook-other { margin-top: 10px; font: italic 15px 'IM Fell English', Georgia, serif; color: var(--ink-faded); cursor: pointer; text-align: right; }
-.cook-other:hover { color: var(--ink); text-decoration: underline; }
-.cook-says { position: fixed; left: var(--cook-mid, 50%); bottom: calc(var(--cook-foot, 24px) + 48px); transform: translateX(-50%); width: min(340px, 46vw); text-align: center; color: #f3e6c4; text-shadow: 0 1px 3px #000, 0 0 8px #000; pointer-events: none !important; }
-.cook-controls { position: fixed; left: var(--cook-mid, 50%); bottom: var(--cook-foot, 24px); transform: translateX(-50%); display: flex; gap: 8px; white-space: nowrap; }
-.cook-do { font: 15px Georgia, serif; color: #2a1c0e; background: #e3d09f; border: 1px solid #5a3a14; border-radius: 3px; padding: 8px 14px; cursor: pointer; touch-action: none; user-select: none; box-shadow: 0 2px 6px #0009; }
-.cook-do:hover { background: #efe2bf; }
-.cook-fireline { font-size: 13px; opacity: .8; margin-top: 2px; }
-.cook-do.quiet { background: #3a2c1ccc; color: #e8dcbc; font-size: 13px; padding: 5px 10px; }
-.cook-do.quiet:hover { background: #4a3a26; }
-.cook-do.armed { background: #8a2c17; color: #fff3df; }
-.cook-do.armed:hover { background: #a03418; }
-.cook-board { position: fixed; box-sizing: border-box; width: min(170px, 30vw); min-height: 58px; padding: 7px 8px 11px; display: flex; flex-wrap: wrap; gap: 3px; align-content: center; justify-content: center;
-  cursor: pointer; touch-action: none; user-select: none; border-radius: 5px 7px 6px 5px; border: 1px solid #2c1a0a; box-shadow: 0 3px 8px #000a, inset 0 0 12px #2c1a0a66;
-  background: linear-gradient(90deg, #c9a768 calc(var(--frac, 0) * 100%), #0000 0) left bottom / 100% 4px no-repeat, repeating-linear-gradient(92deg, #7d5a32 0 9px, #75522c 9px 14px, #83603a 14px 22px); }
-.cook-board.off { display: none; }
-body.pack-dragging .cook-board { outline: 2px dashed #ffe9b0cc; outline-offset: 2px; }
-.cook-board-hint { font: 12px 'Homemade Apple', cursive; color: #f3e6c4b0; pointer-events: none; }
-.cook-chip { width: 22px; height: 22px; border-radius: 40%; background: var(--tint); box-shadow: 0 1px 2px #0009; overflow: hidden; pointer-events: none; }
-.cook-chip img { width: 100%; height: 100%; object-fit: cover; }

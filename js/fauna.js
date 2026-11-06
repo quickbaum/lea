@@ -1,4 +1,3 @@
-import { lantern } from './lantern.js';
 import * as THREE from 'three';
 import { height } from './terrain.js';
 
@@ -48,7 +47,7 @@ export class Warren {
       const r = u.rec;
       if (!r.alive){ u.mesh.visible = false; continue; }
       u.mesh.visible = true;
-      lantern.warm(u.mat.color.copy(tint || WHITE), r.x, r.z);
+      u.mat.color.copy(tint || WHITE);
 
       // hop: rise on a sine arc while moving (faster, higher when bolting)
       const rate = r.moving ? (r.fleeing ? 12 : 8) : 0;

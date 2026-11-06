@@ -65,8 +65,6 @@ export class GrassDetail {
     this.ph = new Float32Array(count);
     this.br = new Float32Array(count);
     this.on = new Uint8Array(count);
-    this.crop = new Uint8Array(count).fill(16);   // height as eaten, in sixteenths (js/sward.js)
-    this.sward = null;
     // perpendicular half-offset for quad width (computed once in _sample)
     this.pw = new Float32Array(count * 2);   // [px, pz] per blade
 
@@ -106,8 +104,6 @@ export class GrassDetail {
       uTime: { value: 0 }, uGust: { value: 1 }, uWind: { value: new THREE.Vector2(1, 0) },
       uCam: { value: new THREE.Vector2() }, uR: { value: radius },
       uFadeIn: { value: 1 / (radius * 0.35) }, uFadeOn: { value: fade ? 1 : 0 },
-      uLampPos: { value: new THREE.Vector3() }, uLampCol: { value: new THREE.Color(0, 0, 0) },
-      uLampR: { value: 1 }, uLampDecay: { value: 1 },
     };
     mat.onBeforeCompile = sh => {
       Object.assign(sh.uniforms, this._u);
@@ -116,28 +112,17 @@ export class GrassDetail {
           attribute vec2 aSway;
           uniform float uTime, uGust, uR, uFadeIn, uFadeOn;
           uniform vec2 uWind, uCam;
-          uniform vec3 uLampPos, uLampCol;
-          uniform float uLampR, uLampDecay;
-          varying float vFade;
-          varying vec3 vLamp;`)
+          varying float vFade;`)
         .replace('#include <begin_vertex>', `#include <begin_vertex>
           // bend = (steady gust + flutter) * blade height * tip-exaggeration; only the tip moves
           float bend = (uGust * 0.03 + sin(uTime * 1.9 + aSway.x) * 0.013) * aSway.y * 4.0;
           transformed.xz += uWind * bend;
           float df = clamp((uR - distance(transformed.xz, uCam)) * uFadeIn, 0.0, 1.0);
-          vFade = mix(1.0, df, uFadeOn);
-          // the lantern, as three's point light falls on the flat turf the blade stands on,
-          // in the units of the tint (groundTint is what reaches level ground too)
-          vec3 toLamp = uLampPos - transformed;
-          float ld = max(length(toLamp), 0.01);
-          float lw = clamp(1.0 - pow(ld / uLampR, 4.0), 0.0, 1.0);
-          vLamp = uLampCol * lw * lw * pow(ld, -uLampDecay) * clamp(toLamp.y / ld, 0.0, 1.0);`);
+          vFade = mix(1.0, df, uFadeOn);`);
       sh.fragmentShader = sh.fragmentShader
         .replace('#include <common>', `#include <common>
-          varying float vFade;
-          varying vec3 vLamp;`)
+          varying float vFade;`)
         .replace('#include <color_fragment>', `#include <color_fragment>
-          diffuseColor.rgb += vColor.rgb * vLamp;
           diffuseColor.a *= vFade;`);
     };
     mat.customProgramCacheKey = () => 'grass-detail-sway';
@@ -166,8 +151,7 @@ export class GrassDetail {
     this.col[o+8] = tR; this.col[o+9] = tG; this.col[o+10] = tB;
     this._alpha(i);
     // static triangle — base-left, base-right, tip; the shader sways the tip
-    this.crop[i] = this._cropAt(i);
-    const by = this.by[i], h = this.bh[i] * this.crop[i] / 16, px = this.pw[i*2], pz = this.pw[i*2+1];
+    const by = this.by[i], h = this.bh[i], px = this.pw[i*2], pz = this.pw[i*2+1];
     const pos = this.pos, o9 = i * 9;
     pos[o9]   = x - px;           pos[o9+1] = by;     pos[o9+2] = z - pz;
     pos[o9+3] = x + px;           pos[o9+4] = by;     pos[o9+5] = z + pz;
@@ -177,31 +161,19 @@ export class GrassDetail {
   }
 
   // vertex alpha = grows here × not worn away by a trail (the edge fade is the shader's)
-  // how short it's been bitten, in sixteenths
-  _cropAt(i){ return this.sward ? Math.max(4, Math.round(this.sward.heightAt(this.bx[i], this.bz[i]) * 16)) : 16; }
-  _setCrop(i, q){
-    this.crop[i] = q;
-    const h = this.bh[i] * q / 16, by = this.by[i];
-    this.pos[i * 9 + 7] = by + h; this.sway[i * 6 + 5] = h;
-  }
   _alpha(i){
     let a = this.on[i] ? 1 : 0;
     if (a && this.trail){
-      const w = this.trail.bladeWearAt(this.bx[i], this.bz[i]);
+      const w = this.trail.wearAt(this.bx[i], this.bz[i]);
       if (w > 0.05){ const tf = 1 - (w - 0.05) / 0.18; a *= tf < 0 ? 0 : tf; }
     }
     const o12 = i * 12;
     this.col[o12+3] = this.col[o12+7] = this.col[o12+11] = a;
   }
 
-  update(camX, camZ, t, tint, lamp){
+  update(camX, camZ, t, tint){
     if (tint) this.mesh.material.color.copy(tint);
     const u = this._u, wAng = t * 0.13;
-    if (lamp?.light){                               // the lantern's light on the blades (lantern.js)
-      u.uLampPos.value.set(lamp.x, lamp.y, lamp.z);
-      u.uLampCol.value.copy(lamp.light.color).multiplyScalar(lamp.power);
-      u.uLampR.value = lamp.distance; u.uLampDecay.value = lamp.decay;
-    }
     if (this.swayOn !== false){                     // the settings panel can freeze the wind
       u.uTime.value = t; u.uGust.value = 0.6 + 0.4 * Math.sin(t * 0.7);
       u.uWind.value.set(Math.cos(wAng), Math.sin(wAng));
@@ -225,24 +197,19 @@ export class GrassDetail {
     if (this._dirty && this._frame - this._lastFlush >= FLUSH_EVERY){
       // wrapped blades are scattered through the buffers — send them whole
       this._dirty = false; this._lastFlush = this._frame;
-      a.color.clearUpdateRanges(); a.position.clearUpdateRanges(); a.aSway.clearUpdateRanges();
+      a.color.clearUpdateRanges();
       a.position.needsUpdate = a.color.needsUpdate = a.aSway.needsUpdate = true;
       return;
     }
     // otherwise refresh the trail wear on one slice, uploading just that slice
     if (!this.trail) return;
-    const len = Math.ceil(this.n / TRAIL_FRAMES), sward = this.sward;
-    let cropped = false;
+    const len = Math.ceil(this.n / TRAIL_FRAMES);
     for (let k = 0; k < len; k++){
       const i = this._ti; this._alpha(i);
-      if (sward){ const q = this._cropAt(i); if (q !== this.crop[i]){ this._setCrop(i, q); cropped = true; } }
       if (k === 0) this._sliceStart = i;
       this._ti = (i + 1) % this.n;
       if (this._ti === 0 || k === len - 1){        // close a contiguous range at wrap or end
-        const from = this._sliceStart, count = i - from + 1;
-        a.color.addUpdateRange(from * 12, count * 12);
-        if (cropped){ a.position.addUpdateRange(from * 9, count * 9); a.aSway.addUpdateRange(from * 6, count * 6); a.position.needsUpdate = a.aSway.needsUpdate = true; }
-        cropped = false;
+        a.color.addUpdateRange(this._sliceStart * 12, (i - this._sliceStart + 1) * 12);
         this._sliceStart = this._ti;
       }
     }

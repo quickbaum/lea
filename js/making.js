@@ -5,7 +5,8 @@
 //
 //   A craft is learnt from a maker's book, one to a bookshelf, dealt round the whole shelves
 //   with the kitchen books (stillroom.js shelfBook, shelfCraft here). Some instructions
-//   want seasoned board and wire, which only the traders bring (js/traders.js).
+//   want materials there's no getting yet (seasoned board, wire), as some recipes do: they
+//   wait for them.
 //   Materials: elder stems, cut from the elder bushes (gen/flora.js); a hide and gut, off a
 //   kill (agents.js Quarry: the hunter keeps them). The folk keep them in n.goods, apart
 //   from food, which goes to the pot.

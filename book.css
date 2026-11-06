@@ -5,34 +5,14 @@
 
 #book-overlay {
   position: fixed; inset: 0; z-index: 99990;
-  display: flex; flex-direction: column; align-items: flex-start; justify-content: center;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 62px;
+  background: radial-gradient(ellipse at 50% 50%, rgba(10,6,2,.38), rgba(0,0,0,.72));
   --ink: #2a1c0e; --ink-faded: #5b4630; --hand: #7a2b17; --rubric: #7a2416;
   user-select: none;
-  opacity: 0; transition: opacity .14s ease, z-index 0s linear .42s;
-  pointer-events: none;
+  opacity: 0; transition: opacity .14s ease;
 }
 #book-overlay.ready { opacity: 1; }
-/* put away, it sits among the game's own bars and panels, over the open bag (#bag.open, 27); up, over everything */
-#book-overlay:not(.up) { z-index: 28; }
-#book-overlay.up { pointer-events: auto; transition: opacity .14s ease, z-index 0s; }
-#book-overlay:not(.up) * { pointer-events: none; }
-#book-overlay::before {
-  content: ''; position: absolute; inset: 0; z-index: -1; opacity: 0; transition: opacity .42s ease;
-  background: radial-gradient(ellipse at 50% 50%, rgba(10,6,2,.38), rgba(0,0,0,.72));
-}
-#book-overlay.up::before { opacity: 1; }
-.book-aside { opacity: 0; }
-#book-overlay.up .book-aside { opacity: 1; transition: opacity .3s ease .2s; }
-/* the book in the corner: what you click is this, over it */
-#book-overlay:not(.up) .book-icon { display: block; pointer-events: auto; cursor: pointer; }
-.book-icon { display: none; position: fixed; padding: 0; border: 0; background: none; }
-body.log-unread .book-icon::after { content: ''; position: absolute; top: 2px; left: 50%; width: 9px; height: 9px; border-radius: 50%; background: #e8c75a; box-shadow: 0 0 4px #e8c75a; }
-.book-icon:focus-visible { outline: 1px solid #c9a23a; }
-/* the close button rides on the board's top right corner; only up, it doesn't dock with the book */
-.book > .close-x { top: calc(var(--lipy) * -1 + var(--sagtop) - 12px); right: calc(var(--lipx) * -1 - 12px); }
-#book-overlay:not(.up) .close-x { visibility: hidden; opacity: 0; }
-#book-overlay.up .close-x { transition: opacity .25s ease .25s, color .12s, box-shadow .12s, transform .12s; }
-#book-overlay.small .book > .close-x { top: calc(var(--lipy) * -1 + var(--sagtop) - 4px); right: calc(var(--lipx) * -1 - 4px); }
+#book-overlay.small { gap: 0; }
 #book-overlay.small .book-aside { display: none; }
 body.book-open #vitals { z-index: 99991; }        /* spell points and stamina stay in sight, beside the book */
 
@@ -40,9 +20,8 @@ body.book-open #vitals { z-index: 99991; }        /* spell points and stamina st
    The leaves' own perspective is flattened onto this plane */
 .book {
   position: relative; width: calc(var(--pw) * 2); height: var(--ph);
-  transform: translate(var(--dx, 0px), var(--dy, 0px)) rotate(var(--rz, 0deg)) scale(var(--zs, 1)) perspective(2500px) rotateX(7deg); transform-origin: 50% 62%;
+  transform: perspective(2500px) rotateX(7deg); transform-origin: 50% 62%;
 }
-#book-overlay.ready .book { transition: transform .42s cubic-bezier(.3,.75,.25,1); }
 .book-cover { position: absolute; inset: calc(var(--lipy) * -1) calc(var(--lipx) * -1) calc(var(--lipfoot) * -1); }
 .book-art { position: absolute; pointer-events: none; }
 
@@ -131,7 +110,7 @@ body.book-open #vitals { z-index: 99991; }        /* spell points and stamina st
 .ribbon {
   position: absolute; left: calc(var(--pw) * 2 + var(--tabroot));
   top: calc(var(--tabtop) + var(--k) * var(--tabstep));
-  height: calc(var(--ph) * .105); width: calc(var(--ph) * .154); cursor: pointer;   /* TAB_H, TAB_W in js/book-view.js */
+  height: calc(var(--ph) * .14); width: calc(var(--ph) * .205); cursor: pointer;
   filter: drop-shadow(1px 2px 2px #0009);
   transition: transform .16s ease;
 }
@@ -194,26 +173,4 @@ body.book-open #vitals { z-index: 99991; }        /* spell points and stamina st
 .instr { display: flex; gap: .7em; margin-bottom: .45em; }
 .instr .k { flex: 0 0 4.2em; text-align: right; font: calc(var(--pw) * .036) 'IM Fell English SC', serif; color: var(--rubric); padding-top: .1em; }
 
-.book-aside { position: absolute; left: 0; font: italic 15px Georgia, serif; color: #dccfa0; text-shadow: 0 1px 3px #000; }
-
-/* the Kin section: bub-lineage's tree (js/kit/bub-lineage.js), in the book's ink. The kit's classes, this page's look */
-.kin-name { font-weight: bold; margin: 0.8em 0 0.2em; }
-.kin-line .bub-lin-tree { list-style: none; margin: 0; padding: 0 0 0 0.2em; }
-.kin-line .bub-lin-tree .bub-lin-tree { padding-left: 0.9em; border-left: 1px solid rgba(60, 40, 20, 0.35); margin-left: 0.2em; }
-.kin-line .bub-lin-tree li { margin: 0.1em 0; }
-.kin-line .bub-lin-card { display: block; }
-.kin-line .bub-lin-card.missing { opacity: 0.5; }
-.kin-line li[data-rel="living"] > .bub-lin-card { font-style: italic; }
-
-/* a name in the book, and a person's page (js/person-view.js) */
-.person-link, .kin-line a.bub-lin-card { color: inherit; cursor: pointer; text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--ink-faded); text-underline-offset: .15em; }
-.person-link:hover, .kin-line a.bub-lin-card:hover { text-decoration-style: solid; }
-.kin-line a.bub-lin-card .bub-lin-name { text-decoration: inherit; }
-.pp-head { text-align: center; margin-bottom: calc(var(--ph) * .02); }
-.pp-face { display: block; margin: 0 auto calc(var(--ph) * .012); width: calc(var(--pw) * .34); height: calc(var(--pw) * .34); object-fit: contain; background-size: cover; border-radius: 50%; }
-.pp-skull { image-rendering: pixelated; border-radius: 0; }
-.pp-name { font: calc(var(--pw) * .055)/1.15 'IM Fell English SC', 'IM Fell English', Georgia, serif; }
-.pp-back { font-style: italic; font-size: .86em; color: var(--ink-faded); }
-.pp-list { list-style: none; margin: 0 0 .5em; padding: 0; }
-.pp-list li { margin: .15em 0; }
-.pp-rel { font-style: italic; color: var(--ink-faded); }
+.book-aside { margin-top: 20px; font: italic 15px Georgia, serif; color: #dccfa0; text-shadow: 0 1px 3px #000; }

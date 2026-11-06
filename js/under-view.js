@@ -18,7 +18,7 @@ import { ashlar, flags, rock, hewn, marble, relief, reliefFromImage, fresco } fr
 import { glass, jewels, outlines, outlinePath } from './glass.js';
 import { juliaMaterial, juliaWhen } from './julia-tex.js';
 import { pavement, PAVEMENTS } from './pavement.js';
-import { CELL, bayAt, STONES, mouthShape, halfWidth, mouthFloor, MOUTH, WELL } from './gen/under.js';
+import { CELL, bayAt, STONES, mouthShape, halfWidth, mouthFloor, MOUTH } from './gen/under.js';
 import { ingredient } from './ingredients.js';
 import { Boats } from './boats.js';
 import { mulberry32 } from './rng.js';
@@ -26,7 +26,6 @@ import { material, placedBox } from './matlib.js';
 import { brazierGeo, brazierCoals, lecternGeo, lecternBook } from './ornament.js';
 import { arcadeMesh } from './gen/arcade.js';
 import { wisps } from './wisps.js';
-import { crisp } from './textures.js';
 
 const TILE = 3;                      // world size of one texture tile underground (u)
 const CHUNK = 24;                    // cells per mesh, each way
@@ -114,7 +113,7 @@ function haloTexture(){
   const g = cv.getContext('2d'), gr = g.createRadialGradient(16, 16, 0, 16, 16, 16);
   gr.addColorStop(0, 'rgba(255,170,80,1)'); gr.addColorStop(1, 'rgba(255,120,40,0)');
   g.fillStyle = gr; g.fillRect(0, 0, 32, 32);
-  const t = crisp(new THREE.CanvasTexture(cv)); t.colorSpace = THREE.SRGBColorSpace;
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 // woven cloth: warp and weft crossing over and under, as a normal map tile
@@ -127,7 +126,7 @@ function weaveNormal(){
     im.data[o] = (nx / l * 0.5 + 0.5) * 255; im.data[o + 1] = (ny / l * 0.5 + 0.5) * 255; im.data[o + 2] = (nz / l * 0.5 + 0.5) * 255; im.data[o + 3] = 255;
   }
   g.putImageData(im, 0, 0);
-  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace;   // crisp-ok: a normal map: light, not a picture
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.NoColorSpace;
   return t;
 }
 
@@ -143,6 +142,7 @@ export function buildEntrances(scene){
 }
 
 // a crypt stair's opening, shared by the drawing and by entranceHit()
+const WELL = { L: 4.6, W: 1.5 };                            // the crypt stair: length back from the mouth, half-width
 
 // A cave mouth (gen/under.js mouthShape): worn rock out of gen/arcade.js, leaning back into
 // the hill, and behind the opening a dark passage going down, in the cut land.js made for it
@@ -170,18 +170,6 @@ export function entranceHit(e, ox, oy, oz, dx, dy, dz, reach){
   if (t < 0 || t > reach) return -1;
   const qx = ox + dx * t - e.x, qz = oz + dz * t - e.z, u = -(qx * fx + qz * fz), v = qx * tx + qz * tz;
   return u >= -0.6 && u <= WELL.L + 0.6 && Math.abs(v) <= WELL.W + 0.6 ? t : -1;   // the kerb counts
-}
-
-// the point to look at so that entranceHit() meets the opening: the middle of the stairwell's
-// floor, or the cave's opening at chest height
-export function entranceAim(e){
-  const fx = Math.cos(e.face), fz = Math.sin(e.face);
-  if (e.kind === 'cave'){
-    const M = mouthShape(e), lean = MOUTH.LEAN * 2.5;
-    return { x: M.px - fx * lean, y: e.floor + 1.2, z: M.pz - fz * lean };
-  }
-  const x = e.x - fx * WELL.L / 2, z = e.z - fz * WELL.L / 2;
-  return { x, y: height(x, z), z };
 }
 
 function caveMouth(group, e, r, mats){
@@ -326,7 +314,6 @@ function palaceEnv(){
   g.fillStyle = sky; g.fillRect(0, 0, 256, 128);
   const glassC = ['#ffe9a8', '#bcd4ff', '#ffc4c4', '#d8ffd8'];
   for (let q = 0; q < 12; q++){ g.fillStyle = glassC[q % 4]; g.fillRect(q * 256 / 12 + 6, 34, 9, 26); }
-  // crisp-ok: an environment map, only ever seen as a reflection
   const t = new THREE.CanvasTexture(cv); t.mapping = THREE.EquirectangularReflectionMapping; t.colorSpace = THREE.SRGBColorSpace;
   return PALACE_ENV = t;
 }
@@ -335,7 +322,7 @@ function palaceEnv(){
 // reflections. The floor, walls and mosaic want vertex colours (Geo gives them)
 // the light in Faerie's buildings (2026-10-27): dimmer than day, blue-violet, a haze
 // at the far end of a hall; the windows and the floating lights do the rest
-export const FAERIE_LIGHT = { haze: 0x1f1440, zenith: 0x120c24, near: 16, far: 110, ambient: [0x7a58d0, 0.5], hemi: [0xa07cff, 0x2a1850, 0.55] };
+export const FAERIE_LIGHT = { haze: 0x1f1440, near: 16, far: 110, ambient: [0x7a58d0, 0.5], hemi: [0xa07cff, 0x2a1850, 0.55] };
 export function lightFaerie(scene){
   const F = FAERIE_LIGHT;
   scene.background = new THREE.Color(F.haze);
@@ -502,7 +489,6 @@ export function buildLevelView(L){
   let t = 0, cullT = 0;
   return {
     scene, canoe,
-    setSlab: (p, k, dir, room) => crypt?.setSlab(p, k, dir, room),
     update(dt, camera){
       t += dt;
       if ((cullT -= dt) <= 0){
@@ -865,7 +851,6 @@ function cryptView(L, scene, mats){
   reliefs(L, scene, mats);
 
   const T = new Geo(), V = new Geo();     // trim: jambs, spandrels, coffins; V: the voussoir rings
-  const Slabs = new Geo(), slabAt = new Map();   // a tomb's slab: only its own vertices move (setSlab)
   const light = 0.98;
   // doorways: a ring of voussoirs round the passage's arch, standing proud of the wall, on half-columns
   const halfCols = [];
@@ -929,16 +914,9 @@ function cryptView(L, scene, mats){
   // stone coffins: a chest and a lid with a chamfered top
   for (const p of L.props) if (p.kind === 'coffin'){
     boxUV(T, p.x, p.z, p.y - 0.2, p.y + p.h - 0.2, 2 * p.hl, 2 * p.hw, p.a, [0.86, 0.84, 0.8]);
-    // the dark inside, unseen until the slab slides; the slab drawn apart, so it can slide
-    const c = Math.cos(p.a), s = Math.sin(p.a), P = (u, v) => [p.x + c * u - s * v, p.y + p.h - 0.198, p.z + s * u + c * v], Z = [0, 0], U = p.hl - 0.12, W = p.hw - 0.12;
-    T.quad(P(-U, -W), P(U, -W), P(U, W), P(-U, W), Z, Z, Z, Z, [0, 1, 0], [0.03, 0.028, 0.025]);
-    const from = Slabs.p.length / 3;
-    boxUV(Slabs, p.x, p.z, p.y + p.h - 0.2, p.y + p.h, 2 * p.hl + 0.22, 2 * p.hw + 0.22, p.a, [0.95, 0.93, 0.88]);
-    boxUV(Slabs, p.x, p.z, p.y + p.h, p.y + p.h + 0.12, 2 * p.hl - 0.2, 2 * p.hw - 0.5, p.a, [0.9, 0.88, 0.84]);
-    slabAt.set(p, { from, n: Slabs.p.length / 3 - from });
+    boxUV(T, p.x, p.z, p.y + p.h - 0.2, p.y + p.h, 2 * p.hl + 0.22, 2 * p.hw + 0.22, p.a, [0.95, 0.93, 0.88]);
+    boxUV(T, p.x, p.z, p.y + p.h, p.y + p.h + 0.12, 2 * p.hl - 0.2, 2 * p.hw - 0.5, p.a, [0.9, 0.88, 0.84]);
   }
-  const sm = Slabs.mesh(M.trim);
-  if (sm){ sm.frustumCulled = false; scene.add(sm); }    // (it's the whole level's slabs, and one can move)
   const tm = T.mesh(M.trim); if (tm) scene.add(tm);
   const vm = V.mesh(M.vous); if (vm) scene.add(vm);
 
@@ -1019,27 +997,7 @@ function cryptView(L, scene, mats){
   for (const t of L.tapestries) hangTapestry(scene, L.site === 'palace' ? { ...t, pristine: true } : t, mats);
   ribsAndPiers(L, scene, mats);
 
-  // a tomb's slab, k of the way open (0 shut, 1 off): along its length past the chest's end, then
-  // (with room) tipping over that end to rest on the floor. dir: which end. Only moves its own vertices.
-  const slabBase = new Map();
-  const setSlab = (p, k, dir, room) => {
-    const at = slabAt.get(p), a = sm?.geometry.attributes.position; if (!at || !a) return;
-    if (!slabBase.has(p)) slabBase.set(p, a.array.slice(at.from * 3, (at.from + at.n) * 3));
-    const base = slabBase.get(p), c = Math.cos(p.a), s = Math.sin(p.a), top = p.y + p.h - 0.2;
-    const slide = room ? 2 : 1.1, ks = Math.min(1, k / 0.7), kt = room ? Math.max(0, (k - 0.7) / 0.3) : 0;
-    // tipped far enough that the far end meets the floor (the slab's end is slide + hl + 0.11 out; the pivot's at hl)
-    const over = slide + 0.11, th = Math.asin(Math.min(1, (top - p.y) / over)) * kt, ct = Math.cos(th), st = Math.sin(th);
-    for (let i = 0; i < at.n; i++){
-      const bx = base[i * 3], by = base[i * 3 + 1], bz = base[i * 3 + 2], dx = bx - p.x, dz = bz - p.z;
-      const u = (dx * c + dz * s) * dir + slide * ks, v = -dx * s + dz * c, du = u - p.hl, dy = by - top;     // along the way it's going, from the pivot
-      const u2 = kt ? p.hl + du * ct + dy * st : u, y2 = kt ? top - du * st + dy * ct : by, ud = u2 * dir;
-      a.setXYZ(at.from + i, p.x + c * ud - s * v, y2, p.z + s * ud + c * v);
-    }
-    a.needsUpdate = true;
-  };
-
   return {
-    setSlab,
     update(dt, camera, time){
       const cx = camera.position.x, cz = camera.position.z;
       const near = s => Math.hypot(s.x - cx, s.z - cz) - (s.kind === 'brazier' ? 25 : 0);   // a brazier counts as nearer: it lights so much more
@@ -1163,7 +1121,7 @@ const MASKS = new Map();
 function emblemMask(src){
   if (MASKS.has(src)) return MASKS.get(src);
   const cv = document.createElement('canvas'); cv.width = 200; cv.height = 300;
-  const t = crisp(new THREE.CanvasTexture(cv)); t.colorSpace = THREE.SRGBColorSpace;
+  const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4;
   const img = new Image();
   img.onload = () => { const g = cv.getContext('2d'); g.drawImage(img, 0, 0, cv.width, cv.height); g.globalCompositeOperation = 'source-in'; g.fillStyle = '#fff'; g.fillRect(0, 0, cv.width, cv.height); t.needsUpdate = true; };
   img.src = src;

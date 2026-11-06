@@ -1,17 +1,13 @@
 import * as THREE from 'three';
-import { alongPath, hoverPaths } from './gen/faerie.js';
-import { crisp } from './textures.js';
-import { wisps } from './wisps.js';
+import { alongPath } from './gen/faerie.js';
 
 // faerie-view.js — what the fairy salve shows (docs/magic.md "Faerie palaces"): what's
 // in the Lea all along under glamour. While your eye is anointed, the whole Lea over:
 //   · the portals to the Gentry's palaces (gen/faerie.js planPortals): an upright oval of
 //     black, lights spiralling into it from the front and out of it again
 //     with a glow round it; over a palace's own door, a tall faint beam that shows from anywhere
-//   · the Gentry, tall pale figures walking the old paths between the thin places; one you
-//     come near fades away, and is further along its path when you look again
-//   · their lights (wisps.js), the same that float through Faerie, hovering along those paths
-// (and Faerie's own light over the Lea: main.js gives the sky `k`, Sky.setGlamour)
+//   · the Gentry, tall pale figures walking the paths between the portals; one you come
+//     near fades away, and is further along its path when you look again
 // Pure scene decoration, no rules: main.js decides when the sight opens and closes, and
 // what E does at a portal. Nothing here is drawn until start().
 
@@ -24,7 +20,6 @@ const SHY = 7;              // closer than this and a figure fades away
 const PACE = 1.1;           // how fast they walk (u/s)
 const FADE = 1.2;           // seconds to fade the whole sight in or out
 const BEAM = [2.4, 70];     // a door's beam: its width and height
-const LIGHT_EVERY = 24;     // one hovering light for every so many units of path
 
 // a tall, soft, pale shape, head and shoulders and a long fall of robe: drawn once,
 // every figure shares it
@@ -38,7 +33,7 @@ function figureTexture(){
   const head = g.createRadialGradient(32, 22, 2, 32, 22, 14);
   head.addColorStop(0, 'rgba(245,250,255,0.95)'); head.addColorStop(1, 'rgba(245,250,255,0)');
   g.fillStyle = head; g.beginPath(); g.arc(32, 22, 14, 0, Math.PI * 2); g.fill();
-  const t = crisp(new THREE.CanvasTexture(c)); t.colorSpace = THREE.SRGBColorSpace;
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
 // one round soft dot, for the lights
@@ -47,7 +42,7 @@ function moteTexture(){
   const g = c.getContext('2d'), r = g.createRadialGradient(16, 16, 0, 16, 16, 16);
   r.addColorStop(0, 'rgba(255,255,255,1)'); r.addColorStop(0.35, 'rgba(255,255,255,0.5)'); r.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = r; g.fillRect(0, 0, 32, 32);
-  return crisp(new THREE.CanvasTexture(c));
+  return new THREE.CanvasTexture(c);
 }
 // a soft upright shaft, brightest at its foot and fading up and to its edges
 function beamTexture(){
@@ -58,7 +53,7 @@ function beamTexture(){
     up.addColorStop(0, `rgba(255,255,255,${across})`); up.addColorStop(0.25, `rgba(255,255,255,${0.45 * across})`); up.addColorStop(1, 'rgba(255,255,255,0)');
     g.fillStyle = up; g.fillRect(x, 0, 1, 128);
   }
-  return crisp(new THREE.CanvasTexture(c));
+  return new THREE.CanvasTexture(c);
 }
 const TINTS = [[0.75, 1, 0.8], [1, 0.95, 0.65], [0.7, 0.9, 1]];
 
@@ -86,7 +81,6 @@ export class FaerieSight {
   setWorld(portals, paths){
     for (const p of portals) this.addPortal(p);
     this.paths = paths;
-    this.lights = wisps(this.group, hoverPaths(paths, this.height), { lights: 0, spacing: LIGHT_EVERY, reach: SEE });
     this.walkers = paths.flatMap((P, pi) => { const n = Math.max(2, Math.ceil(P.len / SPACING)); return Array.from({ length: n }, (_, q) => ({ pi, s: P.len * (q + Math.random() * 0.5) / n, dir: q % 2 ? -1 : 1, a: 0, gone: 0, d: Infinity })); });
   }
   // one door: its oval, its lights, its glow, and its beam (which isn't culled with the rest)
@@ -121,7 +115,6 @@ export class FaerieSight {
     this.moteMat.opacity = this.k * (0.8 + 0.2 * Math.sin(this.t * 1.7));
     this.haloMat.opacity = this.k * (0.55 + 0.15 * Math.sin(this.t * 1.1));
     this.beamMat.opacity = this.k * 0.35;
-    if (this.lights){ this.lights.fade(this.k); this.lights.update(dt, { position: cam }, this.t); }
     // the lights round each portal near enough to see: half spiral in to its middle from
     // in front, half spiral out of it behind and drift away
     for (const P of this.portals){

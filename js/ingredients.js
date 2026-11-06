@@ -94,8 +94,6 @@ export const INGREDIENTS = {
   'four-leaf clover': { hyph: 'four-leaf clo-ver', from: 'fairy ring', when: 'dawn', rare: 'ring', virtues: ['breaks glamour'],
                color: '#5fae4a', temper: [-1, -1], size: [1, 1], stack: 3 },
   // what ran down from the altar candles (gen/under.js): old salves were bound with wax
-  // a letter in your pack: each is itself (js/mail.js; its lot's provenance names it), so one to a box
-  letter:    { from: 'given', keep: 36500, color: '#d9c8a2', pic: ['sprites/items/letter.png'], size: [1, 1], stack: 1, use: 'letter' },
   beeswax:   { from: 'crypt', keep: 365, virtues: ['binding'], color: '#d9b45a', temper: [1, -1], size: [1, 1], stack: 4,
                look: ['Beeswax', 'Old beeswax, run down from the altar candles into a lump.'] },
   'fairy salve': { hyph: 'fairy salve', from: 'a stargazer', use: 'sight', virtues: ['the second sight'], color: '#7fd0a0', size: [1, 1], stack: 2 },
@@ -112,16 +110,6 @@ export const INGREDIENTS = {
   'foxfire draught': { hyph: 'fox-fire draught', group: 'dish', from: 'a cook', color: '#3fc9a8', virtues: ['against the dark'],
                        temper: [-1, 0], size: [1, 2], stack: 1, eat: { sp: 10 } },
 
-  // ---- what the folk cook, and what you make of a pot with no recipe (docs/cooking.md):
-  // filling, but they haven't the book dishes' spell points ----
-  'acorn porridge': { group: 'dish', from: 'a cook', color: '#8a6a3a', size: [2, 1], stack: 1, eat: { stamina: 22, health: 2 } },
-  'rabbit stew':    { group: 'dish', from: 'a cook', color: '#7a4a32', size: [2, 1], stack: 1, eat: { stamina: 28, health: 4 } },
-  'root stew':      { group: 'dish', from: 'a cook', color: '#8a6e3e', size: [2, 1], stack: 1, eat: { stamina: 20, health: 2 } },
-  'fish stew':      { group: 'dish', from: 'a cook', color: '#a8a68a', size: [2, 1], stack: 1, eat: { stamina: 24, health: 3 } },
-  'pottage':        { group: 'dish', from: 'a cook', color: '#6f7a40', size: [2, 1], stack: 1, eat: { stamina: 22, health: 3 } },
-  'chamomile tea':  { group: 'dish', from: 'a cook', color: '#d8c56a', size: [1, 2], stack: 1, eat: { stamina: 8, health: 2 } },
-  'plain boil':     { group: 'dish', from: 'a cook', color: '#857a60', size: [2, 1], stack: 1, eat: { stamina: 14 } },
-
   // ---- the valuables (flora.js; trade.js VALUABLES): pretty things, worth a trade,
   // and what the shrines take as offerings (docs/sacred-trees.md) ----
   shell:  { group: 'trinket', from: 'shore', sym: ['sacred tree'], size: [1, 1], stack: 1 },
@@ -137,29 +125,18 @@ export const INGREDIENTS = {
 
   // ---- materials for making instruments (making.js; docs/music.md "Making instruments"):
   // not food, not trinkets. Elder stems off the elder bushes; a hide and gut off a kill (the
-  // folk's hunters keep them). Board and wire come up the road with the traders (js/traders.js) ----
+  // folk's hunters keep them). Board and wire have no source yet: their instructions wait ----
   // elder's soft pith pushes out of a green stem, leaving a tube: the old pipe and whistle wood
-  // cut from shrubs, stacked by a fire or laid into a new one (docs/cooking.md); use: lay a fire
-  wood: { label: 'firewood', group: 'material', use: 'fire', worth: 0.3, from: 'shrubs', color: '#6b4a2a', size: [1, 2], stack: 4 },
   elder: { label: 'elder stem', group: 'material', worth: 0.5, from: 'elder bushes', color: '#8a7a4e', size: [1, 3], stack: 4,
            look: ['An elder stem', 'A straight green stem, soft at the heart.'] },
   hide:  { group: 'material', worth: 1.2, from: 'a kill', color: '#9a7a5a', size: [2, 2], stack: 2,
            look: ['A hide', 'Scraped clean and dried stiff.'] },
-  fleece: { group: 'material', worth: 1.5, from: 'shearing', color: '#d8ccb0', size: [3, 2], stack: 1,
-            look: ['A fleece', 'All in a piece, greasy and warm, and it smells of sheep.'] },
   gut:   { group: 'material', worth: 0.8, from: 'a kill', color: '#d8c8a0', size: [1, 1], stack: 6,
            look: ['Gut string', 'Cleaned, twisted and dried into a cord.'] },
-  board: { label: 'seasoned board', group: 'material', worth: 1.5, from: 'foreign parts', color: '#b08a5a', size: [1, 3], stack: 2,
+  board: { label: 'seasoned board', group: 'material', worth: 1.5, from: 'nowhere yet', color: '#b08a5a', size: [1, 3], stack: 2,
            look: ['A seasoned board', 'Old timber, dry right through, that will not warp.'] },
-  wire:  { group: 'material', worth: 2, from: 'foreign parts', color: '#c0a060', size: [1, 1], stack: 4,
+  wire:  { group: 'material', worth: 2, from: 'nowhere yet', color: '#c0a060', size: [1, 1], stack: 4,
            look: ['Wire', 'A coil of fine brass wire.'] },
-
-  // ---- what the traders bring along the road (js/traders.js, docs/economy.md). Salt goes on a house's harvest
-  // and is used up by it; a blade makes its digging quicker till it wears out. Neither is food ----
-  salt:  { group: 'foreign', worth: 1.3, keep: 365, from: 'foreign parts', color: '#e8e4d8', temper: [1, -3], virtues: ['keeping'], size: [1, 1], stack: 6,
-           look: ['Salt', 'Grey sea salt, in a twist of cloth.'] },
-  iron:  { label: 'iron blade', group: 'foreign', worth: 3, keep: 3650, from: 'foreign parts', color: '#6a6e74', size: [1, 2], stack: 1,
-           look: ['An iron blade', 'A spade-iron, to shoe the edge of a wooden digging spade.'] },
 
   // ---- instruments (docs/music.md): found where nobody plays them any more, played from
   // the pack (main.js playFromPack) with the tunes you've read; their sound is sampled,

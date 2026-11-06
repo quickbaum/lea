@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { height, under } from './terrain.js';
-import { lantern } from './lantern.js';
 import { mouthShape, halfWidth } from './gen/under.js';
 
 // The trolls — characters, not monsters (docs/music.md, "The troll"). Each sits in the one
@@ -43,7 +42,7 @@ function makeTroll(scene, e){
   T.update = (camera, visible, tint) => {
     if (!T.mesh) return;
     T.mesh.visible = visible;
-    if (tint) lantern.warm(mat.color.copy(tint), x, z);
+    if (tint) mat.color.copy(tint);
     T.mesh.rotation.y = Math.atan2(camera.position.x - x, camera.position.z - z);
   };
   // (px, pz) moved out of where he sits

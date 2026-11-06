@@ -15,7 +15,6 @@
 
 import { prepare, score } from './speech-score.js';
 import { LILTS, handOf, inkOn } from './lilt.js';
-import { closeX, pinX } from './close-x.js';
 
 const cache = {};
 let voicePlayer = null;          // (kind, { notes, length }, { gain }) → Promise<{ stop } | null>
@@ -120,18 +119,17 @@ function open(tree, opts){
   const main = document.createElement('div'); main.id = 'dlg-main';
   box.appendChild(portrait); box.appendChild(main);
   overlay.appendChild(box); document.body.appendChild(overlay);
-  pinX(closeX(close), box, overlay);
 
   function close(){ song?.skip(); overlay.remove(); document.removeEventListener('keydown', onKey); if (opts.onClose) opts.onClose(); }
   function onKey(e){
     if (e.key === 'Escape') close();
     else if (song && (e.key === ' ' || e.key === 'Enter')){ e.preventDefault(); song.skip(); }
   }
-  // a click anywhere, in the box or out of it, shows the rest of what's said and never shuts it;
-  // not a click that takes you somewhere (a choice, a link, back): that click opens the next
-  // screen first, and skipping then would skip that one
-  overlay.addEventListener('click', e => { if (!e.target.closest('.dlg-choice, .dlg-link, .dlg-back, .dlg-kin')) song?.skip(); });
+  // a click shows the rest of what's said; not a click that takes you somewhere (a choice, a
+  // link, back): that click opens the next screen first, and skipping then would skip that one
+  main.addEventListener('click', e => { if (!e.target.closest('.dlg-choice, .dlg-link, .dlg-back, .dlg-kin')) song?.skip(); });
   document.addEventListener('keydown', onKey);
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
   function go(id, push = true){
     const node = tree.nodes[id];

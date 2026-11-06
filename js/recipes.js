@@ -17,8 +17,7 @@
 // one makes it instead of the plain dish of its base (startPot), and puts a portion
 // by for the player (putBy, read by main.js). Pure sim, no rendering; talk
 // (convo.js) reads the pot through potNeeds / potHelp / potLeft / potStuck.
-// See docs/talk.md. The player isn't one of the folk: their hands act on a pot through potAct
-// (docs/cooking.md).
+// See docs/talk.md.
 
 import { countOf, takeFood, rawOf, takeRaw } from './larder.js';
 import { RAW_KINDS, RARE } from './ingredients.js';
@@ -115,9 +114,6 @@ const PATIENCE     = 8;      // seconds a cook waits on a step nobody knows, the
 const FETCH_WAIT   = 40;     // how long an add step waits for someone who's gone to fetch it
 const ADD_WAIT     = 6;      // …and for anyone at all to turn up with it, otherwise
 const Q_STIR = 0.25, Q_ADD = 0.2, Q_GUESS = 0.2;
-export const POT_CAP = 12;      // raw units a pot holds at once
-const PLAIN_Q = 0.4;             // what you make of it with no recipe: filling, not good (docs/cooking.md)
-const HOLD_T  = 14;              // seconds a cook leaves a step to whoever's helping, then does it
 
 // ---- knowing a recipe ----------------------------------------------------------
 const hash01 = (a, b) => { let h = 2166136261 >>> 0; for (const c of a + '|' + b) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return (h % 10007) / 10007; };
@@ -175,7 +171,6 @@ export const potDish = p => p.recipe || p.kind;
 export function startPot(p, kind, by = null, now = 0){
   p.recipe = (by && bookDishFor(by, kind, now)) || recipeFor(kind); p.step = 0; p.st = 0; p.stall = 0; p.q = 1;
   p.helpers = new Map(); p.missing = null; p.fetching = 0; p.stuck = false;
-  p.mine = false; p.helper = false; p.holdT = 0; p.slips = {}; p.noted = false; p.board = false;
 }
 
 export function stepPot(f, w, dt){
@@ -186,16 +181,6 @@ export function stepPot(f, w, dt){
   const s = r.steps[p.step];
   if (!s){ tally(w, 'dishes'); tally(w, 'quality', Math.max(0, p.q)); finish(p); if (r.book){ tally(w, 'book:' + p.recipe); putBy(f, p, w.time); } return; }
   p.cook += dt;
-  if (p.mine){                                     // your pot: nobody else works it, and only stirring won't wait
-    p.stuck = false; p.missing = null;
-    if (s.do === 'wait'){ if ((p.st += dt) >= s.t) next(p); }
-    else if (s.do === 'stir' && (p.st += dt) >= s.t){ p.q -= Q_STIR; p.slips[p.step] = 'caught'; next(p); }
-    return;
-  }
-  if (p.helper){                                   // you're lending a hand: the cook leaves you this step, for a while
-    if (!f.hands) p.helper = false;
-    else if (s.do !== 'wait' && (p.holdT += dt) < HOLD_T) return;
-  }
   const here = atFire(w, f), now = w.time;
   // anyone at the fire can stir; the rest wants someone who knows the dish
   const knower = s.do === 'stir' ? here[0] : here.find(n => knowsStep(n, p.recipe, p.step, now));
@@ -225,7 +210,7 @@ export function stepPot(f, w, dt){
     if ((p.st += dt) >= (p.fetching > 0 ? FETCH_WAIT : ADD_WAIT)){ p.q -= Q_ADD; tally(w, 'without'); next(p); }   // done without
   }
 }
-function next(p){ p.step++; p.st = 0; p.stall = 0; p.holdT = 0; }
+function next(p){ p.step++; p.st = 0; p.stall = 0; }
 // a book dish is done: its cook has it fresh in mind again, and keeps a portion back
 // for the player, who brought the recipe (main.js hands it over in talk)
 function putBy(f, p, now){
@@ -239,89 +224,6 @@ function tally(w, k, v = 1){ if (w.potStats) w.potStats[k] = (w.potStats[k] || 0
 function finish(p){
   p.readyQ = p.ready > 0 ? Math.min(p.readyQ ?? 1, Math.max(0, p.q ?? 1)) : Math.max(0, p.q ?? 1);
   p.ready += p.raw; p.raw = 0; p.cook = 0; p.step = 0; p.st = 0;
-}
-
-// ---- your hands at a pot (docs/cooking.md) -----------------------------------------
-// The player isn't one of the folk, so stepPot never sees them. They act through this, and
-// the pack stays main.js's: what comes back as `took` is for the caller to take out of it.
-//   'put'     { kind, n, recipe, to } the dish's base; an empty pot becomes yours. `recipe` is the
-//                                  one you're following (null: you just boil it, at PLAIN_Q).
-//                                  `to` 'pot' or 'board': a dish that opens with prep is worked on
-//                                  the board first (p.board), and goes in the pot when that's done
-//   'add'     kind                 what the current add step wants
-//   'stir'                         the current stir step
-//   'prep'    dt                   seconds of work at the current prep step
-//   'without'                      your pot's add step: go on without it, at a cost
-//   'help'                         someone else's pot: you've been asked to lend a hand
-// Returns { ok: true, took? } or { ok: false, why }.
-const no = why => ({ ok: false, why });
-export function potAct(f, w, act, arg){
-  const p = f.pot;
-  if (act === 'put'){
-    const { kind, n = 1, recipe = null, to = 'pot' } = arg;
-    if (p.raw + p.ready <= 0){
-      if (!f.lit) return no('cold');
-      const R = recipe && RECIPES[recipe];
-      if (R && !R.base.includes(kind)) return no('wrong');
-      const opens = !!R && R.steps[0].do === 'prep';
-      if (opens && to !== 'board') return no('prep-first');
-      if (!opens && to === 'board') return no('straight-in');
-      p.kind = kind; p.cook = 0; p.cooks = new Map(); startPot(p, kind, null, w.time);
-      p.recipe = R ? recipe : null; p.mine = true; p.q = R ? 1 : PLAIN_Q; p.board = opens;
-    } else {
-      if (!p.mine) return no('not-yours');
-      if (p.ready > 0) return no('ready');
-      if (RECIPES[p.recipe] ? !RECIPES[p.recipe].base.includes(kind) : p.kind !== kind) return no('wrong');
-      if (p.board && to !== 'board') return no('prep-first');
-      if (!p.board && to === 'board') return no('straight-in');
-      if (!p.board && RECIPES[p.recipe]?.steps[0].do === 'prep') return no('too-late');   // the rest has been worked and gone in
-    }
-    const m = Math.min(n | 0, POT_CAP - p.raw - p.ready);
-    if (m <= 0) return no('full');
-    p.raw += m;
-    return { ok: true, took: { kind, n: m } };
-  }
-  if (act === 'help'){
-    if (p.mine) return no('yours');
-    if (p.raw <= 0 || !RECIPES[p.recipe]) return no('no-step');
-    p.helper = true; p.holdT = 0;
-    return { ok: true };
-  }
-  if (!p.mine && !p.helper) return no('not-yours');
-  const s = p.raw > 0 && potStep(p);
-  if (!s) return no('no-step');
-  if (act === 'add'){
-    if (s.do !== 'add') return no('not-yet');
-    if (!s.item.includes(arg)) return no('wrong');
-    next(p);
-    return { ok: true, took: { kind: arg, n: 1 } };
-  }
-  if (act === 'stir'){
-    if (s.do !== 'stir') return no('not-yet');
-    next(p);
-    return { ok: true };
-  }
-  if (act === 'prep'){
-    if (s.do !== 'prep') return no('not-yet');
-    if ((p.st += Math.max(0, arg || 0)) >= s.t){ next(p); p.board = false; }
-    return { ok: true };
-  }
-  if (act === 'without'){
-    if (!p.mine) return no('not-yours');
-    if (s.do !== 'add') return no('not-yet');
-    p.q -= Q_ADD; p.slips[p.step] = 'without'; next(p);
-    return { ok: true };
-  }
-  return no('unknown');
-}
-// what the paper draws: the dish, each step and how it stands
-export function potView(p){
-  const r = RECIPES[p.recipe], cooking = p.raw > 0;
-  const steps = !r ? [] : r.steps.map((s, i) => ({ do: s.do, say: s.say, item: s.item || null, slip: p.slips?.[i] || null,
-    state: !cooking || i < p.step ? 'done' : i === p.step ? 'now' : 'todo' }));
-  const s = cooking && r ? r.steps[p.step] : null;
-  return { dish: potDish(p), recipe: p.recipe || null, mine: !!p.mine, helper: !!p.helper, board: !!p.board, raw: p.raw, ready: p.ready, q: Math.max(0, p.q ?? 1),
-           steps, now: s ? { do: s.do, say: s.say, item: s.item || null, frac: Math.min(1, p.st / s.t) } : null };
 }
 
 // ---- what talk reads -------------------------------------------------------------

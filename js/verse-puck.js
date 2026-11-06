@@ -36,7 +36,6 @@ export const SAYINGS = {
   'last-seen':    { label: 'Where a friend was last seen', needs: ['at', 'far', 'dir'], tries: [['last-saw', 'lies:far']] },
   'set-off':      { label: 'Setting off', tries: [['set-off', 'fill']] },
   'set-off:road': { label: 'Setting off by the road', tries: [['set-off:road', 'fill']] },
-  bound:          { label: 'Where we are bound, and how far yet', needs: ['dest', 'far'], tries: [['bound', 'still-far'], ['bound', 'fill']] },
   'on-road':      { label: 'Onto the road', tries: [['on-road', 'fill']] },
   'off-road':     { label: 'Off the road, into open country', tries: [['off-road', 'fill']] },
   enter:          { label: 'Coming into a place', needs: ['place'], tries: c => [['enter', 'kind:' + c.kind], ['enter', 'fill']] },

@@ -1,17 +1,7 @@
 import * as THREE from 'three';
 import { WORLD_R } from './config.js';
-import { lantern } from './lantern.js';
 import { height, walkable, randomLand } from './terrain.js';
-import { Dodge } from './dodge.js';
-
-// he goes round tree trunks, not through them (js/dodge.js). main.js hands in the obstacles once they're planted
-let dodge = null;
-export const setPuckObstacles = within => { dodge = new Dodge(within, 0.45); };
-function clearOfTrees(p){
-  if (!dodge) return;
-  const x = p.x, z = p.z;
-  if (dodge.push(p) && !walkable(p.x, p.z)){ p.x = x; p.z = z; }
-}
+import { makeLabel } from './label.js';
 
 // Puck — a magical hopping creature. No walk animation: he *hops*, bobbing up
 // and down. The sprite is drawn facing left, so we mirror it when he travels
@@ -46,9 +36,6 @@ const LEAD = 12;      // how far ahead of you a guiding Puck keeps, along the ro
 const WAIT = 22;      // and how far off you may fall before he stops and waits
 const FAR  = 50;      // farther than this from you (outside), and he may wink over to you
 const NEAR = [10, 18];   // where he winks in: this far from you (beyond his skittish 7)
-const CATCH = 3.5;       // guiding, he pauses for you only this close (you can talk from further: PUCK_REACH, main.js)
-const CATCH_PAUSE = 1.5; // that long, time enough to press E
-const CATCH_REST = 4;    // and then hops at least this long before he'll pause again
 
 function loadTex(loader, src){
   return new Promise((res) => loader.load(src, t => {
@@ -62,9 +49,9 @@ function loadTex(loader, src){
 // ------------------------------------------------------------------ Puck (regular)
 
 class Puck {
-  constructor(scene, texF, texB, { x, z, h, opacity = 1 }){
+  constructor(scene, texF, texB, { x, z, h, opacity = 1, label = null }){
     this.scene = scene; this.texF = texF; this.texB = texB;
-    this.x = x; this.z = z; this.h = h;
+    this.x = x; this.z = z; this.h = h; this.label = label;
     const aspect = (texF.image.width || 1) / (texF.image.height || 1);
     this.w = h * aspect;
     this.mat = new THREE.MeshBasicMaterial({
@@ -80,9 +67,6 @@ class Puck {
     this.hopSpeed = 7 + Math.random() * 2;    // radians/sec
     this.retarget = 0;                        // countdown to pick a new spot
     this.spooked = 0;                         // time left fleeing the player
-    this.catchPause = 0;                      // guiding: time left paused for you (stays)
-    this.catchRest = 0;                       // and before he'll pause again
-    this.aloof = 0;                           // just set off: time left that E won't reach him (main.js)
     this._back = false;
   }
 
@@ -128,32 +112,16 @@ class Puck {
     if (dist < 0.05) return false;
     for (const turn of [0, 0.6, -0.6, 1.2, -1.2]){
       const a = Math.atan2(dz, dx) + turn, nx = this.x + Math.cos(a) * step, nz = this.z + Math.sin(a) * step;
-      if ((walkable(nx, nz) && !dodge?.hit(this, nx, nz)) || turn === -1.2){ this.heading = Math.atan2(nx - this.x, nz - this.z); this.x = nx; this.z = nz; return true; }
+      if (walkable(nx, nz) || turn === -1.2){ this.heading = Math.atan2(nx - this.x, nz - this.z); this.x = nx; this.z = nz; return true; }
     }
     return false;
   }
 
-  // Does he stand still this frame? Talking, yes. `held` (main.js) says E would talk to him: at
-  // large that's enough, he stays as long as you like. Guiding, he has somewhere to be: only
-  // if you've really caught him, only briefly, and not again straight after, nor as you part.
-  stays(dt, player){
-    if (this.talking){ this.catchPause = 0; this.catchRest = CATCH_REST; return true; }
-    if (!this.guide) return !!this.held;
-    if (this.catchPause > 0){ this.catchPause -= dt; return true; }
-    if (this.catchRest > 0){ this.catchRest -= dt; return false; }
-    if (!this.held || Math.hypot(this.x - player.x, this.z - player.z) >= CATCH) return false;
-    this.catchPause = CATCH_PAUSE; this.catchRest = CATCH_REST;
-    return true;
-  }
-
   update(cam, dt, player, cx, cz, spread, tint){
-    if (tint) lantern.warm(this.mat.color.copy(tint), this.x, this.z);
+    if (tint) this.mat.color.copy(tint);
     let moving = false;
-    if (this.aloof > 0 && !this.talking) this.aloof -= dt;     // from when the talk is over
-    // standing still, he comes down from any hop he's in
-    if (this.stays(dt, player)){ if (Math.sin(this.hop) > 0) this.hop += this.hopSpeed * dt; }
-    else if (this.guide) moving = this.guideStep(dt, player);
-    else {
+    if (this.guide && !this.talking) moving = this.guideStep(dt, player);
+    else if (!this.talking){
       const dPlayer = Math.hypot(this.x - player.x, this.z - player.z);
       if (dPlayer < 7) this.spooked = 0.8 + Math.random() * 0.7;
       if (this.spooked > 0){
@@ -178,10 +146,10 @@ class Puck {
       }
     }
 
-    clearOfTrees(this);
     const yOff = Math.max(0, Math.sin(this.hop)) * (0.45 * this.h * 0.6);
     const gy = height(this.x, this.z) + this.h / 2;
     this.mesh.position.set(this.x, gy + yOff, this.z);
+    if (this.label) this.label.position.set(this.x, gy + this.h / 2 + 0.5, this.z);
 
     this.mesh.rotation.y = Math.atan2(cam.position.x - this.x, cam.position.z - this.z);
 
@@ -229,7 +197,7 @@ class AncientPuck {
   }
 
   update(cam, dt, player, cx, cz, spread, tint){
-    if (tint) lantern.warm(this.mat.color.copy(tint), this.x, this.z);
+    if (tint) this.mat.color.copy(tint);
 
     const dPlayer = Math.hypot(this.x - player.x, this.z - player.z);
     if (dPlayer < 8) this.spooked = 1.0 + Math.random() * 0.5;
@@ -254,7 +222,6 @@ class AncientPuck {
     }
 
     this._float += dt * 1.1;
-    clearOfTrees(this);
     const yOff = Math.sin(this._float) * this.h * 0.04;
     const gy = height(this.x, this.z) + this.h / 2;
     this.mesh.position.set(this.x, gy + yOff, this.z);
@@ -403,12 +370,14 @@ export class PuckFlock {
   }
 
   async load(){
-    const loader = new THREE.TextureLoader();   // crisp-ok: loadTex sets the filters
+    const loader = new THREE.TextureLoader();
     this.texF = await loadTex(loader, FRONT);
     this.texB = await loadTex(loader, BACK);
     this.ancientTextures = await Promise.all(ANCIENT_SPRITES.map(s => loadTex(loader, s)));
+    const label = makeLabel('Puck', { color: '#e8c75a' });
+    this.scene.add(label);
     this.leader = new Puck(this.scene, this.texF, this.texB,
-      { x: this.cx, z: this.cz, h: 1.35, opacity: 1 });
+      { x: this.cx, z: this.cz, h: 1.35, opacity: 1, label });
     this.leaderCx = this.cx; this.leaderCz = this.cz;
     this._spawnBand();
     return this;
@@ -458,7 +427,7 @@ export class PuckFlock {
       if (L.mat.opacity >= 1){ this.wink = null; L.mat.depthWrite = true; }
       return;
     }
-    if (!outside || L.guide || L.talking || L.held) return;
+    if (!outside || L.guide || L.talking) return;
     this.findTimer -= dt;
     if (this.findTimer > 0) return;
     this.findTimer = 40 + Math.random() * 40;
@@ -471,6 +440,7 @@ export class PuckFlock {
 
     this._keepNear(dt, player, outside);
     this.leader.update(cam, dt, player, this.leaderCx, this.leaderCz, 7, tint);
+    if (this.leader.label) this.leader.label.material.opacity = this.leader.mat.opacity;   // his name fades with him
     this.leaderCx += (this.leader.x - this.leaderCx) * Math.min(1, dt * 0.4);
     this.leaderCz += (this.leader.z - this.leaderCz) * Math.min(1, dt * 0.4);
 

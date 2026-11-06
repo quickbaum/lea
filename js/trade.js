@@ -18,7 +18,7 @@
 //              gain from, or null. No set prices: the rate lands between what
 //              the buyer must get and what the seller will give.
 
-import { FOOD_GROUP, CROP_KINDS, WORTHS, TRINKETS, INGREDIENTS } from './ingredients.js';
+import { FOOD_GROUP, CROP_KINDS, WORTHS, TRINKETS } from './ingredients.js';
 
 export const CROPS = CROP_KINDS;          // (ingredients.js, in its order: cropAt indexes it)
 const CROP = new Set(CROPS);
@@ -57,43 +57,6 @@ export function worth(n, kind, held, now){
   return (WORTH[kind] ?? 0.6) * taste(n, kind) * (0.3 + want) / (1 + held / HELD_SOFT);
 }
 
-// What the road's goods are worth to whoever might use them (docs/economy.md). Not by diet: a household wants
-// salt for its harvest and a blade if its own's worn out; a maker wants wire and board if their craft calls for
-// them. `use` is how much they'd have a use for it, 0..1, from agents.js; held halves it as for anything.
-export const ROAD_GOODS = new Set(['salt', 'iron', 'wire', 'board']);
-export const useWorth = (n, kind, use, held) => (WORTH[kind] ?? 0.6) * taste(n, kind) * (0.1 + use) / (1 + held / HELD_SOFT);
-export const baseWorth = kind => isCraft(kind) ? CRAFT.BASE : WORTH[kind] ?? 0.6;
-
-// Village crafts (docs/economy.md). A style is a design, an arrangement and a medium, kept apart so each can grow:
-// more designs, ways of laying them out, ways of working them. For now the designs are Wagara's patterns (the Lea's
-// baked copy, js/kin-mark.js; `design` is an index, js/craft-view.js draws it) and each settlement has one style of its own. A person wants what they haven't got: another of the same
-// style is worth far less, and your own village's is everyday stuff to you. So a piece is worth most far from home.
-export const CRAFT = { BASE: 2.2, HELD: 1, OWN: 0.35, RATE: 0.2, STORE: 3 };
-export const MEDIA = { embroidery: { label: 'embroidery', look: 'stitched in thread' }, beadwork: { label: 'bead-work', look: 'worked in beads' } };
-const DYES = [['#27406b', '#e3d8bf'], ['#9c3a2e', '#e8dcc4'], ['#e3d8bf', '#27406b'], ['#c9a23a', '#3b3a32'], ['#5a3f2a', '#dcc9a3'], ['#56663a', '#e3d8bf']];
-export const isCraft = kind => typeof kind === 'string' && kind.startsWith('craft-');
-// each settlement's style: from where the settlement is, so it's the same every time and takes nothing from the rng
-export function craftStyles(places){
-  if (!places.length) return [];
-  const off = Math.floor(hash01(`${Math.round(places[0].x)},${Math.round(places[0].z)}`) * 1000);
-  return places.map((p, i) => {
-    const media = Object.keys(MEDIA), medium = media[(off + i) % media.length], [ink, ground] = DYES[(off + i * 5) % DYES.length];
-    const kind = `craft-${i}`, s = { kind, place: i, design: off + i * 5, arrange: 'allover', medium, ink, ground };
-    INGREDIENTS[kind] = { label: `${MEDIA[medium].label}`, group: 'craft', worth: CRAFT.BASE, keep: 3650, from: `place ${i}`, color: ink, size: [1, 1], stack: 4, style: s,
-      look: [MEDIA[medium].label, `A patterned piece, ${MEDIA[medium].look}.`] };
-    return s;
-  });
-}
-// a place's name, once the world's named them: this is how you tell one village's work from another's
-export function nameCraft(style, name, design){
-  const e = INGREDIENTS[style.kind], word = MEDIA[style.medium].label;
-  e.label = `${name} ${word}`; e.from = name; e.look = [e.label, `A ${design} pattern, ${MEDIA[style.medium].look}.`];
-}
-export function craftWorth(n, kind, held, own){
-  const eye = 0.4 + 0.6 * (n.persona?.beauty ?? 1);
-  return CRAFT.BASE * taste(n, kind) * eye * (own ? CRAFT.OWN : 1) / (1 + held / CRAFT.HELD);
-}
-
 // The haggle. `offers` are what the buyer can give, `wants` what the seller can:
 // each { kind, have, a, b } where a and b are its worth to buyer and seller.
 // Tries every pairing and every count up to the caps, and keeps the swap whose
@@ -130,26 +93,6 @@ export function wishOf(n, held, now){
   let best = null, bv = 0;
   for (const k of WILD){ const v = worth(n, k, held(k), now); if (v > bv){ bv = v; best = k; } }
   return best;
-}
-
-// How each crop is kept (docs/farming.md). family: its place in the rotation. support: what it must
-// climb, without which it stops at its shoots. rate: how fast it comes on. yield: how much it brings
-// in. soil: what a crop does to the ground: pulses put back, cabbages take the most.
-export const HUSBANDRY = {
-  beans:    { family: 'pulse',  support: 'trellis', rate: 0.9,  yield: 1.0,  soil: 0.3 },
-  peas:     { family: 'pulse',  support: 'sticks',  rate: 1.15, yield: 0.8,  soil: 0.25 },
-  cabbages: { family: 'leaf',   support: null,      rate: 0.85, yield: 1.2,  soil: -0.3 },
-  leeks:    { family: 'allium', support: null,      rate: 0.8,  yield: 1.0,  soil: -0.15 },
-  onions:   { family: 'allium', support: null,      rate: 0.9,  yield: 0.95, soil: -0.15 },
-  turnips:  { family: 'root',   support: null,      rate: 1.2,  yield: 1.05, soil: -0.1 },
-  parsnips: { family: 'root',   support: null,      rate: 0.85, yield: 1.0,  soil: -0.1 },
-};
-const ROTATION = ['pulse', 'leaf', 'allium', 'root'];
-// What follows a crop on the same ground: the next family, and which of it by where the field lies.
-export function nextCrop(crop, x, z, turn){
-  const fam = ROTATION[(ROTATION.indexOf(HUSBANDRY[crop].family) + 1) % ROTATION.length];
-  const opts = Object.keys(HUSBANDRY).filter(k => HUSBANDRY[k].family === fam);
-  return opts[(Math.abs(Math.round(x) * 31 + Math.round(z)) + turn) % opts.length];
 }
 
 // the valuables (flora.js), worth the same as a trinket

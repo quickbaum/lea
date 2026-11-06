@@ -188,11 +188,9 @@ function plan(route, from = 0){
   return { cum, len, legs: routeLegs(route), turns };
 }
 
-// guide: { puck, flock, player, say(text), onArrive(dest), onSetOff() } — say puts a bubble over
-// Puck; onArrive, when he's brought you where you asked (for the journal); onSetOff, when he
-// starts leading (main.js turns you to watch him go)
-const ALOOF = 3;   // s after you part that E won't reach him, nor the box offer it: he's off
-export function makePuckGuide({ flock, player, say, finder = null, onArrive = null, onSetOff = null, friends = null }){
+// guide: { puck, flock, player, say(text), onArrive(dest) } — say puts a bubble over Puck;
+// onArrive, when he's brought you where you asked (for the journal)
+export function makePuckGuide({ flock, player, say, finder = null, onArrive = null, friends = null }){
   let trip = null;            // { dest, route, plan, leg, turnK, said, t, song, waitT, offT, half, near }
   let chosen = null, page = 0, opts = new Map(), asked = null, fpage = 0;
   const puck = () => flock.leader;
@@ -200,7 +198,6 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
   function start(dest, planned){
     const p = puck(), { route, len: lead } = leadIn(planned, p.x, p.z, player.x, player.z), pl = plan(route, lead);
     p.guide = { pts: route.pts, cum: pl.cum, len: pl.len, s: 0, ip: 0, k: 0 };
-    p.aloof = ALOOF; onSetOff?.();
     trip = { dest, route, plan: pl, leg: 0, turnK: 0, seen: new Set([dest.name]), t: GAP, song: 0, waitT: 0, offT: 0, stage: 0 };
     const first = pl.legs[0];
     speak(couplet(SAYINGS[first?.road ? 'set-off:road' : 'set-off'].tries, {}, pick(['Follow me!', 'This way!', 'Come on, then!']) + (first?.road ? ' The old road first.' : '')));
@@ -401,30 +398,20 @@ export function makePuckGuide({ flock, player, say, finder = null, onArrive = nu
     return couplet(SAYINGS['last-seen'].tries, { at: [d.where()], far: FAR[farWord(far)], ctxdir: 'dir:' + dir }, `${pick(['Last I saw,', 'Wandering about'])} ${d.where()}, ${farWord(far)} ${dir}.`);
   }
   // the badger's wood (dialogs/puck.json "badger"): the biggest wood in the Lea
-  const badger = () => [...places()].filter(g => g.kind === 'wood' && g.town == null).sort((a, b) => b.area - a.area)[0]?.name || 'the old wood';
-  // on a trip, he's on an errand: he reminds you where you're both going, and you can call it off
-  function tripGreeting(root){
-    const d = trip.dest, far = farWord(Math.max(0, puck().guide.len - puck().guide.s));
-    return { ...root,
-      text: couplet(SAYINGS.bound.tries, { ...namedCtx(d.name), far: FAR[far] }, `We're bound for ${d.name}. ${cap(far)}, still.`),
-      choices: [
-        { label: 'Lead on.', next: null },
-        { label: `On second thought, let's not go to ${d.name}.`, next: null, run: () => { say('As you like. Another time!'); stop(); } },
-        { label: 'Where am I?', next: 'g-where' },
-      ] };
-  }
-  // Puck's tree with the branch grafted on: "Where am I?" in his greeting (or, on a trip, a
-  // greeting of its own)
+  const badger = () => [...places()].filter(g => g.kind === 'wood').sort((a, b) => b.area - a.area)[0]?.name || 'the old wood';
+  // Puck's tree with the branch grafted on: "Where am I?" in his greeting (and, on a
+  // trip, a way to call it off)
   function graft(tree){
     const root = tree.nodes[tree.root], extra = [{ label: 'Where am I?', next: 'g-where' }];
     if (finder?.salve?.()) extra.push({ label: 'How do I make a salve to help me see the way to Faerie?', next: 'g-salve' });
+    if (trip) extra.unshift({ label: "Let's stop here.", next: null, run: () => { say('As you like. Another time!'); stop(); } });
     const choices = [...root.choices];
     const bye = choices.findIndex(c => c.next === null);
     choices.splice(bye < 0 ? choices.length : bye, 0, ...extra);
     const out = { ...tree, nodes: Object.create(null) };
     for (const k of Object.keys(tree.nodes)) out.nodes[k] = tree.nodes[k];
     for (const k of Object.keys(nodes)) Object.defineProperty(out.nodes, k, Object.getOwnPropertyDescriptor(nodes, k));
-    out.nodes[tree.root] = trip ? tripGreeting(root) : { ...root, choices };
+    out.nodes[tree.root] = { ...root, choices };
     for (const [k, n] of Object.entries(tree.nodes)) if (n.text?.includes('{badger}')) out.nodes[k] = { ...n, text: n.text.replaceAll('{badger}', badger()) };
     opts = new Map();                                 // routes are from where you stand now
     return out;

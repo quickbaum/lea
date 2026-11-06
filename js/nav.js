@@ -105,15 +105,6 @@ export class NavGrid {
     }
   }
 
-  // A building put up after build() (a shepherd's hut, js/flock-land.js raiseCommons): close its cells as build() would have.
-  // Without it the route runs through the walls, the body is pushed back off them, and people shuffle by the hut (docs/npc-behavior.md, "Stuck")
-  closeBuilt(x, z, rad){
-    if (!this.h) return;
-    const c0 = this.col(x - rad - 1), c1 = this.col(x + rad + 1), r0 = this.row(z - rad - 1), r1 = this.row(z + rad + 1);
-    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++)
-      if (this.inb(c, r) && builtAt(this.cxOf(c), this.czOf(r), 0.9)) this.walk[r * this.cols + c] = 0;
-  }
-
   // Re-price the cells worn trails cross (trails.js TrailField): a trodden path
   // is quicker going (terrain.js wornPace), so routes come to follow the paths.
   // Cheap enough to call every couple of seconds: it visits only the worn cells,
@@ -129,7 +120,7 @@ export class NavGrid {
       if (this.inb(c, r)) visit.add(r * cols + c);
     };
     for (const i of trail.active) add(i);
-    if (trail.permanent) for (const i of trail.permanent.keys()) add(i);
+    if (trail.permanent) for (const i of trail.permanent) add(i);
     this._worn.clear();
     for (const i of visit){
       const c = i % cols, r = (i / cols) | 0;
