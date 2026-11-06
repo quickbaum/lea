@@ -67,6 +67,14 @@ export const TUNES = {
 Object.assign(TUNES, SCORED);
 // One song twice over: the folk's way and the Gentry's, as two tunes under two names. Off a printed
 // page (docs/texts/tunes.md). Added after the rest so the crypts' deal of the other songs stands.
+const FRIENDS = ['G2G2A3G|G2FF-F4|z2GGG3F|F2E2-E2z2|', 'G2G2A2G2|GFF2-F2z2|G2G2z2GF|E4z4|',
+                 'E3cc3B|BAA2-A2z2|z2B4/3A4/3G4/3-GF|F2E2-E2z2|', 'z2GFG2F2|FEE2-E2z2|ED-D2C2B,2|A,4z4|'];
+TUNES['fortune rains rarely'] = { key: 'Am', unit: 1 / 8, meter: [4, 4], bpm: 138, book: 'cellar',
+  about: 'A wry song: why climb the ladder yourself, when your friends are on it?',
+  phrases: FRIENDS, form: [0, 1, 2, 3, 0, 1, 2, 3] };
+TUNES['the halls with cold names'] = { key: 'Am', unit: 1 / 8, meter: [4, 4], bpm: 69, book: 'coldnames', style: 'gentry',
+  about: 'A mortal song the Gentry kept, of high halls that walk through a dreamer\'s nights.',
+  phrases: FRIENDS, harmony: ['C', 'G', 'G', 'C', 'C', 'G', 'G', 'C', 'Am', 'Dm', 'G', 'C', 'Dm', 'Am', 'E', 'Am'] };
 export const TUNE_IDS = Object.keys(TUNES);
 export const FOLK_TUNES = TUNE_IDS.filter(id => !TUNES[id].book);
 
@@ -85,6 +93,7 @@ export const MUSIC_BOOKS = {
   pass:    { from: 'A scroll of songs, from far to the east', faerie: true, paper: 'vellum' },
   rocking: { from: 'A leaf of music for flute and lute, gilt-edged', faerie: true, paper: 'vellum' },
   sorrowful: { from: 'A leaf of music, gilt-edged, its corner turned down', faerie: true, paper: 'vellum' },
+  coldnames: { from: 'A leaf of music, gilt-edged, in a mortal hand', faerie: true, paper: 'vellum' },
 };
 for (const [id, B] of Object.entries(MUSIC_BOOKS)) B.tunes = TUNE_IDS.filter(t => TUNES[t].book === id);
 export const FAERIE_MUSIC = Object.keys(MUSIC_BOOKS).filter(b => MUSIC_BOOKS[b].faerie);
