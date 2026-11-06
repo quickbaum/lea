@@ -110,6 +110,8 @@
   .lab .clap.icon{width:28px;height:26px}
   .cell{height:36px;border:1px solid var(--line);border-radius:3px;background:#28241f;color:var(--fg);display:flex;align-items:center;justify-content:center;font:bold 14px ui-monospace,monospace;cursor:pointer;user-select:none}
   .cell.hit{background:var(--on)} .cell.now{outline:2px solid var(--now)}
+  /* while playing (or paused), every column but the one sounding sinks back */
+  #grid.live .cell:not(.now), #grid.live .count:not(.now){filter:brightness(.62) saturate(.8)}
   .cell.beat{box-shadow:inset 3px 0 0 #6b604c} .cell.bar{box-shadow:inset 3px 0 0 var(--gold)}
   /* a clap: two palms, apart at rest, struck together each time the playhead reaches it */
   .clap{width:26px;height:24px;display:block;overflow:visible}
@@ -128,9 +130,45 @@
   @keyframes spark{0%,20%{opacity:0} 35%{opacity:1} 100%{opacity:0}}
   @media (prefers-reduced-motion: reduce){ .cell.now .clap g, .cell.now .clap .spark{animation:none} .cell.now .clap .spark{opacity:1} }
   .key .clap{display:inline-block;vertical-align:middle;width:20px;height:18px}
+  /* a stroke, drawn: the skin from above and what strikes it, a palm in the middle, fingertips at
+     the rim, a stick or a mallet; the other hand hollow, a ghost note in brackets */
+  .stroke{width:22px;height:22px;display:block;overflow:visible}
+  #grid .cell .stroke{width:calc(var(--cell) * .8);height:calc(var(--cell) * .8)}
+  .key .stroke{display:inline-block;vertical-align:middle;width:20px;height:20px}
+  .stroke .skin{fill:none;stroke:var(--fg);stroke-width:1.2;opacity:.5}
+  .stroke .hand path{fill:var(--fg);stroke:var(--bg);stroke-width:.8} .stroke .hand path.fing{fill:none;stroke:var(--on);stroke-width:.9}
+  .stroke .hand.other path{fill:none;stroke:var(--fg);stroke-width:1.4} .stroke .hand.other path.fing{stroke:var(--fg);stroke-width:.9}
+  .stroke .bracket{fill:none;stroke:var(--fg);stroke-width:1.2;opacity:.5}
+  .stroke .stick{fill:none;stroke:var(--fg);stroke-width:1.8;stroke-linecap:round} .stroke .stick.thin{stroke-width:1}
+  .stroke .ball{fill:var(--fg)}
+  .stroke .ring,.stroke .spark,.stroke .arrow{fill:none;stroke:var(--gold);stroke-width:1.3;stroke-linecap:round;stroke-linejoin:round}
+  .stroke .jingle{fill:var(--gold)} .stroke .jingle.off{fill:none;stroke:var(--fg);stroke-width:.8;opacity:.6}
+  .stroke .cym{fill:var(--fg)}
+  .stroke.soft{opacity:.55}
+  /* the stroke, played: the hand drops onto the skin, a stick swings down, the skin flashes */
+  .stroke .mv{transform-box:view-box}
+  .stroke .swing{transform-origin:25px 0}
+  .stroke .hand{transform-box:fill-box;transform-origin:center}
+  .cell.now .stroke .hand{animation:handHit .16s ease-out}
+  .cell.now .stroke .swing{animation:swingHit .16s ease-out}
+  .cell.now .stroke .down{animation:downHit .16s ease-out}
+  .cell.now .stroke .up{animation:upHit .16s ease-out}
+  .cell.now .stroke .top{animation:topHit .14s ease-out}
+  .cell.now .stroke .shake{animation:shakeHit .2s ease-out;transform-origin:12px 12px}
+  .cell.now .stroke .skin{animation:skinHit .22s ease-out}
+  .cell.now .stroke .ring,.cell.now .stroke .spark{animation:flashHit .22s ease-out}
+  @keyframes handHit{0%{transform:translate(var(--dx),var(--dy)) scale(1.3)} 35%{transform:scale(.94)} 100%{transform:none}}
+  @keyframes swingHit{0%{transform:rotate(-28deg)} 35%{transform:rotate(4deg)} 100%{transform:none}}
+  @keyframes downHit{0%{transform:translateY(-5px)} 40%{transform:translateY(1.5px)} 100%{transform:none}}
+  @keyframes upHit{0%{transform:translateY(5px)} 40%{transform:translateY(-1.5px)} 100%{transform:none}}
+  @keyframes topHit{0%{transform:translateY(-4px)} 40%{transform:translateY(.8px)} 100%{transform:none}}
+  @keyframes shakeHit{0%{transform:rotate(-14deg)} 35%{transform:rotate(9deg)} 70%{transform:rotate(-4deg)} 100%{transform:none}}
+  @keyframes skinHit{0%,25%{stroke:var(--gold);opacity:1;stroke-width:2} 100%{}}
+  @keyframes flashHit{0%{opacity:.2} 30%{opacity:1;stroke-width:2.2} 100%{}}
+  @media (prefers-reduced-motion: reduce){ .cell.now .stroke *{animation:none} }
   .cell.ro{cursor:default;font-weight:normal;font-size:13px}
   .cell.band{cursor:default;font-weight:normal;font-size:11px;line-height:1.1;text-align:center;background:#24211c}
-  .cell.band.hit{background:#4a3a5a} .cell.band.prev{opacity:.45} .lab.band{color:#c8b8e0}
+  .cell.band.hit{background-color:#4a3a5a} .cell.band{--head:#5e4a7e;text-shadow:0 0 3px #24211c,0 0 2px #24211c} .cell.band.prev{opacity:.45} .lab.band{color:#c8b8e0}
   .count{color:var(--dim);text-align:center;font-size:12px} .count.now{color:var(--now)}
   code{color:var(--gold)} .key{font-size:14px}
   #about,#fitInfo{min-height:3em}
@@ -251,7 +289,7 @@
 <div class="grid" id="grid" aria-label="Everything playing, on the cycle you're hearing. Drum rows: click a square to change its stroke, untick to mute. Band rows: the notes each part strikes on each pulse."></div>
 <p id="text" hidden></p>
 <div class="bottom">
-  <button id="play" class="bigplay" aria-label="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="tri" d="M7 4.5 L20 12 L7 19.5 Z"/><rect class="sq" x="6" y="6" width="12" height="12" rx="1.5"/></svg></button>
+  <button id="play" class="bigplay" aria-label="Play"><svg viewBox="0 0 24 24" aria-hidden="true"><path class="tri" d="M7 4.5 L20 12 L7 19.5 Z"/><g class="sq"><rect x="6.5" y="5" width="4" height="14" rx="1"/><rect x="13.5" y="5" width="4" height="14" rx="1"/></g></svg></button>
   <div id="where" aria-live="off"></div>
 </div>
 </main>
@@ -436,7 +474,7 @@ function load(p){
   for (const pid of ['drone', 'bells']) mix[pid].follows = KIT.bass;
   mix.broken.follows = KIT.lead;
   $('strokeKey').innerHTML = `On ${KIT.name}: ` + VOICES.map(v => `${v.name}, ` + Object.entries(DRUMS[v.id].strokes)
-    .map(([k, what]) => (v.id === 'clap' ? CLAP.replace('class="clap"', 'class="clap keyclap"') : `<code>${k}</code>`) + ' ' + what).join(', ')).join(' · ');
+    .map(([k, what]) => (v.id === 'clap' ? CLAP.replace('class="clap"', 'class="clap keyclap"') : (strokeArt(v.id, k) || '') + `<code>${k}</code>`) + ' ' + what).join(', ')).join(' · ');
   $('about').textContent = `${p.meter.join('/')}, ${G.bars > 1 ? `a cycle of ${G.bars} bars` : 'a bar a cycle'}, ${G.N} pulses. ` + p.about;
   patName = p.name; curPat = p;
   $('rot').max = G.N - 1; if (+$('rot').value > G.N - 1) $('rot').value = 0;
@@ -454,6 +492,7 @@ function load(p){
   listTunes(); draw(); labels();
   if (mel){
     if (playing && changed){ stop(); start(); }
+    else if (paused && changed) stop();
     else { if ($('tune').value !== was) newTune(); else refit(); summary(); if (openDD === 'melody-adv') showFit(); }
   }
 }
@@ -722,9 +761,20 @@ function ambience(on){
     amb.update(dt, { here: { x: 0, z: 0, yaw: 0 }, wind: 0, ...(AMBIENT[room] || { under: true }) });
   }, 100);
 }
+// Pause freezes the band's audio clock where it is, notes in flight and all, so Play goes on from
+// there; anything that changes the grid's shape while paused (a new meter) drops it to a stop
+let paused = false;
+function pause(){
+  ambience(false); ctx.suspend();
+  playing = false; paused = true; clearInterval(timer); playLabel();
+}
+async function resume(){
+  await ctx.resume();
+  playing = true; paused = false; clearInterval(timer); timer = setInterval(tick, 25); tick(); frame(); playLabel(); ambience(true);
+}
 function stop(){
   ambience(false);
-  playing = false; clearInterval(timer); upNext = null; $('where').textContent = ''; heard.clear(); shownCycle = null; bandRows();
+  playing = false; paused = false; clearInterval(timer); upNext = null; $('where').textContent = ''; heard.clear(); shownCycle = null; bandRows();
   playLabel(); document.querySelectorAll('.now').forEach(c => c.classList.remove('now'));
 }
 // cycle songs: the tunes in the rhythm's own meter, in the list's order. Each comes in where the last
@@ -768,7 +818,25 @@ function bandRows(at = G.N - 1){
     const col = +c.dataset.col, old = col > at, ns = (old ? P : C)[c.dataset.part]?.[col] || [];
     c.textContent = [...new Set(ns.map(nameOf))].join(' ');
     c.classList.toggle('hit', ns.length > 0); c.classList.toggle('prev', old && ns.length > 0);
+    c.style.backgroundImage = noteheads(ns, span(c.dataset.part));
   });
+}
+// The shading under a band square's names: a notehead per pitch, high in the square for a high
+// note, low for a low one, against the row's own range (what the last few cycles struck, at least
+// an octave, so a drone's two notes don't fly to the edges).
+function span(pid){
+  let lo = Infinity, hi = -Infinity;
+  for (const C of heard.values()) for (const col of C[pid] || []) for (const m of col){ lo = Math.min(lo, m); hi = Math.max(hi, m); }
+  if (lo > hi) return null;
+  const pad = Math.max(0, 12 - (hi - lo)) / 2;
+  return [lo - pad, hi + pad];
+}
+function noteheads(ns, r){
+  if (!ns.length || !r) return '';
+  return [...new Set(ns)].map(m => {
+    const y = 84 - 68 * (m - r[0]) / (r[1] - r[0]);
+    return `radial-gradient(90% 45% at 50% ${y.toFixed(1)}%, var(--head), transparent)`;
+  }).join(', ');
 }
 function fitGrid(){
   const g = $('grid'); if (!g) return;
@@ -809,6 +877,48 @@ const FINGERS = 'M4.6 4.8 L4.6 11 M6.5 4.2 L6.5 11 M8.4 4.8 L8.4 11';         //
 const CLAP = `<svg class="clap" viewBox="0 0 26 24" aria-label="clap"><g class="l"><path d="${PALM}"/><path class="fing" d="${FINGERS}"/></g>`
   + `<g class="r"><g transform="translate(26,0) scale(-1,1)"><path d="${PALM}"/><path class="fing" d="${FINGERS}"/></g></g>`
   + `<path class="spark" d="M13 1.5 L13 -1.5 M8.5 3 L6.5 0.5 M17.5 3 L19.5 0.5"/></svg>`;
+// Each drum's strokes, drawn rather than lettered (the letter stays in the key and the text form).
+// A hand: the clap's own palm (PALM, FINGERS), fingers up; (x, y) where its palm's middle goes,
+// `rot` turning it, `sc` its size. Each moving part is a .mv group that strikes when the playhead
+// reaches its square: a hand drops from above onto the skin, a stick swings down from its far end.
+const hand = (x, y, rot, sc, other, lift = [0, 0]) => `<g transform="translate(${x} ${y}) rotate(${rot})">`
+  + `<g class="mv hand${other ? ' other' : ''}" style="--dx:${lift[0]}px;--dy:${lift[1]}px"><g transform="scale(${(0.53 * sc).toFixed(3)}) translate(-7 -13)">`
+  + `<path d="${PALM}"/><path class="fing" d="${FINGERS}"/></g></g></g>`;
+const SKIN = '<circle class="skin" cx="12" cy="12" r="9.5"/>';
+const JINGLES = on => `<g class="${on ? 'mv shake' : ''}">` + [[12, 1.5], [22.5, 12], [12, 22.5], [1.5, 12]].map(([x, y]) => `<circle class="jingle${on ? '' : ' off'}" cx="${x}" cy="${y}" r="2"/>`).join('') + '</g>';
+const stick = (d, cls = '') => `<g class="mv swing"><path class="stick${cls}" d="${d}"/></g>`;
+const RIM = [0, 5];                                   // a rim hand lifts back along its own fingers
+const STROKE_ART = {
+  palm:  SKIN + hand(12, 12, 0, 1.45),                                          // the flat hand in the middle: low
+  tip:   SKIN + hand(19.5, 19.5, -45, 1.1, false, RIM),                           // fingertips at the rim: high
+  ka:    SKIN + hand(4.5, 19.5, 45, 1.1, true, RIM),                              // the other hand, softer
+  tone:  SKIN + hand(19.5, 19.5, -45, 1.1, false, RIM) + '<path class="ring" d="M6.25 2.04 A11.5 11.5 0 0 1 17.75 2.04"/>',   // at the rim, ringing
+  slap:  SKIN + hand(19.5, 19.5, -45, 1.1, false, RIM) + '<path class="spark" d="M20 14 L23.5 10.5 M22.5 16.5 L26 15.5 M17 12.5 L18 9"/>',
+  jingle: '<circle class="skin" cx="12" cy="12" r="8"/>' + JINGLES(true),       // the jingles alone
+  mallet: SKIN + `<g class="mv swing"><path class="stick" d="M25 -1 L14.5 9.5"/><circle class="ball" cx="13.3" cy="10.7" r="2.7"/></g>`,   // a mallet on the big head
+  curve: SKIN + stick('M25 1 Q23 10 13.5 11.5'),                                  // tbel's curved stick
+  rod:   '<circle class="skin" cx="12" cy="14" r="6"/>' + stick('M24 1 L13 13', ' thin'),   // a thin stick on a small head
+  stick: SKIN + stick('M25 0 L13 12'),
+  ghost: SKIN + stick('M25 0 L13 12', ' thin') + '<path class="bracket" d="M0 4 Q-3 12 0 20 M24 4 Q27 12 24 20"/>',
+  down:  SKIN + '<g class="mv down"><path class="arrow" d="M12 5 L12 19 M7.5 14.5 L12 19 L16.5 14.5"/></g>',   // bodhrán: the tipper's down stroke
+  up:    SKIN + '<g class="mv up"><path class="arrow" d="M12 19 L12 5 M7.5 9.5 L12 5 L16.5 9.5"/></g>',
+  closed: '<g class="mv top"><path class="cym" d="M1 11 Q12 6 23 11 Z"/></g><path class="cym" d="M1 13 Q12 18 23 13 Z"/>',   // hi-hat: the pair shut
+  open:  '<g class="mv top"><path class="cym" d="M1 7 Q12 2 23 7 Z"/></g><path class="cym" d="M1 17 Q12 22 23 17 Z"/><path class="ring" d="M3 12 L6 12 M18 12 L21 12"/>',
+};
+const HAND = { D: 'palm', B: 'palm', T: 'tip', K: 'ka', S: 'slap', O: 'tone' };
+const STROKE_OF = {
+  darbuka: HAND, taarija: HAND, bendir: HAND, conga: HAND,
+  riq: { ...HAND, T: 'jingle' }, djembe: { ...HAND, T: 'tone' },
+  tbel: { D: 'curve', T: 'rod' }, tapan: { D: 'mallet', T: 'rod' },
+  kick: { D: 'mallet' }, bassdrum: { D: 'mallet' }, snare: { T: 'stick', K: 'ghost' },
+  bodhran: { D: 'down', T: 'up' }, hihat: { x: 'closed', o: 'open' },
+};
+// a stroke's picture, riq's jingles drawn on its skin whatever strikes it; null where the letter will do
+function strokeArt(drum, k){
+  const a = STROKE_OF[drum]?.[k]; if (!a) return null;
+  const soft = DRUMS[drum].soft === k ? ' soft' : '', what = DRUMS[drum].strokes[k];
+  return `<svg class="stroke${soft}" viewBox="-2 -1 28 27" role="img" aria-label="${k}: ${what}">${STROKE_ART[a]}${drum === 'riq' && a !== 'jingle' ? JINGLES(false) : ''}</svg>`;
+}
 const DRUM_ICON = {
   // a goblet drum: a head on a wide cup, narrowing to a waist and flaring to an open foot
   darbuka: '<svg class="icon" viewBox="0 0 28 28"><path d="M6 5 L22 5 Q22 11 16.5 14 L16.5 17 Q20 20 20 24 L8 24 Q8 20 11.5 17 L11.5 14 Q6 11 6 5 Z"/><path d="M6 5 Q14 7 22 5"/></svg>',
@@ -911,7 +1021,9 @@ function draw(){
       const s = (i + rot) % G.N, k = cells[v.id][s];       // columns show the cycle as heard, from the chosen start
       const c = document.createElement('div');
       c.className = 'cell drum' + (k !== '.' ? ' hit' : '') + edge(i) + (muted[v.id] ? ' muted' : ''); c.dataset.row = v.id;
-      if (k === 'X' && v.id === 'clap') c.innerHTML = CLAP; else c.textContent = k === '.' ? '' : k;
+      const art = k === '.' ? null : strokeArt(v.id, k);
+      if (k === 'X' && v.id === 'clap') c.innerHTML = CLAP; else if (art) c.innerHTML = art; else c.textContent = k === '.' ? '' : k;
+      if (k !== '.') c.dataset.hint = `${v.name}: ${DRUMS[v.id].strokes[k]}`;
       c.dataset.s = s;
       c.onclick = () => { const order = ['.', ...v.strokes]; cells[v.id][s] = order[(order.indexOf(cells[v.id][s]) + 1) % order.length]; if (!patName.endsWith('(edited)')) patName += ' (edited)'; draw(); };
       g.append(c);
@@ -1136,7 +1248,8 @@ function summary(){
   markOpt($('rooms'), room);
 }
 function playLabel(){
-  $('play').classList.toggle('playing', playing); $('play').setAttribute('aria-label', playing ? 'Stop' : 'Play'); $('play').dataset.hint = playing ? 'Stop' : 'Play';
+  $('grid').classList.toggle('live', playing || paused);
+  $('play').classList.toggle('playing', playing); $('play').setAttribute('aria-label', playing ? 'Pause' : 'Play'); $('play').dataset.hint = playing ? 'Pause' : 'Play';
 }
 let entry = 'cycle';
 const ENTRIES = [
@@ -1151,7 +1264,7 @@ fillOpts($('pats'), METERS.flatMap(({ m, about }) => {
   return ps.length ? [{ header: `${m} · ${about}` }, ...ps.map(p => ({ value: p.name, name: p.name, info: `${p.info} · ${KITS[p.kit || 'maghreb'].name}` }))] : [];
 }).concat([{ header: 'Your own' }, ...PATTERNS.filter(p => p.name === 'empty').map(p => ({ value: p.name, name: p.name, info: p.info }))]),
   name => load(PATTERNS.find(p => p.name === name)));
-$('play').onclick = () => playing ? stop() : start();
+$('play').onclick = () => playing ? pause() : paused ? resume() : start();
 function labels(){
   $('tempoV').textContent = `${$('tempo').value} beats a minute (${$('tempo').value * G.base} pulses)`;
   $('leanV').textContent = fracs().map((f, i, a) => Math.round(((a[i + 1] ?? 1) - f) * 100)).join(' / ') + ' %';
