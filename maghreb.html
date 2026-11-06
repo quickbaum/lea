@@ -483,6 +483,13 @@ function initAudio(){
   inst.setRoom(room); inst.init();
   if (ctx) return;
   ctx = inst.ctx;
+  // a limiter last of all, between the room (instruments.js's dry and reverb paths) and the speakers:
+  // the full band and the drums together ran over full scale, and clipped
+  const lim = ctx.createDynamicsCompressor();
+  lim.threshold.value = -6; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.001; lim.release.value = 0.2;
+  for (const n of [inst.dry, inst.wet]){ n.disconnect(); n.connect(lim); }
+  lim.connect(ctx.destination);
+  if (window.__bench) window.__bench.lim = lim;          // for headless checks
   out = ctx.createGain(); out.gain.value = 0.7;
   const comp = ctx.createDynamicsCompressor(); out.connect(comp); comp.connect(inst.master);
   noise = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
@@ -1211,7 +1218,7 @@ document.addEventListener('pointerover', e => showHint(hintOf(e.target)));
 document.addEventListener('focusin', e => showHint(hintOf(e.target)));
 document.addEventListener('pointerleave', () => showHint(''));
 // for headless checks: what's been heard, and the tune as laid out
-window.__bench = { heard, mel: () => mel, cells: () => cells, amb, fitGrid };
+window.__bench = { heard, mel: () => mel, cells: () => cells, amb, fitGrid, inst };
 labels(); load(PATTERNS.find(p => p.name === 'chaabi, a two-bar cycle')); setRoom('palace'); playLabel();
 fetch('instruments/instruments.json').then(r => r.json()).then(bank => {
   KINDS = Object.keys(bank).filter(k => !bank[k].perc);
