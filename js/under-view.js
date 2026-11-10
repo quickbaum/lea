@@ -493,6 +493,7 @@ export function buildLevelView(L){
   // Faerie: the floating lights, and the stained glass casting its light into the room
   // (the nearest few windows, and the great door, each lend a light from a fixed pool)
   const lights = palace && L.wisps ? wisps(scene, L.wisps) : null;
+  let music = null;
   const panes = palace ? [...L.panels.filter(p => TRACERY[p.pattern]).map(p => ({ x: p.x + Math.cos(p.face) * 1.6, y: p.y, z: p.z + Math.sin(p.face) * 1.6, i: 3.2, c: 0xc8b4ff })),
     ...L.mouths.filter(m => m.grand).map(m => ({ x: m.x - Math.cos(m.face) * 2, y: m.y + 3.5, z: m.z - Math.sin(m.face) * 2, i: 5, c: 0xa8a0ff }))] : [];
   const paneLights = panes.length ? Array.from({ length: 4 }, () => { const l = new THREE.PointLight(0xffffff, 0, 20, 1.3); scene.add(l); return l; }) : [];
@@ -503,6 +504,7 @@ export function buildLevelView(L){
   return {
     scene, canoe,
     setSlab: (p, k, dir, room) => crypt?.setSlab(p, k, dir, room),
+    setMusic: m => { music = m; },     // what the hall's band is playing, for the lights to dance to (main.js palaceBandTick)
     update(dt, camera){
       t += dt;
       if ((cullT -= dt) <= 0){
@@ -522,7 +524,7 @@ export function buildLevelView(L){
       glow.update(camera, t);
       if (boats) boats.update(dt, t);
       if (crypt) crypt.update(dt, camera, t);
-      if (lights) lights.update(dt, camera, t);
+      if (lights) lights.update(dt, camera, t, music);
       if (paneLights.length && (paneT -= dt) <= 0){
         paneT = 0.4;
         const p = camera.position, near = panes.map(q => [Math.hypot(q.x - p.x, q.y - p.y, q.z - p.z), q]).sort((a, b) => a[0] - b[0]);

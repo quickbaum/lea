@@ -30,9 +30,9 @@ import { makeFishingView } from './fishing-view.js';
 import { Ambience } from './ambience.js';
 import { Sky } from './sky.js';
 import { SkyPicker } from './skypicker.js';
-import { AgentWorld, CULTURES, dishName } from './agents.js';
+import { AgentWorld, CULTURES, dishName, isAngler } from './agents.js';
 import { factIcon, idleMove, setSayings, knowDish } from './convo.js';
-import { RECIPES, RAW_KINDS, RARE, BOOK_RECIPES, stepsKnown, memoryOf } from './recipes.js';
+import { RECIPES, RAW_KINDS, RARE, BOOK_RECIPES, HEDGE_RECIPES, stepsKnown, memoryOf } from './recipes.js';
 import { INGREDIENTS, LOOKS, ingredient, edible } from './ingredients.js';
 import { makePack } from './pack.js';
 import { packView } from './pack-view.js';
@@ -42,7 +42,8 @@ import { journalBlocks } from './journal-view.js';
 import { makeBook } from './book-view.js';
 import { describe as describeProv, THIN_R, DAWN, isDawn } from './provenance.js';
 import { PREPARATIONS, prepWants, shelfBook, shelfCraft, wantsMet, daysToNewMoon, NEW_MOON } from './stillroom.js';
-import { CRAFTS, canMake, needsText, teachCraft, goodsOf, takeGoods, addGoods } from './making.js';
+import { CRAFTS, canMake as canMakeInstrument, needsText as instrumentNeeds, teachCraft, goodsOf, takeGoods, addGoods } from './making.js';
+import { RODS, rodOf, TACKLE_CRAFTS, newBite, stepBite, strike } from './tackle.js';
 import { houseName, phaseName } from './astrology.js';
 import { makeVitals, tickVitals, canRun, spend, eat, eatValue, SP_MAX, ST_MAX } from './vitals.js';
 import { vitalsView } from './vitals-view.js';
@@ -52,10 +53,16 @@ import { traderSites, traderCount, TRADE } from './traders.js';
 import { addFood, countOf, rawOf, rawKinds, addRaw, giveForDish } from './larder.js';
 import { CampfireView, ShelterView, HutView, FireLights } from './campfire-view.js';
 import { makeCookView } from './cook-view.js';
+import { carriesCards as carriesCards0, dealPacks, cardRecall, cardMind, cardManner } from './cards.js';
+// (every settlement and camp has a card player: dealt once, the first time anyone's asked, when the folk are all made)
+let packsDealt = false;
+const carriesCards = n => { if (!packsDealt){ packsDealt = true; dealPacks(agents.npcs); } return carriesCards0(n); };
+import { makeCardsView } from './cards-view.js';
 import { lantern } from './lantern.js';
 import { ShrineView } from './shrine-view.js';
 import { TrailField } from './trails.js';
 import { buildRoad } from './road-view.js';
+import { buildBridges } from './bridge-view.js';
 import { buildSettlements } from './settle-view.js';
 import { buildRuins } from './ruins-view.js';
 import { stairClearing } from './gen/under.js';
@@ -80,9 +87,12 @@ import { talk, talkTree, loadTree, setVoicePlayer } from './dialog.js';
 import { readPage } from './page.js';
 import { FAERIE_BOOKS } from './faerie-books.js';
 import { TUNES, MUSIC_BOOKS, shelfMusic, shelfTune, schedule } from './tunes.js';
-import { phrasesKnown, phraseCount, knowsTune, knownSet, tunesOf, teachTune, instrumentOf, giveInstrument, craftsKnown, musicalCamp, fluencyOf, practiceGo } from './music-sim.js';
+import { phrasesKnown, phraseCount, knowsTune, knownSet, tunesOf, teachTune, instrumentOf, giveInstrument, craftsKnown, musicalCamp, fluencyOf, practiceGo, joinersFor, joinIn, joiningNow } from './music-sim.js';
 import { playTalk } from './play-talk.js';
 import { DRUMS, parts, partNotes, liftFor, roughen } from './arrange.js';
+import { leaPattern, gridOf, cycleSec, tuneBeatSec, shape, rhythmNotes } from './rhythm.js';
+import { palaceDrums, planSet, bandNotes, drumNotes, DRUMMERS, REST, setTrack, tuneTrack } from './palace-music.js';
+import { feel as musicFeel } from './dance.js';
 import { staffSvg } from './notation.js';
 import { Instruments } from './instruments.js';
 import { makePuckGuide } from './puck-guide.js';
@@ -113,6 +123,7 @@ import { nudge, regard } from './ties.js';
 import { isMember, mayHear, atSecretRite } from './fellowships.js';
 import { makeTosses } from './toss.js';
 import { crisp } from './textures.js';
+import { makeDither } from './dither.js';
 
 // Bake any sprites that are in tools/bakes.json but not yet on disk.
 // Runs in the user's Chrome (real GPU) and saves results to the server.
@@ -123,6 +134,7 @@ bakeMissing();
 const canvas = document.getElementById('c');
 // high-performance: on a laptop with two GPUs, ask for the discrete one
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+var sitPixel = 0;   // sat at a fire: drawn finer, as through the spyglass (sitAt; var, as applyGfx can run first)
 let PIXEL = 4;     // 3 → 4 on 2026-10-20: chunkier, ~44% fewer pixels; the settings panel moves it
 function resize(){
   renderer.setPixelRatio(1);
@@ -148,6 +160,11 @@ scene.fog = new THREE.Fog(SKY, FOG_NEAR, FOG_FAR);
 const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 400);
 const EYE = 1.7;
 const EYE_BOAT = 1.32;     // seated in the canoe (above the floating gunwale)
+// out on the open water the wind drifts your canoe (docs/boats.md, "Riding"): steer
+// against it. Per unit of sky.wind, in u/s: ~0.8 in the usual breeze, ~2 in a gale
+// (the paddle makes 5). Not underground, and not with a line out: you hold her then.
+const BOAT_DRIFT = 1.1;
+const BOAT_RIDE  = 0.7;     // how much of the hull's rock reaches your eye (you sit loose and steady your head)
 
 // Lighting + sky (sun/moon/stars/clouds) are owned by Sky — see js/sky.js.
 
@@ -155,6 +172,7 @@ const EYE_BOAT = 1.32;     // seated in the canoe (above the floating gunwale)
 const rng = mulberry32(WORLD_SEED);
 const { ground, waterTex } = buildTerrain(scene);
 buildRoad(scene);                                          // the Old Road's paving (js/gen/road.js)
+buildBridges(scene);                                       // over the rivers: stone, timber and plank (js/bridge-view.js)
 const settleView = buildSettlements(scene);                // the villages' wooden buildings (js/gen/settle.js)
 const junctionView = buildJunctions(scene, { junctions: settlements().junctions, nameOf: p => settlementNames()[settlements().places.indexOf(p)].name, height });                // the signpost and mailbox where each lane meets the road
 buildRuins(scene);                                         // the old stone ruins, mostly far from the road (js/gen/ruins.js)
@@ -660,8 +678,17 @@ function forageLabel(p){
       || 'A pretty thing, worth a trade.';
     return { title, desc };
   }
+  if (p.wild) return { title: cap(ingredient(k)?.label || k), desc: WILD_DESC[k] || 'Ripe for the picking.' };
+  if (p.find) return { title: ingredient(k)?.look?.[0] || cap(k), desc: ingredient(k)?.look?.[1] || 'Lying on the ground.' };
   return { title, desc: 'Ripe for the picking.' };
 }
+// what you take from what already grows (gen/wild.js), as the box reads it
+const WILD_DESC = {
+  'pine needles': 'A low bough of a pine, the needles in pairs.', 'pine bark': 'Under the scaly bark of a pine, a soft white layer.',
+  'willow bark': 'Smooth willow bark, bitter if you chew it.', 'juniper berries': 'Blue-black berries in among the prickles.',
+  heather: 'Heather in flower, the tips purple.', elderberries: 'Heavy clusters of elderberries. Not to be eaten raw.',
+  elderflowers: 'Flat heads of cream-coloured elderflowers.', primroses: 'Pale yellow primroses.', violets: 'Violets, low in the grass.',
+};
 
 // everything above ground you might look at, as consider(x, z, eyeY, maxDist, data): the hover
 // box and E pick from these, and so does the glance
@@ -683,6 +710,13 @@ function focusables(consider){
     consider(p.x + m.dx, p.z + m.dz, height(p.x, p.z) + m.y, FRAME_RANGE,
       p.ring ? { kind: 'ring', item: p } : { kind: 'fruit', item: p });
   }
+  // what you take from what already grows: needles, bark, berries, heather (gen/wild.js).
+  // It's everywhere, so it gives way to anything else in the cone (`low`), as shrubs do
+  if (forage.wild) for (const p of forage.wild.near(pos.x, pos.z, FRAME_RANGE + 1)){
+    if (!p.ripe) continue;
+    const m = p.aim();
+    consider(p.x + m.dx, p.z + m.dz, height(p.x, p.z) + m.y, FRAME_RANGE, { kind: 'fruit', item: p, low: true, rank: 0.6 });
+  }
   // campfires (informational — not an E target)
   for (const fr of agents.openFires || [])
     consider(fr.x, fr.z, height(fr.x, fr.z) + 0.6, FRAME_RANGE, { kind: 'fire', fire: fr });
@@ -697,9 +731,9 @@ function focusables(consider){
       consider(s.x, s.z, height(s.x, s.z) + 0.8, ready ? SHEEP_REACH : FRAME_RANGE, { kind: 'sheep', s, f, wool: ready ? s : null, reach: ready ? SHEEP_REACH : undefined });
     }
   // fishing spots: aim at the water off the bank (E casts, if you're on the bank)
-  if (!boating && !playerFish)
+  if (!boating)   // (with your line out, only your own spot: the eyes stay on the float)
     for (const sp of agents.fishing)
-      if (Math.hypot(sp.x - pos.x, sp.z - pos.z) < 6) consider(sp.wx, sp.wz, WATER + 0.1, FRAME_RANGE + 3, { kind: 'fishspot', spot: sp });
+      if ((!playerFish || playerFish.sp === sp) && Math.hypot(sp.x - pos.x, sp.z - pos.z) < 6) consider(sp.wx, sp.wz, WATER + 0.1, FRAME_RANGE + 3, { kind: 'fishspot', spot: sp, reach: FRAME_RANGE + 3 });   // (the float's 4u out)
   // moored boats (board with E) — only when you're not already aboard one
   if (!boating)
     for (const b of boats.list)
@@ -740,6 +774,8 @@ function updateFocus(){
     if (dist < 0.4 || dist > maxDist) return;
     if (glance.target && glanceRef(data) === glance.target) held = { dist, ...data };
     if (data.kind === 'shrub' && best && best.kind !== 'shrub') return;   // anything else in the cone comes first
+    if (data.low && best && !best.low) return;                              // …and so for what grows everywhere (gen/wild.js)
+    if (best?.low && !data.low && dot > LOOK_CONE){ bestDot = dot; best = { dist, ...data }; return; }
     if (dot > bestDot){ bestDot = dot; best = { dist, ...data }; }
   };
   focusables(consider);
@@ -925,11 +961,13 @@ function doInteract(target){
   if (inDialog) return;
   if (target.kind === 'person'){
     const npc = target.c;
-    npc.talking = true; inDialog = true;
+    npc.talking = true; inDialog = true; cardsWith = null;      // (a "Deal them." from some other talk can't carry over)
     if (npc.heading !== undefined) npc.heading = Math.atan2(pos.x - npc.x, pos.z - npc.z);
     document.exitPointerLock?.();
     const onClose = () => {
-      mapMark = null; npc.talking = false; inDialog = false;
+      mapMark = null;
+      if (cardsWith === npc){ cardsWith = null; sitToCards(npc); return; }   // still talking, still in the dialog: at the table now
+      npc.talking = false; inDialog = false;
       relock();
     };
     if (target.peasant){
@@ -1080,6 +1118,7 @@ function setScopeMag(i){
   _scopeMag.textContent = `${SCOPE_MAG[scope.i]}× ${TOUCH ? '' : ' · wheel to change · E to lower'}`;
 }
 function raiseGlass(){
+  if (sat) return 'Not while you\'re sat at the fire.';
   if (down) return 'Not down here. It wants the open sky.';
   if (boating) return 'Not from a boat. The stars would not hold still.';
   if (invOpen) closeInventory(true);
@@ -1391,8 +1430,12 @@ new PuckFlock(scene, { x: -4, z: 13 }).load().then(f => {
 // and the nearest place it's got, as a destination he can lead you to
 const FOUND_LORE = {
   bushes: 'On the bushes, at the wood edges and along the hedges.', trees: 'On the trees. Look up!', ground: 'Dig for them, where the ground is soft.',
+  pines: 'Off a pine. Needles from a low bough, bark off the trunk.', willows: 'Off the willows, down by the water.',
+  junipers: 'On the junipers, up on the heath. Prickly things.', heath: "Up on the heath. It's nothing but heather up there.",
+  'elder bushes': "Elder bushes. Some are in flower, some in berry. You can't have both off one.", 'woodland edge': 'Where the woods thin out, in the dappled bits.',
   oaks: 'Under the oaks, in autumn.', shade: 'In the shade, where it stays damp.', meadows: 'In the meadows, among the grass.', marsh: 'In the marsh. Wet feet, I\'m afraid.',
   croft: "They grow them in the village crofts. Ask the folk; they'll trade.", water: 'In the water. They bite best at dusk: find a bank and cast.',
+  'woodland floor': "On the ground in the woods, by the trees. Look down as you walk.", shrubs: 'Cut from the shrubs. A straight shoot makes a fishing pole, if you trim it.', 'a village': "Off a villager who fishes. Ask them how it's biting.",
   'the hunt': "The hunters bring those back. Puck doesn't hunt.", shore: 'Along the shores, washed up.', grass: 'Dropped in the grass, if you look.', rock: 'Grown out of the rock, where it shows.', tombs: 'In the old tombs, with the dead.',
 };
 const nearestOf = (list, x, z) => { let b = null, bd = Infinity; for (const q of list){ const d = Math.hypot(q.x - x, q.z - z); if (d < bd){ bd = d; b = q; } } return b; };
@@ -1472,7 +1515,7 @@ function whereFound(kind){
     const w = nearestOf(agents.fishing, x, z);
     return { lore, dest: w ? { name: 'the water', spot: true, what: `a good bank ${here(w.x, w.z)}`, x: w.x, z: w.z, arrive: 3 } : null };
   }
-  const q = nearestOf(forage.plants.filter(f => f.kind === kind && !f.ring), x, z);
+  const q = nearestOf([...forage.plants, ...(forage.wild?.sources || [])].filter(f => f.kind === kind && !f.ring), x, z);
   return { lore, dest: q ? { name: `the ${kind}`, spot: true, what: `some ${kind} ${here(q.x, q.z)}`, x: q.x, z: q.z, arrive: 3 } : null };
 }
 // a /dialogs conversation; Puck's with his guide branch grafted on, and Puck held
@@ -1613,6 +1656,12 @@ window.leaReverence = () => {
 window.leaNpcs = () => agents.npcs.slice(0, 6).map(n => ({
   slug: n.slug, moving: !!n.moving,
   scaleY: +n.mesh.scale.y.toFixed(5), y: +n.mesh.position.y.toFixed(4) }));
+// debug: who carries a pack of cards (js/cards.js), and where they are now; and how many grown folk there are of each kind
+window.leaCards = () => {
+  const grown = agents.npcs.filter(n => n.role !== 'child' && !n.postRider && !n.trader);
+  return { villagers: grown.filter(n => n.home).length, others: grown.filter(n => !n.home).length,
+           carriers: agents.npcs.filter(carriesCards).map(n => ({ name: n.name, villager: !!n.home, at: [Math.round(n.x), Math.round(n.z)], doing: n.actionLabel || '' })) };
+};
 // debug: the fellowships (js/fellowships.js) — where each meets, who belongs, who's out now
 window.leaFellows = () => agents.fellowships.map(F => ({ name: F.def.name, secrecy: F.def.secrecy,
   at: F.site ? `${F.site.name} @${F.site.x | 0},${F.site.z | 0}` : `a fire near @${F.anchor.x | 0},${F.anchor.z | 0}`,
@@ -1878,15 +1927,18 @@ sfxRange.addEventListener('input',   () => { volSfx   = sfxRange.value   / 100; 
 // ---------- performance settings (per browser) ----------
 // Switches for finding what costs what on a given machine. Defaults are the
 // shipped look; each change applies live and is remembered in localStorage.
-const GFX_DEFAULTS = { pixel: 4, draw: 130, lod: 55, grass: true, sway: true,
+const GFX_DEFAULTS = { pixel: 3, draw: 130, lod: 55, grass: true, sway: true,
                        smooth: false, hands: true, map: true, meter: false,
-                       // a phone: 4× of a 390-point screen would be a smear, and 2× is still fewer pixels than a desktop at 4×
+                       dither: true, ditherLevels: 8,    // the Bayer filter over the frame (js/dither.js): on by default since 2026-11-10
+                       // a phone: 3× of a 390-point screen would be a smear, and 2× is still fewer pixels than a desktop at 3×
                        ...(TOUCH ? { pixel: 2, draw: 90, lod: 35, sway: false } : {}) };
 const gfx = { ...GFX_DEFAULTS };
 try { Object.assign(gfx, JSON.parse(localStorage.getItem('lea.gfx') || '{}')); } catch (_){}
 const meterEl = document.getElementById('meter');
+const dither = makeDither();
 function applyGfx(){
-  if (PIXEL !== gfx.pixel){ PIXEL = gfx.pixel; resize(); }
+  const wantPx = sitPixel ? Math.min(gfx.pixel, sitPixel) : gfx.pixel;
+  if (PIXEL !== wantPx){ PIXEL = wantPx; resize(); }
   FOG_FAR = gfx.draw; FOG_NEAR = Math.min(30, FOG_FAR * 0.3);
   rain.setFogBase(FOG_NEAR, FOG_FAR);              // rain sets fog.near/far from these each frame
   scene.fog.near = FOG_NEAR; scene.fog.far = FOG_FAR;
@@ -1895,16 +1947,17 @@ function applyGfx(){
   grassDetail.swayOn = gfx.sway;   // not .sway: that's the blade buffer
   MAP.style.display = gfx.map ? '' : 'none';
   meterEl.classList.toggle('hide', !gfx.meter);
+  dither.state.on = gfx.dither; dither.state.levels = gfx.ditherLevels;
 }
 const saveGfx = () => { try { localStorage.setItem('lea.gfx', JSON.stringify(gfx)); } catch (_){} };
 for (const [key, id, fmt] of [['pixel', 'gfx-pixel', v => `${v}×`], ['draw', 'gfx-draw', v => `${v}`],
-                              ['lod', 'gfx-lod', v => `${v}`]]){
+                              ['lod', 'gfx-lod', v => `${v}`], ['ditherLevels', 'gfx-dither-levels', v => `${v}`]]){
   const el = document.getElementById(id), val = document.getElementById(id + '-val');
   el.value = gfx[key]; val.textContent = fmt(gfx[key]);
   el.addEventListener('input', () => { gfx[key] = +el.value; val.textContent = fmt(gfx[key]); applyGfx(); saveGfx(); });
 }
 for (const [key, id] of [['grass', 'gfx-grass'], ['sway', 'gfx-sway'], ['smooth', 'gfx-smooth'],
-                         ['hands', 'gfx-hands'], ['map', 'gfx-map'], ['meter', 'gfx-meter']]){
+                         ['hands', 'gfx-hands'], ['map', 'gfx-map'], ['meter', 'gfx-meter'], ['dither', 'gfx-dither']]){
   const el = document.getElementById(id);
   el.checked = gfx[key];
   el.addEventListener('change', () => { gfx[key] = el.checked; applyGfx(); saveGfx(); });
@@ -2003,8 +2056,10 @@ function castLine(sp){
   // the float: off the bank where the spot says, or over the side of the boat
   const a = sp.boat ? yaw + Math.PI : 0, me = down ? upos : pos;   // (yaw 0 looks down -Z: over the bow)
   const fx = sp.boat ? me.x + Math.sin(a) * 3.5 : sp.wx, fz = sp.boat ? me.z + Math.cos(a) * 3.5 : sp.wz;
-  playerFish = { sp, left: 25 + Math.random() * 20, x: me.x, z: me.z, fx, fz };
-  setForageMsg(sp.boat ? 'You let a line down over the side. Hold the boat still.' : 'You cast a line. Hold still and wait.', 4000);
+  const rod = rodOf(myPack.counts);                        // the best you carry (js/tackle.js); none, a hand line
+  playerFish = { sp, rod, bite: null, left: 25 + Math.random() * 20, x: me.x, z: me.z, fx, fz };
+  setForageMsg(sp.boat ? 'You let a line down over the side. Hold the boat still.'
+    : rod === 'hand line' ? 'You throw out a hand line. Watch the float.' : `You cast with your ${rod}. Watch the float.`, 4000);
 }
 function reelIn(msg){
   if (!playerFish) return;
@@ -2016,9 +2071,26 @@ function tickFishing(dt){
   const f = playerFish, me = down ? upos : pos;
   if (!f) return;
   if (Math.hypot(me.x - f.x, me.z - f.z) > 1.5) return reelIn('You reel in.');
+  // a bite (js/tackle.js): the float twitches, then goes under, and E strikes. Waiting it out doesn't run the clock
+  if (f.bite){
+    if (stepBite(f.bite, dt) === 'gone'){ f.bite = null; setForageMsg(pickOne(['It took the bait and was off.', 'Gone. Strike when the float goes under.']), 3000); }
+    return;
+  }
   f.left -= dt;
-  if (Math.random() < agents.biteRate(f.sp, null) * dt){
-    const n = agents.landFish(f.sp), k = f.sp.kind;
+  if (Math.random() < agents.biteRate(f.sp, null) * RODS[f.rod].bite * dt){ f.bite = newBite(f.rod); return; }
+  if (f.left <= 0) reelIn(f.sp.stock < 0.3 ? "Nothing's biting. It's been fished hard." : (sky?.evening ?? 0) > 0.2 ? "Nothing's biting." : "Nothing's biting. They rise better at dusk.");
+}
+// E with the line out: on a bite, strike; otherwise reel in
+const pickOne = a => a[(Math.random() * a.length) | 0];
+function strikeOrReel(){
+  const f = playerFish;
+  if (!f?.bite) return reelIn('You reel in.');
+  const got = strike(f.bite);
+  f.bite = null;
+  if (got === 'early') return setForageMsg(pickOne(['Too soon. You pulled it out of its mouth.', 'Too soon. Wait for the float to go right under.']), 3000);
+  if (got !== 'hooked') return;
+  {
+    const n = agents.landFish(f.sp, RODS[f.rod].two), k = f.sp.kind;
     if (!myPack.add(k, n, provHere('fished'))) return reelIn('No room in your pack. You let it go.');
     jot('caught', (ingredient(k) || {}).label || k);
     if (invOpen) openInventory();
@@ -2027,7 +2099,6 @@ function tickFishing(dt){
     const name = k === 'eels' ? (n === 1 ? 'An eel' : 'Two eels') : `${n === 1 ? 'A' : 'Two'} ${names[(Math.random() * (n === 1 ? names.length : names.length - 1)) | 0]}`;
     return reelIn(`${name}, into the basket.`);
   }
-  if (f.left <= 0) reelIn(f.sp.stock < 0.3 ? "Nothing's biting. It's been fished hard." : (sky?.evening ?? 0) > 0.2 ? "Nothing's biting." : "Nothing's biting. They rise better at dusk.");
 }
 // who's fishing near you, for the view: the folk on the bank, and you
 function fishersNear(){
@@ -2040,7 +2111,8 @@ function fishersNear(){
   out.sort((a, b) => a.d - b.d);
   if (playerFish){
     const f = playerFish, face = Math.atan2(f.fx - pos.x, f.fz - pos.z);
-    out.unshift({ face, wx: f.fx, wz: f.fz, hand: { x: pos.x + Math.sin(face) * 0.5, y: pos.y - 0.5, z: pos.z + Math.cos(face) * 0.5 } });
+    out.unshift({ face, wx: f.fx, wz: f.fz, bite: f.bite?.phase, rod: f.rod, mine: true,
+      hand: { x: pos.x + Math.sin(face) * 0.45 + Math.cos(face) * 0.25, y: pos.y - 0.55, z: pos.z + Math.cos(face) * 0.45 - Math.sin(face) * 0.25 } });   // (a little to the right of the eye)
   }
   return out;
 }
@@ -3135,11 +3207,60 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
     get traded(){ return { text: dealt }; },
   };
 
+  // ---- fishing (docs/fishing.md "In talk"): anyone who fishes will say where, and how. A villager
+  // who fishes (agents.js isAngler) has a jointed rod put by, and will let it go for something ----
+  const fisher = isAngler(npc, agents.fishing) || !!npc.fishing || (npc._caught && agents.time - npc._caught.t < 2);
+  let rodDeal = null, rodSaid = '';
+  const ROD_ASK = 2.2;   // what the rod's worth to them, in what you bring (trade.js worth)
+  const rodValue = (k, n) => n * worth(npc, asKind(k), held(asKind(k)), agents.time);
+  const fishNodes = !fisher ? {} : {
+    get fishing(){
+      const at = npc.home || npc, sp = nearestOf(agents.fishing, at.x, at.z), where = sp ? whereSaid(npc, sp.x, sp.z) : 'down at the water';
+      const what = sp?.kind === 'eels' ? v('fish-eels', ['Eels, mostly. They lie up in the mud there.', "Eels. It's all mud and reeds."])
+        : v('fish-fish', ["Perch and roach. A pike, if you're lucky.", 'Roach, mostly. Tench in the summer.']);
+      const when = npc.home ? v('fish-when-v', ['Most evenings, when the field lets me', "Of an evening, when the day's work's done"]) : v('fish-when-f', ['When I want fish', "When there's a want of it"]);
+      const c = [{ label: v('q-fish-tip', ['Any advice?', 'How do you catch them?']), next: 'fishTip' }];
+      if (isAngler(npc, agents.fishing) && !npc._rodGiven) c.push({ label: v('q-fish-rod', ['Could I have a rod off you?', 'Have you a rod to spare?']), next: 'rodAsk' });
+      return { text: `"${when}, ${where === 'right here' ? 'here' : where}. ${what}"`, choices: c };
+    },
+    get fishTip(){
+      return { text: `"${v('fish-tip', ["Watch the float. It bobs a bit first. That's only them nosing at it. Wait till it goes right under, then strike.",
+        "Don't strike when it bobs. Wait for it to go under. Then you strike."])} ${v('fish-tip2', ['And go of an evening. They come up to feed when the light goes.',
+        "And leave a place be once it's fished. It fills up again in a day or so.", 'And a proper rod helps. You see it go under sooner.'])}"` };
+    },
+    get rodAsk(){
+      if (npc._rodGiven) return { text: `"${v('rod-gone', ["I've only the one now, and I'm keeping it.", 'You had my spare.'])}"` };
+      const mine = Object.keys(basket).filter(k => basket[k] > 0 && (isWild(k) || isCrop(k) || ROAD_GOODS.has(k) || VALUABLES.has(k)));
+      const say = `"${v('rod-have', ["I've an old one put by. Ash, with a hazel top.", "There's a spare in the house. Jointed, ash and hazel."])} ${v('rod-what', ["What'll you give for it?", 'What have you got?'])}"`;
+      if (!mine.length) return { text: `${say.slice(0, -1)} You've nothing on you, by the look of it."` };
+      return { text: say, choices: mine.map(k => ({ label: cap(qty(Math.min(basket[k], 3), k)) + '.', next: 'rodOffer', run: () => { rodDeal = { k, n: Math.min(basket[k], 3) }; } })) };
+    },
+    get rodOffer(){
+      const d = rodDeal;
+      if (!d || rodValue(d.k, d.n) < ROD_ASK) return { text: `"${v('rod-no', ["Not for that. It's a good rod.", "No. That's not worth a rod."])}"`, choices: [{ label: 'Something else, then.', next: 'rodAsk' }] };
+      return { text: `"${cap(qty(d.n, d.k))}? ${v('rod-yes', ['All right.', 'Go on, then.'])}"`, choices: [{ label: 'Done.', next: 'rodDone', run: () => {
+        if ((basket[d.k] || 0) < d.n){ rodSaid = `"${v('t-gone', ["You've not got them now.", 'Seems that went somewhere.'])}"`; return; }
+        if (myPack.room('jointed rod', 1) < 1){ rodSaid = `"${v('t-full', ["You've no room for it.", 'Where would you put it?'])}"`; return; }
+        myPack.take(d.k, d.n); npc._rodGiven = true;
+        const g = asKind(d.k);
+        if (g === 'trinket'){ npc.trinkets = (npc.trinkets || 0) + d.n; if (!npc.trinketKind) npc.trinketKind = d.k; }
+        else if (ROAD_GOODS.has(g)) addGoods(npc, g, d.n);
+        else if (RAW_KINDS.has(g)) addRaw(npc, g, d.n);
+        else addFood(npc, g, d.n, agents.time);
+        myPack.add('jointed rod', 1, provHere('traded', displayName(npc))); flyToBag('jointed rod', 1);
+        jot('traded', `${d.k} for a jointed rod with ${displayName(npc)}`);
+        if (invOpen) openInventory();
+        rodSaid = `"${v('rod-done', ['Mind the top joint. Hazel snaps if you yank it.', "There. Don't yank it, the top's only hazel."])}" ${Pron} brings it out of the house in three pieces and fits them together.`;
+      } }, { label: 'No, thanks.', next: 'rodAsk', run: () => { rodDeal = null; } }] };
+    },
+    get rodDone(){ return { text: rodSaid }; },
+  };
+
   // Book recipes (docs/magic.md "Teaching"): what they've put by for you from a pot of
   // one; teaching them one you've read; giving them what a dish they know wants (the
   // Lea runs on open-handed sharing, so you give, you don't sell)
   let cookSaid = '';
-  const unknownTo = () => [...recipesRead].filter(id => RECIPES[id] && stepsKnown(npc, id, agents.time) < RECIPES[id].steps.length);
+  const unknownTo = () => [...recipesRead].filter(id => RECIPES[id] && !RECIPES[id].hedge && stepsKnown(npc, id, agents.time) < RECIPES[id].steps.length);
   const theirBook = () => BOOK_RECIPES.filter(id => stepsKnown(npc, id, agents.time) > 0);
   const untaughtCrafts = () => [...craftsRead].filter(k => (craftsKnown(npc).get(k) || 0) < 2);
   const untaughtTunes = () => [...tunesRead].filter(id => !knowsTune(npc, id, agents.time));
@@ -3225,6 +3346,28 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
         } })) };
     },
     get instGiven(){ return { text: cookSaid }; },
+    // cards (docs/cards.md): Go Fish at a table drawn over the world, once the talk's closed (doInteract)
+    get cards(){
+      const theirs = carriesCards(npc);
+      return { text: theirs ? `${Pron} brings out a pack of cards, soft at the corners. "${v('cd-yes', ['Go Fish? I like that one.', "Go Fish, then. I'll shuffle."])}"`
+                            : `You bring out your pack. "${v('cd-yours', ['Go Fish? Go on, then.', "Cards? I've a minute. Go Fish?"])}"`,
+        choices: [{ label: v('q-cards-deal', ['Deal them.', "Let's play."]), next: null, run: () => { cardsWith = npc; } }] };
+    },
+    // every trader on the road has one pack put by, not in the stock they sell to the folk, for a shell or a stone
+    get trCards(){
+      if (tr.cardsSold) return { text: `"${v('trc-gone', ['That was my only pack.', "I've no more. That was the one."])}"` };
+      const pay = Object.keys(basket).filter(k => basket[k] > 0 && VALUABLES.has(k));
+      if (!pay.length) return { text: `"${v('trc-want', ["I've one pack. It'd cost you something pretty: a shell, a stone.", 'One pack. Bring me a shell or a stone for it.'])}"` };
+      return { text: `"${v('trc-have', ["I've one pack. What'll you give?", 'Just the one pack. What have you got?'])}"`,
+        choices: pay.map(k => ({ label: `${cap(qty(1, k))}.`, next: 'trCardsDone', run: () => {
+          if (!myPack.add('pack of cards', 1, provHere('bought'))){ trSaid = `"${v('trc-full', ["You've no room for them. Make some room and come back.", 'Your pack is full. Come back when it isn\'t.'])}"`; return; }
+          myPack.take(k, 1); tr.cardsSold = true;                 // (paid only once they're in your pack)
+          if (invOpen) openInventory(); flyToBag('pack of cards', 1);
+          jot('bought', 'a pack of cards');
+          trSaid = `"${v('trc-done', ['Done. Mind, the jack of spades is a bit bent.', "Done. They're well used, but they're all there."])}"`;
+        } })) };
+    },
+    get trCardsDone(){ return { text: trSaid }; },
     get playMe(){
       const id = tunesOf(npc, agents.time)[0], kind = instrumentOf(npc), k = phrasesKnown(npc, id, agents.time);
       const band = playForYou(npc, id, kind, k);
@@ -3323,7 +3466,9 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
       }
       if (tr){ if (tr.kind !== 'music') c.push({ label: v('q-trader', ['What are you carrying?', 'What have you got?', "What's in the pack?"]), next: 'trStock' });
         c.push({ label: v('q-trader-where', ['Where are you headed?', 'Where are you off to next?']), next: 'trWhere' });
+        if (tr.kind !== 'music') c.push({ label: v('q-trader-cards', ['Have you a pack of cards?', 'Any playing cards?']), next: 'trCards' });
         if (tr.kind !== 'music') c.push({ label: v('q-trader-tip', ["What's cheap where, these days?", "Where's the good trade?"]), next: 'trTip' }); }
+      if (fisher) c.push({ label: v('q-fishing', ["How's the fishing?", 'Do you fish?', 'Where do they bite?']), next: 'fishing' });
       if (house && (sky?.day ?? 1) > 0.3) c.push({ label: v('q-trade', ['Got anything to trade?', 'Anything put by to trade?', 'Will you trade?']), next: 'trade' });
       if (unknownTo().length) c.push({ label: v('q-teach-them', ['I found an old recipe…', "I've a recipe from an old book…"]), next: 'teach' });
       if (carriedInstrument() && untaughtTunes().length) c.push({ label: v('q-tune-teach', ["I've a tune for you…", 'Want to learn a tune?']), next: 'tuneTeach' });
@@ -3331,6 +3476,7 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
       if (!npc.home && (goodsOf(npc, 'hide') || goodsOf(npc, 'gut'))) c.push({ label: v('q-ask-goods', ['Have you a hide or any gut to spare?', 'Any hide or gut going spare?']), next: 'askGoods' });
       if (!instrumentOf(npc) && carriedInstrument()) c.push({ label: v('q-give-inst', ["I've brought you something to play.", 'Would you like an instrument?']), next: 'instGive' });
       if (instrumentOf(npc) && tunesOf(npc, agents.time).length) c.push({ label: v('q-play', ['Will you play something?', 'Play me a tune?']), next: 'playMe' });
+      if (!tr && door?.mood !== 'surly' && (carriesCards(npc) || basket['pack of cards'] > 0)) c.push({ label: v('q-cards', ['Fancy a game of cards?', 'Will you play cards with me?']), next: 'cards' });
       c.push(...mailTalk.choices());
       if (givable().length) c.push({ label: v('q-give-cook', ["I've brought something for your cooking.", 'Here, for your cooking.']), next: 'give' });
       // a portion they've put by for you, from a pot of a book dish (recipes.js putBy)
@@ -3395,10 +3541,33 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
   }};
   Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(tradeNodes));   // getters, so the offer re-reads live
   Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(traderNodes));
+  Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(fishNodes));
   Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(cookNodes));
   Object.defineProperties(tree.nodes, Object.getOwnPropertyDescriptors(mailTalk.nodes));
   tree.doctorMark = doctorMark;
   return tree;
+}
+
+// A game of cards (js/cards.js, js/cards-view.js, docs/cards.md): from talk, once its dialog has closed.
+// They stay put and you stay in the dialog's stillness until you get up. A game warms the tie a
+// little, once a day for each person, so dealing again and again isn't a way to make friends.
+let cardsWith = null;
+const cardTable = makeCardsView({ onClose: tally => {
+  const npc = cardTable.npc; cardTable.npc = null;
+  if (npc){
+    npc.talking = false;
+    if (tally.games){
+      jot('played', `cards with ${displayName(npc)}`);
+      const day = Math.floor(agents.time);
+      if (npc._cardsDay !== day){ npc._cardsDay = day; nudge(npc, PLAYER, 0.03, 0.05); }
+    }
+  }
+  inDialog = false; relock();
+} });
+function sitToCards(npc){
+  npc.talking = true; inDialog = true; document.exitPointerLock?.();
+  cardTable.npc = npc;
+  cardTable.open({ name: displayName(npc), she: npc.gender === 'female', mind: cardMind(cardRecall(memoryOf(npc))), manner: cardManner(npc) });
 }
 
 // Sitting at a fire (E on it; docs/cooking.md): the view lowers and turns to the pot, the cursor
@@ -3406,6 +3575,8 @@ function peasantTree(npc, sky, door = null){   // door: come to their door at yo
 // E or Esc gets you up. The pot is kept in the gap between the leaf and the pack.
 let sat = null;
 const SEAT_R = 1.75, SEAT_DROP = 0.65, SEAT_EASE = 4;
+// up close: 2×2 pixels, and zoomed so the pot is about this much of the gap between the leaf and the pack
+const SIT_PIXEL = 2, SIT_POT = 0.5, SIT_ZOOM = [1, 3.5];
 const potTop = f => height(f.x, f.z) + (f.view?._brothY ?? 0.5);
 function sitAt(fire){
   if (!fire.done){ setForageMsg(fire.fireReport(), 3500); return; }
@@ -3418,7 +3589,9 @@ function sitAt(fire){
   }
   const d = Math.hypot(pos.x - fire.x, pos.z - fire.z) || 1, k = SEAT_R / d, sx = fire.x + (pos.x - fire.x) * k, sz = fire.z + (pos.z - fire.z) * k;
   inDialog = true; document.exitPointerLock?.();
-  sat = { fire, x: walkable(sx, sz) ? sx : pos.x, z: walkable(sx, sz) ? sz : pos.z, drop: 0 };
+  sat = { fire, x: walkable(sx, sz) ? sx : pos.x, z: walkable(sx, sz) ? sz : pos.z, drop: 0, zoom: 1 };
+  sitPixel = SIT_PIXEL; PIXEL = Math.min(gfx.pixel, SIT_PIXEL); resize();
+  fire.view?.setClose(true, { x: sat.x, z: sat.z });
   glance.reset();
   openInventory();
   cook.open(fire);
@@ -3436,7 +3609,9 @@ function seatPack(){
 }
 function getUp(){
   if (!sat) return;
+  sat.fire.view?.setClose(false);
   sat = null;
+  sitPixel = 0; camera.zoom = 1; PIXEL = gfx.pixel; resize();    // (resize takes the zoom through the projection)
   packUI.maxCell = 52;
   cook.close();
   closeInventory();
@@ -3459,8 +3634,14 @@ function satFrame(dt){
   css.setProperty('--cook-mid', `${mid}px`);
   css.setProperty('--cook-foot', `${stacked ? innerHeight - pk.top + 8 : 24}px`);
   if (leaf) document.querySelector('.cook-paper').style.maxHeight = stacked ? `${pk.top - 24}px` : '';
-  const tanV = Math.tan(camera.fov * Math.PI / 360), ndc = mid / innerWidth * 2 - 1, ndcY = 1 - midY / innerHeight * 2;
-  const dx = f.x - pos.x, dz = f.z - pos.z, wantY = Math.atan2(-dx, -dz) + Math.atan(ndc * tanV * camera.aspect);
+  const dx = f.x - pos.x, dz = f.z - pos.z;
+  // zoom so the pot fills its share of the gap: its radius on screen at no zoom, from how far off it is
+  const far = Math.hypot(dx, dz, potTop(f) - camera.position.y), tan1 = Math.tan(camera.fov * Math.PI / 360);
+  const rad1 = 0.32 * innerHeight / 2 / (far * tan1), wantZ = Math.max(SIT_ZOOM[0], Math.min(SIT_ZOOM[1], (right - left) * SIT_POT / 2 / rad1));
+  sat.zoom += (wantZ - sat.zoom) * e;
+  if (Math.abs(camera.zoom - sat.zoom) > 1e-4){ camera.zoom = sat.zoom; camera.updateProjectionMatrix(); }
+  const tanV = tan1 / camera.zoom, ndc = mid / innerWidth * 2 - 1, ndcY = 1 - midY / innerHeight * 2;
+  const wantY = Math.atan2(-dx, -dz) + Math.atan(ndc * tanV * camera.aspect);
   const wantP = Math.atan2(potTop(f) - camera.position.y, Math.hypot(dx, dz)) - Math.atan(ndcY * tanV);
   let dy = (wantY - yaw) % (Math.PI * 2); if (dy > Math.PI) dy -= Math.PI * 2; if (dy < -Math.PI) dy += Math.PI * 2;
   yaw += dy * e; pitch += (wantP - pitch) * e;
@@ -3572,6 +3753,7 @@ function layFire(){
 const potItem = f => (f.pot.recipe && ingredient(f.pot.recipe)) ? f.pot.recipe : 'plain boil';
 function notePot(f){ if (!f.pot.noted){ f.pot.noted = true; jot('cooked', f.pot.recipe || `some ${f.pot.kind}`); } }
 const cook = makeCookView({ world: agents, pack: myPack, book: { receive: el => myBook.receive(el) }, say: m => setForageMsg(m, 2600),
+  onStir: a => sat?.fire.view?.close?.stir(a),
   known: () => [...recipesRead].filter(id => RECIPES[id]),
   onFeed: f => { if (f.woodpile >= 12){ setForageMsg('The pile is as high as it will go.', 2600); return false; } f.addWood(1); return true; },
   mayDouse: f => {
@@ -3763,7 +3945,7 @@ const FIND_LABEL = LOOKS;   // what a find says when you aim at it (ingredients.
 // recipe into your own book (the Recipes page of the spellbook); what wants a rare
 // ingredient says, in a margin note, where that's found. A mouldy shelf in a chapter house
 // holds a still-room book instead (stillroom.js shelfBook): a preparation, not a dish.
-const recipesRead = new Set();   // kitchen recipes and preparations alike, by id
+const recipesRead = new Set(HEDGE_RECIPES);   // kitchen recipes and preparations alike, by id (the hedge dishes everyone knows: recipes.js)
 const madeOnce = new Set();      // preparations a stargazer has made for you: what they want from then on is less (stillroom.js)
 // A Faerie palace's shelves hold the Gentry's library instead (faerie-books.js): real
 // recipes out of mortal books, read and copied but not yet made. Kept apart from
@@ -3843,6 +4025,10 @@ const tunesRead = new Set();
 // making into your book (the Crafts page), which is where you make the instrument, with what
 // it wants in your pack; you can show the folk how, too (talk).
 const craftsRead = new Set();
+// a craft's needs: an instrument's (making.js), or tackle anyone can make (tackle.js)
+const craftOf = kind => CRAFTS[kind] || TACKLE_CRAFTS[kind];
+const canMake = (pack, kind) => TACKLE_CRAFTS[kind] ? TACKLE_CRAFTS[kind].needs.every(([m, k]) => (pack.counts[m] || 0) >= k) : canMakeInstrument(pack, kind);
+const needsText = kind => TACKLE_CRAFTS[kind] ? TACKLE_CRAFTS[kind].needs.map(([m, k]) => `${k > 1 ? k + ' ' : ''}${ingredient(m)?.label || m}`).join(', ') : instrumentNeeds(kind);
 const intoBook = el => myBook.receive(el);    // a page you've copied, on its way into your book, once shut
 function readCraft(kind, from){
   const C = CRAFTS[kind], name = ingredient(kind).label, fresh = !craftsRead.has(kind);
@@ -3862,7 +4048,7 @@ function makeCraft(kind){
   const name = ingredient(kind).label;
   if (!canMake(myPack, kind)) return `You haven't what it needs: ${needsText(kind)}.`;
   if (myPack.room(kind, 1) < 1) return `No room in your pack for a ${name}.`;
-  for (const [m, k] of CRAFTS[kind].needs) myPack.take(m, k);
+  for (const [m, k] of craftOf(kind).needs) myPack.take(m, k);
   myPack.add(kind, 1, provHere('made'));
   flyToBag(kind, 1);
   jot('made', `a ${name}`);
@@ -3901,6 +4087,12 @@ async function playTune(id, kind, sched = id ? partNotes(id, DRUMS.has(kind) ? '
   if (!perf){ stopTune(); return; }
   p.perf = perf;
   perf.done.then(() => { if (tunePlaying === p) stopTune(); });
+  // out of doors, a whole tune: whoever's free near you, with an instrument, may join in (decision 5)
+  if (id && !down && sched?.notes?.length){
+    const t0 = performance.now() / 1000, go = { kind, notes: sched.notes, length: sched.length, get left(){ return this.length - (performance.now() / 1000 - t0); } };
+    const me = { x: pos.x, z: pos.z, id: 'you' }, js = joinersFor(me, id, agents);
+    if (js.length) joinIn(me, go, id, agents, js, () => tunePlaying === p && !down);
+  }
 }
 function stopTune(){ stopTuneBtn.classList.add('hide'); if (!tunePlaying) return; tunePlaying.perf?.stop(); tunePlaying = null; }
 // the first `secs` of a part (partNotes), dying away over its last `fade`: a taste of a tune,
@@ -3935,8 +4127,10 @@ const HEAR_R = 90, BAND_R = 10;
 const heardFires = new Map();     // fire → { M, players: [{ npc, perf }] }
 let playedForYou = null;          // [{ npc, perf }]
 // one player's part, from `at` seconds in (null if they've nothing left to play)
-function playPart(id, p, at, still){
+// `scale`: a session's tempo over the tune's own (its seconds × scale are the session's)
+function playPart(id, p, at, still, scale = 1){
   let s = partNotes(id, p.part, DRUMS.has(p.kind) ? null : knownSet(p.k), p.kind);
+  if (scale !== 1) s = { notes: s.notes.map(n => ({ ...n, t: n.t * scale, dur: n.dur * scale })), length: s.length * scale };
   if (p.f != null) s = roughen(s, p.f, `${p.npc.id}|${id}|${p.part}`);   // as their hands have it (music-sim.js fluencyOf)
   const notes = s.notes.filter(n => n.t >= at).map(n => ({ ...n, t: n.t - at }));
   if (!notes.length) return null;
@@ -3956,9 +4150,28 @@ function playForYou(npc, id, kind, k){
     if (ok) band.push({ npc: o, kind: o.instrument, k: ok, f: handsOf(o, o.instrument) });
   }
   parts(band, id).forEach((part, i) => { band[i].part = part; });
-  const rec = playedForYou = [];
-  for (const p of band){ const r = playPart(id, p, 0, () => playedForYou === rec); if (r) rec.push(r); }
+  const rec = playedForYou = [], still = () => playedForYou === rec;
+  const drums = band.filter(p => DRUMS.has(p.kind));
+  if (!drums.length || !band.some(p => !DRUMS.has(p.kind))){
+    for (const p of band){ const r = playPart(id, p, 0, still); if (r) rec.push(r); }
+    return band.slice(1);
+  }
+  // rhythm first (docs/music.md, decision 8): two cycles of the drum alone at the tune's own tempo,
+  // the tune's first bar on the third cycle's head, the drum going on to the end of its cycle
+  const pat = leaPattern(TUNES[id].meter), bpm = 60 / tuneBeatSec(id), cyc = cycleSec(gridOf(pat), bpm);
+  const lead = 2 * cyc, enter = lead - shape(id).pickBeats * 60 / bpm;
+  let end = 0;
+  for (const p of band) if (!DRUMS.has(p.kind)){ const r = playPart(id, p, -enter, still); if (r){ rec.push(r); end = Math.max(end, r.until - performance.now() / 1000); } }
+  end = Math.ceil(end / cyc - 1e-6) * cyc;
+  for (const p of drums) rec.push(playRhythm(p.npc, 'tabor', pat, 'tabor', bpm, 0, end, still));
   return band.slice(1);
+}
+// one keeper of a rhythm's strokes from `from` to `to` on its clock (s; 0 a cycle's head), starting now
+function playRhythm(npc, kind, pat, row, bpm, from, to, still, wait = 0){
+  const notes = rhythmNotes(pat, row, kind, bpm, from, to).map(n => ({ ...n, t: n.t + wait }));
+  const r = { npc, perf: null, until: performance.now() / 1000 + wait + to - from };
+  if (notes.length) instruments.play(kind, { notes, length: wait + to - from }, { gain: 0 }).then(perf => { if (still()) r.perf = perf; else perf?.stop(); });
+  return r;
 }
 function placeSound(r){
   if (!r.perf) return 0;
@@ -3979,7 +4192,8 @@ const heardOf = npc => { const h = heardPlaying.get(npc); return h && agents.tim
 const heardPractice = new Map();  // npc → { go, r }
 function practiceTick(){
   for (const n of npcApi.npcs){
-    const go = n.practice ? practiceGo(n, agents.time) : n.piping?.go ?? null, d = Math.hypot(n.x - pos.x, n.z - pos.z);   // (or a shepherd on their pipe, js/shepherd.js)
+    const J = n.joining ? joiningNow(n) : null;   // (or playing along with someone: music-sim.js joinIn)
+    const go = n.practice ? practiceGo(n, agents.time) : n.piping?.go ?? J?.go ?? null, d = Math.hypot(n.x - pos.x, n.z - pos.z);   // (or a shepherd on their pipe, js/shepherd.js)
     let h = heardPractice.get(n);
     if (h && (h.go !== go || down || d > HEAR_R + 10)){ h.r.perf?.stop(); heardPractice.delete(n); h = null; }
     if (!h && go && !down && d < HEAR_R){
@@ -3989,12 +4203,14 @@ function practiceTick(){
       heardPractice.set(n, h);
       instruments.play(go.kind, { notes, length: go.length - at }, { gain: 0 }).then(perf => { if (heardPractice.get(n) === hh) r.perf = perf; else perf?.stop(); });
     }
-    if (h && placeSound(h.r) > HEARD_MIN && (n.practice || n.piping)) noteHeard(n, n.practice?.id ?? n.piping.id);
+    if (h && placeSound(h.r) > HEARD_MIN && (n.practice || n.piping?.go || J)) noteHeard(n, n.practice?.id ?? (n.piping?.go ? n.piping.id : J.id));
   }
 }
 function listenTick(){
   instruments.setRoom(!down ? 'open' : down.L.site === 'palace' ? 'palace' : down.L.kind === 'cave' ? 'cave' : 'crypt');
   for (const f of agents.fires){
+    if (f.music?.session){ listenSession(f); continue; }
+    if (heardFires.get(f)?.M?.session) stopHeard(f);
     const M = f.music?.tune ? f.music : null, d = Math.hypot(f.x - pos.x, f.z - pos.z);
     let h = heardFires.get(f);
     if (h && (h.M !== M || down || d > HEAR_R + 10)){ for (const r of h.players) r.perf?.stop(); heardFires.delete(f); h = null; }
@@ -4010,6 +4226,32 @@ function listenTick(){
   palaceBandTick();
   wardenTick();
 }
+// A session at a fire (music-sim.js, docs/music.md "Planned: rhythm first"). The rhythm is sounded a few
+// cycles at a time, each chunk starting where the last ends, from the session's own clock (S.t), so it
+// can't drift far from the sim; each tune is started from that clock too, where it's got to.
+const CHUNK = 4;   // cycles of rhythm sent at a time
+function stopHeard(f){ const h = heardFires.get(f); if (!h) return; for (const r of [...h.players, ...(h.rhythm || [])]) r.perf?.stop(); heardFires.delete(f); }
+function listenSession(f){
+  const S = f.music, d = Math.hypot(f.x - pos.x, f.z - pos.z);
+  let h = heardFires.get(f);
+  if (h && (h.M !== S || down || d > HEAR_R + 10)){ stopHeard(f); h = null; }
+  if (!h){ if (down || d >= HEAR_R) return; h = { M: S, players: [], rhythm: [], upTo: S.t, tune: null }; heardFires.set(f, h); }
+  const hh = h, still = () => heardFires.get(f) === hh;
+  // whoever keeps the rhythm now (a clapper may have got up); the next chunk a little before it's due
+  if (S.t > h.upTo - 0.6){
+    const from = Math.max(h.upTo, S.t), to = (Math.floor(from / S.cyc + 1e-6) + CHUNK) * S.cyc;
+    h.rhythm = h.rhythm.filter(r => r.until > performance.now() / 1000);
+    for (const k of S.rhythm) h.rhythm.push(playRhythm(k.npc, k.kind, S.pat, k.row, S.bpm, from, to, still, from - S.t));
+    h.upTo = to;
+  }
+  if (S.tune !== h.tune || (S.tune && h.start !== S.start)){
+    for (const r of h.players) r.perf?.stop();
+    h.players = []; h.tune = S.tune; h.start = S.start;
+    if (S.tune) for (const p of S.players){ const r = playPart(S.tune, p, S.t - S.start, still, S.scale); if (r) h.players.push(r); }
+  }
+  for (const r of h.rhythm) placeSound(r);
+  for (const r of h.players) if (placeSound(r) > HEARD_MIN && S.tune && S.t - S.start < (S.players.find(p => p.npc === r.npc)?.len ?? 0)) noteHeard(r.npc, S.tune);
+}
 // The Gentry's musicians (docs/music.md "The Gentry's way"): in a palace's great halls (its
 // rooms of kind 'hall' or 'crossing', the biggest four), four of them in a ring in the middle,
 // playing the Gentry's tunes one after another, their way (arrange.js gentryParts). Only the
@@ -4019,6 +4261,8 @@ const GENTRY_TUNES = Object.keys(TUNES).filter(id => TUNES[id].style === 'gentry
 const elfTex = ['male', 'female'].map(g => { const t = crisp(new THREE.TextureLoader().load(`sprites/billboards/${g}-peasant-elf.png`)); t.colorSpace = THREE.SRGBColorSpace; return t; });
 let palaceBand = null;   // { L, bands: [{ x, y, z, sprites, players: [{ npc, kind, part }] }], at: the band playing, perfs, next, tune }
 function makePalaceBands(L){
+  const drums = palaceDrums(L.id);
+  instruments.init(); if (instruments.ctx) for (const k of new Set(BAND_KINDS)) instruments._load(k).catch(() => {});   // (fetched now: the parts start at a set moment)
   const big = R => R.kind === 'hall' || R.kind === 'crossing';
   const rooms = L.regions.filter(R => R.type === 'room' && R.kind !== 'landing' && R.kind !== 'head');
   const halls = (rooms.some(big) ? rooms.filter(big) : rooms)          // (a palace dealt no great hall: its biggest rooms)
@@ -4037,30 +4281,72 @@ function makePalaceBands(L){
       s.scale.set(1.0, 2.05, 1); s.position.set(p.npc.x, R.y + 1.02, p.npc.z);
       return s;
     });
-    return { x: R.cx, y: R.y, z: R.cz, sprites, players };
+    // a palace with drums (palace-music.js): drummers standing round the band, further out
+    const drummers = !drums ? [] : Array.from({ length: DRUMMERS }, (_, i) => {
+      let x = R.cx, z = R.cz;
+      for (const rad of [4.2, 3.4, 2.8]){
+        const a = (i + 0.5) * 2 * Math.PI / DRUMMERS + h + 0.4, px = R.cx + Math.cos(a) * rad, pz = R.cz + Math.sin(a) * rad;
+        if (L.walkable(px, pz)){ x = px; z = pz; break; }
+      }
+      return { npc: { x, z } };
+    });
+    for (const [i, d] of drummers.entries()){
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: elfTex[(i + 1) % 2], transparent: true, alphaTest: 0.1, color: 0xf0e0d0 }));
+      s.scale.set(1.0, 2.05, 1); s.position.set(d.npc.x, R.y + 1.02, d.npc.z); sprites.push(s);
+    }
+    return { x: R.cx, y: R.y, z: R.cz, sprites, players, drummers };
   });
-  return { L, bands, at: null, perfs: [], next: 0, tune: (L.seed ?? 0) % Math.max(1, GENTRY_TUNES.length) };
+  return { L, bands, drums, at: null, perfs: [], next: 0, tune: (L.seed ?? 0) % Math.max(1, GENTRY_TUNES.length), set: 0, S: null };
 }
-const stopBandMusic = P => { for (const r of P.perfs) r.perf?.stop(); P.perfs = []; };
+const stopBandMusic = P => { for (const r of P.perfs) r.perf?.stop(); P.perfs = []; P.S = null; P.track = null; };
+const WISP_REACH = 24;   // how far from its band the Gentry's lights dance (u): about a great hall
 function stopPalaceBand(){ if (!palaceBand) return; stopBandMusic(palaceBand); for (const b of palaceBand.bands) for (const s of b.sprites) s.removeFromParent(); palaceBand = null; }
 // The Post-Warden (js/mail.js): one of the fae, at a desk by the water in the Grounds. One for now;
 // Faerie will be peopled as the Lea is, so nothing else may rely on there being only this.
 const WARDEN_AT = { x: 0, z: -14 };
 let wardenSprite = null, nearWarden = false;
+const WARDEN_H = 2.6;   // the drawing's feathered hat stands above an elf's head, so a little taller than the folk
 function wardenSpot(L){ for (const r of [14, 16, 12, 18]) for (let a = 0; a < 12; a++){ const x = Math.cos(a * 0.52) * r, z = Math.sin(a * 0.52) * r; if (L.walkable(x, z)) return { x, z }; } return WARDEN_AT; }
 function wardenTick(){
   const here = down?.L.id === GROUNDS;
   if (!here){ wardenSprite?.removeFromParent(); return; }
   if (!wardenSprite){
-    wardenSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: elfTex[1], transparent: true, alphaTest: 0.1, color: 0xd8d0f0 }));
-    wardenSprite.scale.set(1.15, 2.36, 1);
+    const tex = crisp(new THREE.TextureLoader().load('sprites/billboards/post-warden.png')); tex.colorSpace = THREE.SRGBColorSpace;
+    wardenSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, alphaTest: 0.1 }));
+    wardenSprite.scale.set(WARDEN_H * 97 / 240, WARDEN_H, 1);   // post-warden.png is 97×240
     Object.assign(WARDEN_AT, wardenSpot(down.L));
   }
-  if (wardenSprite.parent !== down.view.scene){ wardenSprite.position.set(WARDEN_AT.x, down.L.floorAt(WARDEN_AT.x, WARDEN_AT.z) + 1.18, WARDEN_AT.z); down.view.scene.add(wardenSprite); }
+  if (wardenSprite.parent !== down.view.scene){ wardenSprite.position.set(WARDEN_AT.x, down.L.floorAt(WARDEN_AT.x, WARDEN_AT.z) + WARDEN_H / 2, WARDEN_AT.z); down.view.scene.add(wardenSprite); }
 }
 function talkToWarden(){
   inDialog = true; document.exitPointerLock?.();
   talkTree(mail.wardenTree(), { onClose: () => { inDialog = false; relock(); } });
+}
+// a palace with drums: set after set (palace-music.js planSet), each from one moment on the sound's
+// own clock, so the drums, sent a few cycles at a time, and the band's parts keep together
+const SET_CHUNK = 4, SET_AHEAD = 1.5;   // cycles of drumming sent at a time; seconds before they're due
+function palaceSets(P, B, now){
+  instruments.init();
+  const ctx = instruments.ctx; if (!ctx) return;
+  const mine = P.perfs, sound = (npc, kind, notes, length, at) => {
+    const r = { npc, perf: null, until: now + at - ctx.currentTime + length + 1 };
+    instruments.play(kind, { notes, length }, { gain: 0, at }).then(perf => { if (palaceBand === P && P.perfs === mine) r.perf = perf; else perf?.stop(); });
+    mine.push(r);
+  };
+  if (!P.S){
+    if (now < P.next) return;
+    const S = P.S = planSet(P.L.seed ?? 0, P.set++);
+    P.start = ctx.currentTime + 0.4; P.sent = 0; P.track = setTrack(S);
+    bandNotes(S).forEach((b, i) => { if (b.notes.length) sound(B.players[i].npc, b.kind, b.notes, S.end, P.start); });
+  }
+  const S = P.S;
+  while (P.sent < S.end && ctx.currentTime + SET_AHEAD > P.start + P.sent){
+    const a = P.sent, b = Math.min(S.end, a + SET_CHUNK * S.cyc);
+    for (const r of S.rows){ const notes = drumNotes(S, r, a, b); if (notes.length) sound(B.drummers[r.who].npc, r.drum, notes, b - a, P.start + a); }
+    P.sent = b;
+  }
+  if (ctx.currentTime > P.start + S.end){ P.S = null; P.track = null; P.next = now + REST; }
+  for (let i = P.perfs.length - 1; i >= 0; i--) if (now > P.perfs[i].until){ P.perfs[i].perf?.stop(); P.perfs.splice(i, 1); }
 }
 function palaceBandTick(){
   if (down?.L.site !== 'palace' || !GENTRY_TUNES.length){ stopPalaceBand(); return; }
@@ -4072,14 +4358,18 @@ function palaceBandTick(){
   const near = P.bands.reduce((a, b) => dist(b) < dist(a) ? b : a);
   if (near !== P.at){ stopBandMusic(P); P.at = near; P.next = now + 2; }
   const B = P.at;
-  if (now >= P.next){                                    // the next tune, a few seconds after the last
+  if (P.drums) palaceSets(P, B, now);
+  else if (now >= P.next){                                    // the next tune, a few seconds after the last
     const id = GENTRY_TUNES[P.tune++ % GENTRY_TUNES.length], ps = B.players, mine = P.perfs = [];
     parts(ps, id).forEach((part, i) => { ps[i].part = part; });
+    instruments.init();
     let len = 0;
+    P.start = (instruments.ctx?.currentTime ?? 0) + 0.15;      // every part from one moment, which the lights keep time by
     for (const p of ps){
       const s = partNotes(id, p.part, null, p.kind), r = { npc: p.npc, perf: null };
       len = Math.max(len, s.length);
-      instruments.play(p.kind, s, { gain: 0 }).then(perf => { if (palaceBand === P && P.perfs === mine) r.perf = perf; else perf?.stop(); });
+      if (p.part === 'melody') P.track = tuneTrack(id, s.notes);
+      instruments.play(p.kind, s, { gain: 0, at: P.start }).then(perf => { if (palaceBand === P && P.perfs === mine) r.perf = perf; else perf?.stop(); });
       mine.push(r);
     }
     P.next = now + len + 5;
@@ -4091,6 +4381,9 @@ function palaceBandTick(){
     const dx = r.npc.x - upos.x, dz = r.npc.z - upos.z, d = Math.hypot(dx, dz), D = Math.hypot(d, dy);
     r.perf.place(Math.pow(Math.max(0, 1 - D / PALACE_HEAR), 1.4), d > 0.5 ? (dx * rx + dz * rz) / d : 0);
   }
+  // the Gentry's lights dance to it (wisps.js, dance.js): the ones in the band's hall
+  const ctx = instruments.ctx;
+  down.view.setMusic?.(P.track && ctx ? { x: B.x, y: B.y + 3, z: B.z, reach: WISP_REACH, f: musicFeel(P.track, ctx.currentTime - P.start) } : null);
 }
 // who's playing right now, for the notes over their heads (talk-view.js): the fires' players
 // while their part lasts, and a band playing for you
@@ -4098,9 +4391,11 @@ function playingNow(){
   if (down) return [];
   const out = [], now = performance.now() / 1000;
   for (const f of agents.fires){
-    const M = f.music; if (!M?.tune) continue;
+    const M = f.music;
+    if (M?.session) for (const r of M.rhythm) out.push(r.npc);     // the drummer, and whoever's clapping
+    if (!M?.tune) continue;
     const at = M.length - M.left;
-    for (const p of M.players) if (at < p.len) out.push(p.npc);
+    for (const p of M.players) if (at > -0.5 && at < p.len && !out.includes(p.npc)) out.push(p.npc);
   }
   for (const r of playedForYou || []) if (now < r.until && !out.includes(r.npc)) out.push(r.npc);
   for (const n of heardPractice.keys()) if (!out.includes(n)) out.push(n);   // at their practice, while a go at it sounds
@@ -4320,9 +4615,9 @@ function tuneBlocks(){
 // the instruments you know how to make (making.js): what each wants, marked where you carry
 // it; click one you've everything for to make it
 function craftBlocks(){
-  return [...craftsRead].map(k => {
+  return [...Object.keys(TACKLE_CRAFTS), ...craftsRead].map(k => {   // (tackle: anyone knows how, js/tackle.js)
     const it = ingredient(k), can = canMake(myPack, k);
-    const wants = CRAFTS[k].needs.map(([m, n]) => `<span class="${(basket[m] || 0) >= n ? 'have' : ''}">${bookEsc(`${n > 1 ? n + ' ' : ''}${ingredient(m)?.label || m}`)}</span>`).join(' · ');
+    const wants = craftOf(k).needs.map(([m, n]) => `<span class="${(basket[m] || 0) >= n ? 'have' : ''}">${bookEsc(`${n > 1 ? n + ' ' : ''}${ingredient(m)?.label || m}`)}</span>`).join(' · ');
     const el = entryEl(`${it.pic?.[0] ? `<div class="pic"><img src="${bookEsc(it.pic[0])}" alt=""></div>` : ''}<div class="name">${bookEsc(cap(it.label))}${can ? ' <span class="act">— make one</span>' : ''}</div><div class="wants">${wants}</div>`);
     if (can){
       el.style.cursor = 'pointer';
@@ -4339,7 +4634,7 @@ const myBook = makeBook({
   sections: [
     { id: 'journal', title: 'Log', tab: 'log', always: true, empty: 'Nothing written yet. What I find, and who I meet that comes to anything, goes here.', blocks: () => journalBlocks(journal, mail.linkNames) },
     { id: 'recipes', title: 'Food', tab: 'food', sub: 'Copied from the old books. Ticked: what you carry; starred: found only in hard places.', blocks: recipeBlocks },
-    { id: 'crafts', title: 'Making Things', tab: 'making', sub: "Copied from the makers' books. Ticked: what you carry.", blocks: craftBlocks },
+    { id: 'crafts', title: 'Making Things', tab: 'making', sub: "What you know how to make, from the makers' books and your own wits. Ticked: what you carry.", blocks: craftBlocks },
     { id: 'tunes', title: 'Song', tab: 'song', sub: 'Copied from the music books. Play one on an instrument from your pack.', blocks: tuneBlocks },
     { id: 'folk', title: 'Folk', tab: 'folk', sub: 'Everyone I know of, and whose people they are. A name turns to their page.', blocks: kinBlocks },
     { id: 'stamps', title: 'Stamps', tab: 'stamps', bare: true, empty: 'No stamps yet.', blocks: () => mail.album.map(stampPlate) },
@@ -4462,7 +4757,7 @@ function seaProx(){
 // cheats: Enter opens a line to type one into (Enter runs it, Esc drops it); its keys
 // stop at the box, so typing doesn't walk you about or open panels
 const cheatEl = document.getElementById('cheat');
-const CHEATS = { CHEF: () => chef(), TPTOTRADER: () => toTrader(), GENEALOGICAL: () => { const n = mail.learnKin(); setForageMsg(`Every family tree is in your book: ${n} lineages.`, 4000); }, GRIMOIRE: () => { for (const sp of SPELLS) spellsKnown.add(sp.id); setForageMsg('You know every spell. They are in your book.'); }, SALVEMEUP: () => { stow('fairy salve', 1, null); stow('four-leaf clover', 1, { ...provHere('picked'), hour: 5.2, thin: ['fairy ring'] }); recipesRead.add('fairy salve'); madeOnce.add('fairy salve'); }, STARGAZE: () => stow('telescope', 1, null), MUSICAL: musical, BONES: bones };
+const CHEATS = { CHEF: () => chef(), TPTOTRADER: () => toTrader(), GENEALOGICAL: () => { const n = mail.learnKin(); setForageMsg(`Every family tree is in your book: ${n} lineages.`, 4000); }, GRIMOIRE: () => { for (const sp of SPELLS) spellsKnown.add(sp.id); setForageMsg('You know every spell. They are in your book.'); }, SALVEMEUP: () => { stow('fairy salve', 1, null); stow('four-leaf clover', 1, { ...provHere('picked'), hour: 5.2, thin: ['fairy ring'] }); recipesRead.add('fairy salve'); madeOnce.add('fairy salve'); }, STARGAZE: () => stow('telescope', 1, null), CARDS: () => stow('pack of cards', 1, null), MUSICAL: musical, BONES: bones };
 // TPTOTRADER: stood a few steps from a trader, facing them; again for the next one
 let traderTp = 0;
 function toTrader(){
@@ -4608,6 +4903,33 @@ function castAt(cx, cy){
   bolts.cast(down ? down.view.scene : scene, from, () => t.at(aim), t.hit);
   return true;
 }
+// HERE [note]: shows Claude where you are looking — the view as a picture, and the
+// spot, seed and time as a record, saved on bub to logs/here/<id>.{json,jpg}. For bugs.
+// the folk within 60u, nearest first: where they are, what they're about, and the route they mean to walk
+function hereFolk(){
+  const r1 = v => Math.round(v * 10) / 10, at = (x, z) => [r1(x), r1(z)];
+  return agents.npcs.map(n => ({ n, d: Math.hypot(n.x - pos.x, n.z - pos.z) })).filter(o => o.d < 60)
+    .sort((a, b) => a.d - b.d).slice(0, 8).map(({ n, d }) => {
+      const b = n.brain || {}, t = b.target, path = b.path || [];
+      return { name: n.name?.full ?? n.name, id: n.id, d: r1(d), at: at(n.x, n.z), y: r1(height(n.x, n.z)), doing: n.actionLabel,
+        moving: !!n.moving, heading: +(n.heading ?? 0).toFixed(2), sleeping: !!n.sleeping, sitting: !!n.sitting,
+        target: t ? { kind: t.kind, at: t.x != null ? at(t.x, t.z) : t.ref?.x != null ? at(t.ref.x, t.ref.z) : null } : null,
+        goal: b.path ? at(b.pgx, b.pgz) : null, pathI: b.pathI, path: path.slice(b.pathI || 0, (b.pathI || 0) + 40).map(q => at(q[0], q[1])),
+        stuckFrom: b._sx != null ? at(b._sx, b._sz) : null, slide: n._slideT > 0 ? n._slide : 0 };
+    });
+}
+function here(note){
+  renderer.render(down ? down.view.scene : scene, camera);   // draw now, so the buffer still holds the frame
+  const jpg = canvas.toDataURL('image/jpeg', 0.85);
+  const r2 = v => Math.round(v * 100) / 100;
+  const rec = { note, when: new Date().toString(), world: WORLD, pos: { x: r2(pos.x), y: r2(pos.y), z: r2(pos.z) },
+    yaw: +yaw.toFixed(3), pitch: +pitch.toFixed(3),
+    url: poseURL() + `&seed=${WORLD.seed}&size=${WORLD.size}&time=${((((sky.time ?? 0) % 1) + 1) % 1).toFixed(3)}`, here: provHere('looked'), screen: [canvas.width, canvas.height], folk: hereFolk() };
+  fetch('/api/here', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rec, jpg }) })
+    .then(r => r.ok ? r.json() : Promise.reject(r.status))
+    .then(({ id }) => setForageMsg(`Claude can see it: here ${id}`, 4000))
+    .catch(() => setForageMsg('Could not reach bub.', 4000));
+}
 function openCheat(){
   for (const k in keys) keys[k] = false;
   document.exitPointerLock?.();
@@ -4618,15 +4940,18 @@ cheatEl.addEventListener('keydown', e => {
   e.stopPropagation();
   if (e.code === 'Escape'){ e.preventDefault(); closeCheat(); }
   else if (e.key === 'Enter'){
-    const run = CHEATS[cheatEl.value.trim().toUpperCase()];
+    const said = cheatEl.value.trim(), word = said.split(/\s+/)[0].toUpperCase();
+    const run = CHEATS[said.toUpperCase()];
     closeCheat();
-    if (run) run(); else if (cheatEl.value.trim()) setForageMsg('Nothing happens.');
+    if (word === 'HERE') here(said.slice(4).trim());
+    else if (run) run(); else if (said) setForageMsg('Nothing happens.');
   }
 });
 cheatEl.addEventListener('keyup', e => e.stopPropagation());
 cheatEl.addEventListener('blur', () => cheatEl.classList.add('hide'));
 
 addEventListener('keydown', e => {
+  if (cardTable.isOpen){ if (e.code === 'Escape') cardTable.leave(); return; }   // at cards: Esc gets up (asking first mid-game), nothing else moves you
   if (scope && /^(Key[WASDE]|Arrow(Up|Down))$/.test(e.code)){ lowerGlass(); return; }   // a step, or E, lowers the telescope
   if (scope && e.code === 'Escape') lowerGlass();     // (and the browser frees the mouse, below, as for any Esc)
   if (sat && /^(Key[WASDE]|Arrow(Up|Down)|Escape)$/.test(e.code)){ getUp(); return; }   // a step, E or Esc: you get up
@@ -4676,10 +5001,11 @@ addEventListener('keydown', e => {
     navigator.clipboard?.writeText(u).catch(()=>{});
     setPoseMsg('pose copied'); console.log('POSE', u);
   }
+  if (e.code === 'Tab' && inWorld()){ e.preventDefault(); glance.step(e.shiftKey ? -1 : 1); return; }   // the eye on to the next thing E can use (js/glance.js)
   const _inLook = inWorld();                            // (E aims at the middle of the screen, cursor free or not)
   if (e.code === 'KeyE' && _inLook && !inDialog) glance.rearm();   // if that uses it up, the eye may go on to the next
   if (e.code === 'KeyE' && _inLook && !inDialog && down){
-    if (boating){ if (playerFish) reelIn('You reel in.'); else if (nearFish) castLine(nearFish); else disembark(); }
+    if (boating){ if (playerFish) strikeOrReel(); else if (nearFish) castLine(nearFish); else disembark(); }
     else if (nearWarden) talkToWarden();
     else if (nearBoat) board(nearBoat);
     else if (nearShelf) readShelf(nearShelf);
@@ -4689,7 +5015,7 @@ addEventListener('keydown', e => {
     else if (nearSconce){ nearSconce.lit = !nearSconce.lit; setForageMsg(nearSconce.lit ? 'You light it from your own torch.' : 'You put it out.'); }
     else if (nearFind) takeFind(nearFind); else if (nearExit >= 0) askUp(nearExit);
   } else if (e.code === 'KeyE' && _inLook && !inDialog && playerFish){
-    reelIn('You reel in.');
+    strikeOrReel();
   } else if (e.code === 'KeyE' && _inLook && !inDialog && boating && nearFish){
     castLine(nearFish);                                   // over a ground: fish from the boat
   } else if (e.code === 'KeyE' && _inLook && !inDialog && boating){
@@ -4702,11 +5028,12 @@ addEventListener('keydown', e => {
     askDown(nearEntrance);
   } else if (e.code === 'KeyE' && _inLook && !inDialog && nearTalker){
     const npc = nearTalker.c;
-    npc.talking = true; inDialog = true;                  // stop walking mid-dialogue
+    npc.talking = true; inDialog = true; cardsWith = null; // stop walking mid-dialogue
     if (npc.heading !== undefined) npc.heading = Math.atan2(pos.x - npc.x, pos.z - npc.z);   // turn to face me
     document.exitPointerLock?.();
     const onClose = () => {
       mapMark = null;                                     // clear any kin marker on leaving
+      if (cardsWith === npc){ cardsWith = null; sitToCards(npc); return; }   // "Deal them.": at the table now (as doInteract)
       npc.talking = false; inDialog = false;
       relock();
     };
@@ -4773,9 +5100,10 @@ let last = performance.now(), _bigT = 0, walkPace = 1, _wearT = 0;
 // ---------- the glance (js/glance.js): for walking with the keys alone ----------
 // What can draw the eye: what E can act on, in the places updateFocus and underFocus aim at it.
 // rank is a handicap against the angle in radians: furniture gives way to what you came for.
-// Trees, rabbits and fishing water aren't here: they're everywhere, or nothing to take.
-const GLANCE_RANK = { fire: 0.2, door: 0.35, sign: 0.2, mailbox: 0.1, shrub: 0.6, sheep: 0.3 };   // (shrubs are everywhere: anything else near first)
-const glanceRef = d => d.c || d.item || d.fire || d.boat || d.house || d.sign || d.mailbox || d.shrub || d.wool;
+// Trees and rabbits aren't here: they're everywhere, or nothing to take. Fishing water is, but only
+// from its bank, where E casts.
+const GLANCE_RANK = { fishspot: 0.3, fire: 0.2, door: 0.35, sign: 0.2, mailbox: 0.1, shrub: 0.6, sheep: 0.3 };   // (shrubs are everywhere: anything else near first)
+const glanceRef = d => d.c || d.item || d.fire || d.boat || d.house || d.sign || d.mailbox || d.shrub || d.wool || d.spot;
 function glanceThings(cb){
   if (down){
     const L = down.L, put = (ref, [x, y, z], o) => cb({ ref, x, y, z, ...o });
@@ -4789,7 +5117,8 @@ function glanceThings(cb){
   }
   focusables((x, z, y, _, d) => {
     const ref = glanceRef(d);
-    if (ref && !(d.kind === 'door' && boating)) cb({ ref, x, y, z, rank: GLANCE_RANK[d.kind], range: d.reach, los: d.kind === 'boat' ? false : undefined,
+    if (d.kind === 'fishspot' && Math.hypot(d.spot.x - pos.x, d.spot.z - pos.z) >= 3) return;   // off the bank, E wouldn't cast
+    if (ref && !(d.kind === 'door' && boating)) cb({ ref, x, y, z, rank: d.rank ?? GLANCE_RANK[d.kind], range: d.reach, los: d.kind === 'boat' || d.kind === 'fishspot' ? false : undefined,
       top: d.kind === 'person' ? y + (d.c.h ? d.c.h * 0.42 : 0.9) : undefined });   // (a person's aimed at by the chest: the box goes over the head)
   });
   for (const en of under().entrances)
@@ -4804,9 +5133,9 @@ function glanceClear(x, z){
   return true;
 }
 // what E would do just now, in words, in the order E's handler tries things
-const pickWords = p => p.valuable ? `pick up the ${p.kind}` : `pick ${p.kind}`;
+const pickWords = p => p.verb || (p.valuable ? `pick up the ${p.kind}` : `pick ${p.kind}`);
 function useWords(){
-  return playerFish ? 'reel in' : boating ? (nearFish ? 'fish here' : 'step ashore') : nearBoat ? 'board the boat'
+  return playerFish ? (playerFish.bite?.phase === 'take' ? 'strike' : 'reel in') : boating ? (nearFish ? 'fish here' : 'step ashore') : nearBoat ? 'board the boat'
     : down ? (nearWarden ? 'talk to the Post-Warden' : nearShelf ? (bookRecipe(nearShelf) || shelfMusic(nearShelf) || shelfCraft(nearShelf) ? 'read the book' : 'look at the shelf')
       : nearDoor ? ((basket[nearDoor.key] || 0) > 0 ? `unlock it with the ${nearDoor.key}` : 'try the door') : nearChest ? 'open the chest'
       : nearTomb ? (mail.letterAt(down.L, nearTomb) ? 'give the letter' : 'read the tomb')
@@ -5058,9 +5387,10 @@ function loop(now){
       const bdx = dx * 5 / 8, bdz = dz * 5 / 8;
       if (L.floats(upos.x + bdx, upos.z)) upos.x += bdx;
       if (L.floats(upos.x, upos.z + bdz)) upos.z += bdz;
-      upos.y = L.cavern.lake.y + EYE_BOAT;
-      camera.position.copy(upos);
       boating.placeAt(upos.x, upos.z, yaw);
+      boating.rock(dt, !!(bdx || bdz));             // still air down here: only the paddle rocks her
+      upos.y = L.cavern.lake.y + EYE_BOAT;
+      camera.position.copy(upos); camera.position.y += boating.heave * BOAT_RIDE;
       Object.assign(L.canoe, { x: upos.x, z: upos.z, yaw });   // (a rebuilt view finds it where you left it)
     } else {
       if (dx || dz){ const p = L.kind === 'cave' ? 0.8 : 1; walkPace += (p - walkPace) * Math.min(1, dt * 4); dx *= walkPace; dz *= walkPace; }
@@ -5084,9 +5414,18 @@ function loop(now){
     const floats = (x, z) => height(x, z) < WATER + 0.15;          // stay on the water; nose up to shore
     if (floats(pos.x + bdx, pos.z)) pos.x += bdx;
     if (floats(pos.x, pos.z + bdz)) pos.z += bdz;
-    pos.y = WATER + EYE_BOAT;
-    camera.position.set(pos.x, pos.y, pos.z);
+    // the wind drifts you, gusting; held still while your line's out, or you're not at the paddle
+    const w = sky.wind, ts = now * 0.001;
+    if (_arrows && !rest && !playerFish && w){
+      const gust = 1 + 0.3 * Math.sin(ts * 0.37) + 0.15 * Math.sin(ts * 1.13 + 1.7);
+      const ddx = w.x * BOAT_DRIFT * gust * dt, ddz = w.y * BOAT_DRIFT * gust * dt;   // (sky.wind.y is world z)
+      if (floats(pos.x + ddx, pos.z)) pos.x += ddx;
+      if (floats(pos.x, pos.z + ddz)) pos.z += ddz;
+    }
     boating.placeAt(pos.x, pos.z, yaw);             // the boat rides under the camera
+    boating.rock(dt, !!(bdx || bdz), w?.x || 0, w?.y || 0);
+    pos.y = WATER + EYE_BOAT;
+    camera.position.set(pos.x, pos.y + boating.heave * BOAT_RIDE, pos.z);
   } else {
     // the going underfoot slows or speeds you like everyone else (terrain.js pace),
     // eased so a grainy habitat border doesn't jolt the stride
@@ -5139,7 +5478,9 @@ function loop(now){
   if (sat) satFrame(dt);
   if (shearHands.on){ const a = shearHands.frame(dt, (keys.KeyD || keys.ArrowRight ? 1 : 0) - (keys.KeyA || keys.ArrowLeft ? 1 : 0)); if (a){ yaw = a.yaw; pitch = a.pitch; } }
   camera.rotation.set(0, 0, 0, 'YXZ');
-  camera.rotateY(yaw + glance.y); camera.rotateX(pitch + glance.p);
+  camera.rotateY(yaw);
+  if (boating && !fly){ camera.rotateX(boating.pitch * BOAT_RIDE); camera.rotateZ(boating.roll * BOAT_RIDE); }   // your eye rocks with the hull
+  camera.rotateY(glance.y); camera.rotateX(pitch + glance.p);
   if (sat) cook.tick(dt, potOnScreen(sat.fire));
 
   waterTex.offset.x = (now*0.000015) % 1;
@@ -5201,7 +5542,7 @@ function loop(now){
   if (down) _handsTint.copy(_torchTint);           // underground: only the torch lights them
   else _handsTint.copy(sky.spriteTint).lerp(_torchTint, sky.night ?? 0).lerp(_fireWarm, fireGlow * 0.88);   // after dark, the lantern's
   hands.update(dt, { moving: !!(dx || dz) && !fly, running,
-                     visible: playing && !fly && !scope && gfx.hands, tint: _handsTint });
+                     visible: playing && !fly && !scope && gfx.hands && !playerFish, tint: _handsTint });   // (the rod's drawn in the world while you fish; hand sprites for it to come)
   if (!down){                                         // the land's draw, skipped underground
     forage.billboardFruits(camera, sky.spriteTint, FOG_FAR + 20);
     fireworks.update(dt);                              // cross-app colour-bursts in the sky
@@ -5225,6 +5566,7 @@ function loop(now){
   perf.calls = renderer.info.render.calls; perf.triangles = renderer.info.render.triangles;
   perf.frames++;
   hands.render(renderer);                            // overlay pass, on top of the world
+  dither.apply(renderer);                            // last: the hands are dithered with the world
   // desaturate the canvas when it rains — muted, wet-day look
   const _sat = down ? 1 : 1 - rain.intensity * 0.38;
   canvas.style.filter = _sat < 0.995 ? `saturate(${_sat.toFixed(3)})` : '';
@@ -5264,7 +5606,7 @@ function loop(now){
     nearSheep   && `E: shear`,
     nearTree    && (nearTree.faced ? `E: speak` : `E: examine`),
     nearRing    && `E: listen`,
-    playerFish  ? `E: reel in` : nearFish && `E: fish here`,
+    playerFish  ? (playerFish.bite?.phase === 'take' ? `E: strike` : `E: reel in`) : nearFish && `E: fish here`,
     boating     ? (!nearFish && !playerFish && `E: step ashore`) : nearBoat && `E: board the boat`,
     basketText() && `basket: ${basketText()}`,
   ].filter(Boolean);

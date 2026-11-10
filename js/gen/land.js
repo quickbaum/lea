@@ -30,6 +30,7 @@ import { dressSettlements } from './house.js';
 import { planRuins, standing } from './ruins.js';
 import { planUnder, mouthShape, halfWidth, mouthFloor } from './under.js';
 import { arcadeField } from './arcade.js';
+import { planRivers } from './river.js';
 
 // ---- seeded 2D simplex noise (after Gustavson) ------------------------------
 function makeSimplex(seed){
@@ -168,6 +169,13 @@ let ROAD = null, RB = null;                     // the Old Road (road.js), and i
 let SETTLE = null, SB = null;                   // settlements and their lanes (settle.js), and their band per height cell
 let RUINS = null;                               // the old stone ruins (ruins.js)
 let UNDER = null;                               // the caves' and crypts' mouths (under.js)
+let RIVERS = null;                              // the rivers (river.js): { reaches }
+let RV = null;                                  // per height cell: 1 the channel, 2 a bar on a bend's inside, 3 the floodplain
+let HG = null;                                  // the ground itself, under the bridges (the mesh draws this; height() is the deck)
+let BRIDGES = [];                               // [{ kind: 'stone'|'timber'|'foot', ax, az, bx, bz, len, hw, deck(u) }]
+const DECK = new Map();                         // height cell -> deck height, laid over the ground at the end of build()
+const WOOD = new Set();                         // height cells under a timber deck (habitat 'bridge')
+const PAVED = new Set();                        // and under the Old Road's stone deck (band 2, the road)
 
 function build(){
   HN = Math.round(2 * HALF / HSTEP) + 1;
@@ -181,10 +189,14 @@ function build(){
     F[o] = rawSand(x, z); F[o + 1] = rawWet(x, z); F[o + 2] = rawWood(x, z);
     F[o + 3] = rawRough(x, z); F[o + 4] = rawPeat(x, z); F[o + 5] = rawGrove(x, z);
   }
-  ROAD = planRoad({ size: SIZE, seed: (WORLD_SEED ^ 0x70ad) >>> 0, height, water: WATER, fields });
+  RIVERS = planRivers({ size: SIZE, seed: (WORLD_SEED ^ 0x7e7) >>> 0, height, water: WATER });
+  carveRivers();
+  ROAD = planRoad({ size: SIZE, seed: (WORLD_SEED ^ 0x70ad) >>> 0, height, water: WATER, fields, river: riverNear });
+  ROAD.spans = bridgeSpans(ROAD, 'stone', ROAD_W + 0.3, 16);
   gradeRoad();
-  SETTLE = planSettlements({ size: SIZE, seed: (WORLD_SEED ^ 0x5e771e) >>> 0, height, habitat, water: WATER, road: ROAD, worldR: WORLD_R, roadW: ROAD_W });
+  SETTLE = planSettlements({ size: SIZE, seed: (WORLD_SEED ^ 0x5e771e) >>> 0, height, habitat, water: WATER, road: ROAD, worldR: WORLD_R, roadW: ROAD_W, river: riverNear });
   dressSettlements(SETTLE, { height, habitat, seed: WORLD_SEED });   // before grading: a house reads the slope it was built on
+  for (const L of SETTLE.lanes) L.spans = bridgeSpans(L, 'timber', LANE_DECK, 8);
   gradeSettlements();
   RUINS = planRuins({ size: SIZE, seed: (WORLD_SEED ^ 0x7a1d5) >>> 0, height, habitat, water: WATER, road: ROAD, settle: SETTLE, worldR: WORLD_R });
   placeRuins();
@@ -196,6 +208,244 @@ function build(){
     const r0 = Math.max(0, Math.floor((z - R + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((z + R + HALF) / HSTEP));
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++)
       if (!SB[r * HN + c] && Math.hypot(c * HSTEP - HALF - x, r * HSTEP - HALF - z) < R) SB[r * HN + c] = 1;
+  }
+  planFootbridges();
+  layDecks();
+}
+
+// ---- the rivers ------------------------------------------------------------------
+// The channel is cut to just under the water plane and shelves to a deeper middle;
+// beyond it the bank. A lowland river's banks are not the same both sides: on
+// the inside of a bend it drops its gravel and sand as a bar, low and nearly flat,
+// with a broad floodplain behind; on the outside it cuts into the land, a steep
+// bank with little or no flat. The floodplain rises gently (wet meadow, sedge,
+// alder and willow — the habitats' own bands by height above the water) and then
+// the valley side climbs to meet the land. Only ever lowered: where the land is
+// already low, it stays as it is.
+const LANE_DECK = 2.2;      // half-width of a lane's timber bridge
+const FOOT_DECK = 1.6;      // and of a footbridge
+function bankAt(d, w, inside, bend){
+  if (d < w) return [WATER - 0.25 - (0.5 + 0.2 * w) * (1 - (d / w) ** 2), 1];
+  let e = d - w;
+  const bar = inside ? (1.5 + 0.9 * w) * bend : 0;
+  if (e < bar) return [WATER + 0.05 + e * 0.03, 2];
+  e -= bar;
+  const y0 = WATER + 0.17 + bar * 0.03;
+  const fw = (6 + 1.2 * w) * (inside ? 1 + 0.6 * bend : 1 - 0.75 * bend);
+  if (e < fw) return [y0 + e * 0.1, 3];
+  return [y0 + fw * 0.1 + (e - fw) * (inside ? 0.25 : 0.3 + 0.5 * bend), 0];
+}
+function carveRivers(){
+  RV = new Uint8Array(HN * HN);
+  const T = new Float32Array(HN * HN).fill(Infinity), TB = new Uint8Array(HN * HN);
+  for (const R of RIVERS.reaches){
+    const { xs, zs, ws, ks } = R;
+    for (let q = 0; q + 1 < xs.length; q++){
+      const ax = xs[q], az = zs[q], len = Math.hypot(xs[q + 1] - ax, zs[q + 1] - az);
+      if (len < 1e-6) continue;
+      const dx = (xs[q + 1] - ax) / len, dz = (zs[q + 1] - az) / len;
+      const reach = Math.max(ws[q], ws[q + 1]) + 40;
+      const c0 = Math.max(0, Math.floor((Math.min(ax, xs[q + 1]) - reach + HALF) / HSTEP)), c1 = Math.min(HN - 1, Math.ceil((Math.max(ax, xs[q + 1]) + reach + HALF) / HSTEP));
+      const r0 = Math.max(0, Math.floor((Math.min(az, zs[q + 1]) - reach + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((Math.max(az, zs[q + 1]) + reach + HALF) / HSTEP));
+      for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+        const x = c * HSTEP - HALF, z = r * HSTEP - HALF;
+        const t = Math.max(0, Math.min(len, (x - ax) * dx + (z - az) * dz)), f = t / len;
+        const d = Math.hypot(x - ax - dx * t, z - az - dz * t);
+        if (d > reach) continue;
+        const w = ws[q] + (ws[q + 1] - ws[q]) * f, k = ks[q] + (ks[q + 1] - ks[q]) * f;
+        const side = dx * (z - az) - dz * (x - ax);            // + on the side the river turns toward
+        const [y, band] = bankAt(d, w, side * k > 0, Math.min(1, Math.abs(k) * 30));
+        const i = r * HN + c;
+        if (y < T[i]){ T[i] = y; TB[i] = band; }
+      }
+    }
+  }
+  for (let i = 0; i < T.length; i++){
+    if (T[i] === Infinity) continue;
+    const was = H[i];
+    if (T[i] < was) H[i] = T[i];
+    // the channel only where it cuts the land (a lake stays a lake); the rest where the bank shaped the ground
+    if (TB[i] === 1 ? was > WATER - 0.1 : T[i] <= was + 0.3) RV[i] = TB[i];
+  }
+}
+const rvAt = (x, z) => {
+  if (!RV) return 0;
+  const c = Math.round((x + HALF) / HSTEP), r = Math.round((z + HALF) / HSTEP);
+  return c < 0 || r < 0 || c >= HN || r >= HN ? 0 : RV[r * HN + c];
+};
+// is a river's channel within a few units? (the planners' grids are 8u, coarser than a brook)
+function riverNear(x, z){
+  for (const [ox, oz] of [[0, 0], [4, 0], [-4, 0], [0, 4], [0, -4]]) if (rvAt(x + ox, z + oz) === 1) return true;
+  return false;
+}
+
+// Where a road or lane crosses a river: walk its centre line for the water, out to
+// dry bank either side, and that is the bridge. Its deck stands level at the
+// higher bank or high enough over the water, whichever is more (a stone arch
+// wants headroom for its arches, a timber bridge less), and the way rises to it
+// over `ramp` units either side, on a built-up approach.
+function bridgeSpans(line, kind, hw, ramp){
+  const { xs, zs, prof } = line, n = xs.length, step = 2;      // both the road and the lanes sample their centre line every 2u
+  const wet = k => height(xs[k], zs[k]) < WATER + 0.3 || rvAt(xs[k], zs[k]) === 1;
+  const spans = [];
+  for (let k = 0; k < n; k++){
+    if (!wet(k)) continue;
+    let e = k, channel = false;
+    for (let gap = 0; e + 1 < n && gap <= 3; ){ e++; if (wet(e)) gap = 0; else gap++; }
+    while (e > k && !wet(e)) e--;
+    for (let j = k; j <= e; j++) if (rvAt(xs[j], zs[j]) === 1) channel = true;
+    if (!channel){ k = e; continue; }
+    let a = k, b = e;
+    for (let t = 0; t < 6 && a > 0 && height(xs[a], zs[a]) < WATER + 0.7; t++) a--;
+    for (let t = 0; t < 6 && b < n - 1 && height(xs[b], zs[b]) < WATER + 0.7; t++) b++;
+    if (a === 0 || b === n - 1){ k = e; continue; }        // the line's end is in the water: leave it be
+    const len = (b - a) * step;
+    const clear = kind === 'stone' ? 1.6 + Math.min(2.4, len * 0.08) : 1.3;
+    const top = Math.max(prof[a], prof[b], WATER + clear);
+    // the approach rises at 1 in 12 at most (ramp is the least it runs)
+    const rise = Math.max(0, top - Math.min(prof[a], prof[b]));
+    const rk = Math.round(Math.max(ramp, rise * 12) / step), orig = Float32Array.from(prof);
+    for (let j = a; j <= b; j++) prof[j] = top + (kind === 'stone' ? 0.3 * Math.sin(Math.PI * (j - a) / (b - a)) : 0);
+    for (let j = 1; j <= rk; j++){
+      const f = 1 - j / (rk + 1), w = f * f * (3 - 2 * f);
+      if (a - j >= 0) prof[a - j] = Math.max(orig[a - j], orig[a - j] + (top - orig[a - j]) * w);
+      if (b + j < n) prof[b + j] = Math.max(orig[b + j], orig[b + j] + (top - orig[b + j]) * w);
+    }
+    spans.push({ kind, s0: a * step, s1: b * step, hw, top });
+    const br = { kind, ax: xs[a], az: zs[a], bx: xs[b], bz: zs[b], len: Math.hypot(xs[b] - xs[a], zs[b] - zs[a]), hw,
+      deck: u => line.heightAt(a * step + (b - a) * step * Math.max(0, Math.min(1, u / Math.max(1e-6, br.len)))) };
+    BRIDGES.push(br);
+    stampDeck(br);                                   // the bridge runs straight bank to bank, whatever the way's curve
+    k = b;
+  }
+  return spans;
+}
+const inSpan = (spans, s) => { if (spans) for (const p of spans) if (s > p.s0 && s < p.s1) return p; return null; };
+
+// Footbridges: where the walk round is long. At points along each river, how far
+// would you walk to reach the bank opposite (round its spring, or the lake it runs
+// from, or over a bridge already there)? Where that is far, a plank bridge goes
+// over at the narrowest place near by, between dry banks — the way the folk would
+// have put one where they kept wanting to cross. Walked on a coarse 4u grid,
+// four-ways so a diagonal brook still blocks it.
+const ROUND = 480;            // a walk round longer than this wants a bridge
+const WG = 4;
+function planFootbridges(){
+  const n = Math.round(SIZE / WG) + 1, half = SIZE / 2, X = c => c * WG - half;
+  const open = new Uint8Array(n * n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++){
+    const x = X(i), z = X(j);
+    open[j * n + i] = height(x, z) > WATER + 0.25 && Math.hypot(x, z) < WORLD_R && !builtAt(x, z, 0) ? 1 : 0;
+  }
+  const openDeck = b => {
+    const dx = (b.bx - b.ax) / b.len, dz = (b.bz - b.az) / b.len;
+    for (let u = -2; u <= b.len + 2; u += 1){
+      const i = Math.round((b.ax + dx * u + half) / WG), j = Math.round((b.az + dz * u + half) / WG);
+      for (const [di, dj] of [[0, 0], [1, 0], [0, 1], [1, 1]]) if (i + di < n && j + dj < n) open[(j + dj) * n + i + di] = 1;
+    }
+  };
+  for (const b of BRIDGES) openDeck(b);
+  const dist = new Int32Array(n * n), stamp = new Int32Array(n * n), queue = new Int32Array(n * n);
+  let gen = 0;
+  const walkRound = (ax, az, bx, bz) => {             // grid steps from a to b, or Infinity past the limit
+    gen++;
+    const a = Math.round((az + half) / WG) * n + Math.round((ax + half) / WG), b = Math.round((bz + half) / WG) * n + Math.round((bx + half) / WG);
+    if (!open[a] || !open[b]) return Infinity;
+    const lim = Math.ceil(ROUND * 1.2 / WG);
+    let h = 0, t = 0; queue[t++] = a; stamp[a] = gen; dist[a] = 0;
+    while (h < t){
+      const k = queue[h++];
+      if (k === b) return dist[k] * WG;
+      if (dist[k] >= lim) continue;
+      const i = k % n;
+      for (const m of [i > 0 ? k - 1 : -1, i < n - 1 ? k + 1 : -1, k - n, k + n]){
+        if (m < 0 || m >= n * n || stamp[m] === gen || !open[m]) continue;
+        stamp[m] = gen; dist[m] = dist[k] + 1; queue[t++] = m;
+      }
+    }
+    return Infinity;
+  };
+  const reaches = [...RIVERS.reaches].sort((p, q) => q.length - p.length);
+  for (const R of reaches){
+    if (R.length < 60) continue;
+    for (let s = 30; s < R.length - 30; s += 50){
+      const q = Math.round(s / 3);
+      if (q < 1 || q >= R.xs.length - 1) continue;
+      const here = footAt(R, q);
+      if (!here) continue;
+      if (walkRound(here.ax, here.az, here.bx, here.bz) <= ROUND) continue;
+      // wanted: the narrowest good place within 40u
+      let best = here;
+      for (let k = Math.max(1, q - 13); k <= Math.min(R.xs.length - 2, q + 13); k++){
+        const c = footAt(R, k);
+        if (c && c.score < best.score) best = c;
+      }
+      openDeck(addFootbridge(best));
+    }
+  }
+}
+function footAt(R, q){
+  const { xs, zs, ws } = R;
+  const dx = xs[q + 1] - xs[q - 1], dz = zs[q + 1] - zs[q - 1], l = Math.hypot(dx, dz) || 1, nx = -dz / l, nz = dx / l;
+  // each end out over the low bank to where the ground is dry underfoot, 14u past the channel at most
+  const reach = s => {
+    for (let e = ws[q] + 1.5; e <= ws[q] + 14; e += 1){
+      const x = xs[q] + nx * s * e, z = zs[q] + nz * s * e;
+      if (height(x, z) >= WATER + 0.5) return e;
+    }
+    return null;
+  };
+  const ea = reach(-1), eb = reach(1);
+  if (ea === null || eb === null) return null;
+  const ax = xs[q] - nx * ea, az = zs[q] - nz * ea, bx = xs[q] + nx * eb, bz = zs[q] + nz * eb;
+  for (const [x, z] of [[ax, az], [bx, bz]]){
+    if (height(x, z) > WATER + 3.5 || Math.hypot(x, z) > WORLD_R - 30) return null;
+    if (builtBand(x, z) || roadBand(x, z) || builtAt(x, z, 3)) return null;
+  }
+  // the banks beyond the ends are land you can walk on (not a reedy spit into a lake)
+  if (height(ax - nx * 4, az - nz * 4) < WATER + 0.3 || height(bx + nx * 4, bz + nz * 4) < WATER + 0.3) return null;
+  if (BRIDGES.some(b => Math.hypot((b.ax + b.bx) / 2 - xs[q], (b.az + b.bz) / 2 - zs[q]) < 90)) return null;
+  return { ax, az, bx, bz, score: ea + eb + Math.abs(height(ax, az) - height(bx, bz)) };
+}
+function addFootbridge({ ax, az, bx, bz }){
+  const len = Math.hypot(bx - ax, bz - az), eA = height(ax, az), eB = height(bx, bz);
+  const hump = Math.max(0.3, WATER + 1.0 - Math.min(eA, eB));
+  const deck = u => { const t = Math.max(0, Math.min(1, u / len)); return eA + (eB - eA) * t + hump * Math.sin(Math.PI * t); };
+  const b = { kind: 'foot', ax, az, bx, bz, len, hw: FOOT_DECK, deck };
+  BRIDGES.push(b);
+  stampDeck(b);
+  return b;
+}
+// a straight deck into DECK, over its whole footprint
+function stampDeck(b){
+  const dx = (b.bx - b.ax) / b.len, dz = (b.bz - b.az) / b.len;
+  const c0 = Math.max(0, Math.floor((Math.min(b.ax, b.bx) - b.hw - 2 + HALF) / HSTEP)), c1 = Math.min(HN - 1, Math.ceil((Math.max(b.ax, b.bx) + b.hw + 2 + HALF) / HSTEP));
+  const r0 = Math.max(0, Math.floor((Math.min(b.az, b.bz) - b.hw - 2 + HALF) / HSTEP)), r1 = Math.min(HN - 1, Math.ceil((Math.max(b.az, b.bz) + b.hw + 2 + HALF) / HSTEP));
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
+    const x = c * HSTEP - HALF, z = r * HSTEP - HALF, u = (x - b.ax) * dx + (z - b.az) * dz, v = -(x - b.ax) * dz + (z - b.az) * dx;
+    if (u < -0.5 || u > b.len + 0.5 || Math.abs(v) > b.hw + 0.6) continue;
+    const i = r * HN + c;
+    DECK.set(i, Math.max(DECK.get(i) ?? -Infinity, b.deck(u)));
+    if (b.kind !== 'stone') WOOD.add(i);
+    else if (Math.abs(v) <= ROAD_W + 0.8) PAVED.add(i);               // the paving, wherever the straight deck runs past the road's curve
+  }
+}
+// Lay the decks over the ground: height() is the deck, so whoever crosses stands
+// on it; HG keeps the ground under it for the mesh, so the river still runs
+// beneath. Each bridge's sides are solid (a parapet, a handrail), thin, so the
+// folk's routes still fit between them.
+function layDecks(){
+  HG = Float32Array.from(H);
+  for (const [i, y] of DECK) H[i] = Math.max(H[i], y);
+  for (const i of WOOD) if (SB) SB[i] = 6;
+  for (const i of PAVED) RB[i] = 2;
+  for (const b of BRIDGES){
+    const dx = (b.bx - b.ax) / b.len, dz = (b.bz - b.az) / b.len, a = Math.atan2(dz, dx);
+    const mx = (b.ax + b.bx) / 2, mz = (b.az + b.bz) / 2;
+    for (const s of [-1, 1]){
+      const o = { x: mx - dz * s * (b.hw + 0.1), z: mz + dx * s * (b.hw + 0.1), a, hl: b.len / 2 + 0.3, hw: 0.12, thin: true };
+      addSolid(o, o.hl + 1);
+    }
   }
 }
 
@@ -265,6 +515,12 @@ function gradeRoad(){
     if (d > reach) continue;
     const w = gradeWeight(d);
     const camber = d < ROAD_W ? CROWN * (1 - (d / ROAD_W) ** 2) : 0;
+    const span = inSpan(ROAD.spans, S[i]);
+    if (span){                                       // over the river: the deck, and the river left to run under it
+      if (d <= span.hw + 0.6) DECK.set(i, ROAD.heightAt(S[i]) + camber);
+      RB[i] = d <= ROAD_W + 0.8 ? 2 : 0;
+      continue;
+    }
     if (w > 0) H[i] += (ROAD.heightAt(S[i]) + camber - H[i]) * w;
     RB[i] = d <= ROAD_W + 0.8 ? 2 : d <= ROAD_W + VERGE ? 1 : 0;
   }
@@ -312,6 +568,11 @@ function gradeSettlements(){
   });
   for (const [i, { d, s, li }] of D){
     if (RB[i] === 2) continue;                       // the road's paving stays as it is
+    const span = inSpan(SETTLE.lanes[li].spans, s);
+    if (span){                                       // a timber bridge: its deck, the river under it
+      if (d <= span.hw + 0.6){ DECK.set(i, SETTLE.lanes[li].heightAt(s)); WOOD.add(i); }
+      continue;
+    }
     const w = d <= LANE_W + 0.5 ? 1 : smooth(LANE_W + 3, LANE_W + 0.5, d);
     if (w > 0) H[i] += (SETTLE.lanes[li].heightAt(s) - H[i]) * w;
     mark(i, d <= LANE_W + 0.3 ? 3 : 1);
@@ -372,7 +633,7 @@ export function settlements(){ if (!H) build(); return SETTLE; }
 export function ruins(){ if (!H) build(); return RUINS; }
 // the ways underground: { levels: [plan], entrances: [{ level, mouth, kind, x, z, y, face, stand }] } (under.js)
 export function under(){ if (!H) build(); return UNDER; }
-// 0 wild, 1 cleared round a settlement, beside a lane or at a ruin's walls, 2 a green, 3 a lane, 4 a yard, 5 a field
+// 0 wild, 1 cleared round a settlement, beside a lane or at a ruin's walls, 2 a green, 3 a lane, 4 a yard, 5 a field, 6 a timber bridge's deck
 export function builtBand(x, z){
   if (!SB) return 0;
   const c = Math.round((x + HALF) / HSTEP), r = Math.round((z + HALF) / HSTEP);
@@ -385,7 +646,7 @@ export function builtAt(x, z, pad = 0){
   if (!H) build();
   const list = SOLID.get(skey(Math.floor(x / SC), Math.floor(z / SC)));
   if (!list) return false;
-  for (const b of list) if (b.round ? Math.hypot(x - b.x, z - b.z) < b.round + pad : inBuilding(b, x, z, pad)) return true;
+  for (const b of list) if (b.round ? Math.hypot(x - b.x, z - b.z) < b.round + pad : inBuilding(b, x, z, b.thin ? Math.min(pad, 0.35) : pad)) return true;
   return false;
 }
 export const solidAt = builtAt;
@@ -397,6 +658,28 @@ export function roadBand(x, z){
   if (!H) build();
   const c = Math.round((x + HALF) / HSTEP), r = Math.round((z + HALF) / HSTEP);
   return c < 0 || r < 0 || c >= HN || r >= HN ? 0 : RB[r * HN + c];
+}
+
+// the rivers: { reaches: [{ xs, zs, ws (half-width), ks (curvature), ss, length, spring, end }] } (river.js)
+export function rivers(){ if (!H) build(); return RIVERS; }
+// 1 in a river's channel, 2 on a bar on the inside of a bend, 3 on its floodplain, 0 elsewhere
+export function riverBand(x, z){ if (!H) build(); return rvAt(x, z); }
+// the bridges: [{ kind: 'stone' (the Old Road) | 'timber' (a lane) | 'foot', ax, az, bx, bz, len, hw, deck(u) }]
+export function bridges(){ if (!H) build(); return BRIDGES; }
+// the ground itself, ignoring bridge decks (the ground mesh; everything that stands uses height())
+export function groundHeight(x, z){
+  if (!H) build();
+  const gx = (x + HALF) / HSTEP, gz = (z + HALF) / HSTEP;
+  if (gx < 0 || gz < 0 || gx >= HN - 1 || gz >= HN - 1) return rawHeight(x, z);
+  const c = gx | 0, r = gz | 0, fx = gx - c, fz = gz - r, i = r * HN + c;
+  const a = HG[i] + (HG[i + 1] - HG[i]) * fx, b = HG[i + HN] + (HG[i + HN + 1] - HG[i + HN]) * fx;
+  return a + (b - a) * fz;
+}
+// is (x, z) under a bridge's deck?
+export function underDeck(x, z){
+  if (!H) build();
+  const c = Math.round((x + HALF) / HSTEP), r = Math.round((z + HALF) / HSTEP);
+  return c >= 0 && r >= 0 && c < HN && r < HN && DECK.has(r * HN + c);
 }
 
 export function height(x, z){
@@ -457,6 +740,8 @@ export const HABITATS = {
   yard:      { surface: 'grass', cover: 0,    soil: 0.4,  pace: 1.05, color: [0.42, 0.36, 0.26] },
   green:     { surface: 'grass', cover: 0,    soil: 0.6,  pace: 1.0,  color: [0.40, 0.52, 0.23] },
   field:     { surface: 'grass', cover: 0,    soil: 0.9,  pace: 0.85, color: [0.33, 0.25, 0.16] },   // ploughed earth, walked across the furrows
+  // a timber bridge's deck (a lane's, a footbridge): boards underfoot
+  bridge:    { surface: 'rock',  cover: 0,    soil: 0,    pace: 1.1,  color: [0.42, 0.33, 0.22] },
 };
 
 const GROVE = 0.8;   // how rare the old-growth stands are (field threshold)
@@ -471,9 +756,12 @@ export function habitat(x, z, h = height(x, z)){
   if (sb === 4) return 'yard';
   if (sb === 2) return 'green';
   if (sb === 5) return 'field';
+  if (sb === 6) return 'bridge';
   // a little per-metre jitter so borders are grainy, not ruled lines
   const d = h - WATER + (hash(Math.floor(x), Math.floor(z)) - 0.5) * 0.35;
   if (d < 0) return 'lake';
+  const rv = rvAt(x, z);
+  if (rv === 2 && d < 0.8) return 'beach';             // a river's sand and gravel bar, on the inside of a bend
   const f = fields(x, z, _hf);
   if (d < 0.55 && f.sand > 0.45) return 'beach';
   const sl = slope(x, z);
@@ -483,11 +771,12 @@ export function habitat(x, z, h = height(x, z)){
   if (d > 14) return f.wood > 0.6 ? 'woodland' : 'heath';
   const band = 0.7 + 1.9 * f.wet;                       // how high the ground stays waterlogged
   if (d < 0.5) return 'marsh';                          // reeds at the open water
+  const carrT = rv === 3 ? 0.45 : 0.62;                // a river's floodplain grows its gallery of alder and willow more readily
   if (d < band){
-    if (f.wood > 0.62) return 'carr';                   // wet woodland (alder, willow)
+    if (f.wood > carrT) return 'carr';                  // wet woodland (alder, willow)
     return f.peat > 0.42 && f.sand < 0.6 ? 'fen' : (d < band * 0.6 ? 'marsh' : 'wetmeadow');
   }
-  if (d < band + 1.1 && f.wood < 0.62) return 'wetmeadow';
+  if (d < band + 1.1 && f.wood < carrT) return 'wetmeadow';
   if (f.grove > GROVE && f.sand < 0.5 && f.rough < 0.6) return 'grove';  // old growth on moist loam
   if (f.sand > 0.5 && f.wood < 0.55 && d > band + 1.6) return 'heath';   // dry sandy rises
   return f.wood > 0.5 ? 'woodland' : 'meadow';

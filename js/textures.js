@@ -586,6 +586,12 @@ export function makeTrinketTexture(kind = 'stone'){
     } else if (kind === 'amber'){                            // warm translucent bead
       g.fillStyle = '#d98a1e'; g.beginPath(); g.ellipse(cx, cy, w*0.30, h*0.34, 0, 0, 7); g.fill();
       g.fillStyle = 'rgba(255,224,130,0.65)'; g.beginPath(); g.ellipse(cx-2, cy-3, w*0.10, h*0.13, 0, 0, 7); g.fill();
+    } else if (kind === 'feathers'){                         // a fallen wing feather, barred brown, its quill pale
+      g.save(); g.translate(cx, cy); g.rotate(-0.6);
+      g.fillStyle = '#8a6a48'; g.beginPath(); g.ellipse(0, -1, w*0.11, h*0.36, 0, 0, 7); g.fill();
+      g.fillStyle = '#c9b48e'; for (let i = -3; i <= 2; i++) g.fillRect(-w*0.10, i * 2.6 - 1, w*0.2, 1);   // the bars
+      g.fillStyle = '#efe6cf'; g.fillRect(-0.5, -h*0.38, 1, h*0.80);   // the quill
+      g.restore();
     } else if (kind === 'quartz'){                           // pale crystal, faceted
       g.fillStyle = '#dde6ee';
       g.beginPath(); g.moveTo(cx, h*0.10); g.lineTo(cx + w*0.22, cy); g.lineTo(cx, h*0.90); g.lineTo(cx - w*0.22, cy); g.closePath(); g.fill();

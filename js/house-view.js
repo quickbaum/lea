@@ -768,14 +768,16 @@ function drawDoorway(G, R, f, b, floor, E, wallOpt, opt){
 function drawBarnBits(G, R, f, b, floor, wallOpt, opt, frame){
   const { hw } = b, T = G.timber, col = [0.32, 0.26, 0.20];
   // the great doors: a threshing floor's draught runs between them
-  const dw = 2 * f.floorW, dh = Math.min(2.5 * M, f.Eo * M + 0.4 * M);
+  // in the long wall the aisle's eaves come down to f.Eo, so door and lintel (h + 0.08, 0.21 M
+  // thick) stop under them; a midstrey's doors are in its own gable and can stand taller
+  const dw = 2 * f.floorW, dh = Math.min(2.5 * M, (f.Eo - 0.2) * M - 0.08);
   if (f.midstrey){
     const m = f.midstrey, spec = { U: 0, V: hw, turn: 1, s0: 0, s1: m.d, wf: f.floorW + 0.15 * M, wr: f.floorW + 0.15 * M, E: floor + m.E * M, pitch: Math.tan(44 * Math.PI / 180), ends: ['none', 'gable'], over: 0.24 * M, overGable: 0.18 * M, sag: 0.03 };
     const P = makeRange({ P: R.L, out: R.O }, spec);
     drawWalls(G, P, { age: f.age }, { wall: f.wall, wash: null, y0: b.y - PART_SINK, floor, r: wallOpt.r, tint: 0.95, lines: [0, m.d], closeNone: false, open: {} });
     drawRoof(G, P, f.roof, { ...opt, seed: opt.seed + 5, coldSide: 0 });
     // its front: double doors, one standing a little ajar on the dark of the floor
-    bigDoors(G, P, m.d + 0.1, floor, dw * 0.92, Math.min(dh, (m.E - 0.1) * M), col, P.O(1, 0));
+    bigDoors(G, P, m.d + 0.1, floor, dw * 0.92, Math.min(2.3 * M, (m.E - 0.3) * M), col, P.O(1, 0));
   } else {
     bigDoors(G, R, hw + 0.08, floor, dw, dh, col, R.O(0, 1), true);
   }

@@ -9,7 +9,7 @@
 //            can, never in parallel fifths or octaves, closing on the octave. The rules of
 //            first-species counterpoint, roughly, applied beat by beat
 //   low      the tune an octave down
-//   drum     the metre on a tabor: the low head on the strong beats, the snare between,
+//   drum     the metre on a tabor: the Lea's pattern for the tune's meter (rhythm.js),
 //            from the first full bar to the end
 //
 //   voiceN   written-out music's own voices (tunes.js `under`): no need to make any up
@@ -40,6 +40,7 @@
 // it's thinner and plainer; with nothing plucked, it's the tune and a counter-line.
 
 import { tune, schedule, stepMidi } from './tunes.js';
+import { leaPattern, rhythmNotes, tuneBeatSec } from './rhythm.js';
 
 export const DRUMS = new Set(['tabor']);
 const HELD = new Set(['vielle', 'tabor pipe', 'silver pipes', 'bone flute']);   // can hold a drone
@@ -154,18 +155,15 @@ function counter(id, s){
   return out;
 }
 
+// the drum's part: the Lea's pattern in the tune's meter (rhythm.js LEA_PATTERNS), at the tune's own
+// tempo, its cycle's head on the first full bar, to the end. A session plays it from its own clock
+// (music-sim.js) and "Will you play something?" leads in with it (main.js playForYou); this is for
+// anything else that asks for a drum part
 function drum(id, s){
-  const g = grid(id), out = [], end = s.notes.length ? s.notes.at(-1).t + s.notes.at(-1).dur : 0;
-  const hit = (t, midi, vel) => { if (t < end - 0.05) out.push({ t, dur: 0.4, midi, vel }); };
-  for (let b = g.pick; b < end - 1e-6; b += g.bar){
-    if (g.compound){                                    // 6/8: BOOM . tap BOOM . tap
-      hit(b, BOOM, 0.9); hit(b + 2 * g.eighth, SNARE, 0.35); hit(b + 3 * g.eighth, BOOM, 0.7); hit(b + 5 * g.eighth, SNARE, 0.35);
-    } else for (let k = 0; k < g.beats; k++){           // 4/4 BOOM tap boom tap; 3/4 BOOM tap tap
-      const strong = k === 0 || (g.beats === 4 && k === 2);
-      hit(b + k * g.beat, strong ? BOOM : SNARE, k === 0 ? 0.9 : strong ? 0.7 : 0.35);
-    }
-  }
-  return out;
+  const g = grid(id), end = s.notes.length ? s.notes.at(-1).t + s.notes.at(-1).dur : 0;
+  const pat = leaPattern(tune(id).meter);
+  if (!pat || end <= g.pick) return [];
+  return rhythmNotes(pat, 'tabor', 'tabor', 60 / tuneBeatSec(id), 0, end - g.pick - 0.05).map(n => ({ ...n, t: n.t + g.pick }));
 }
 
 // ---- the Gentry's way --------------------------------------------------------------------

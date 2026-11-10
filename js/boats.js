@@ -2,7 +2,8 @@
 // world object: anyone may climb in (the player with E; NPCs later) and paddle
 // across water. The hull is a parametric low-poly canoe, flat-shaded and crisp to
 // match the game's look. Boats float at the waterline and bob; an unmanned boat
-// sways gently where it was left, a manned one is glued under its rider's camera.
+// sways gently where it was left. A manned one rides under its rider's camera and
+// rocks with the water and the paddle (Boat.rock); the rider's eye rocks with it.
 //
 // Also the canoe the folk are making on the bank (CanoeBedView, docs/boats.md
 // "Making canoes"). Deferred: portaging a canoe overland.
@@ -17,6 +18,17 @@ const PADDLE = 0x8a6a3f;
 // how high the hull rides: gunwales sit FLOAT above the waterline, the keel a
 // little below — so the canoe floats *on* the water, not submerged in it.
 const FLOAT = 0.42;
+
+// --- riding: the canoe under you rocks (docs/boats.md, "Riding"). Radians and units.
+// Kept small: the picture is low-res, and a big roll is seasickness, not realism.
+const SWAY_ROLL   = 0.022;    // idle roll, still air (~1.3°)
+const SWAY_WIND   = 0.014;    // …more roll per unit of wind (a gale is ~1.7)
+const SWAY_PITCH  = 0.008;    // idle pitch
+const SWAY_HEAVE  = 0.035;    // idle rise and fall
+const STROKE      = 1.15;     // seconds per paddle stroke
+const STROKE_ROLL = 0.026;    // the lean into each stroke, alternating sides
+const STROKE_DIP  = 0.012;    // the bow dips as the blade pulls
+const STROKE_EASE = 3;        // how fast the stroke rhythm comes up and dies away (1/s)
 
 // A canoe pointed along -Z (the camera's forward at yaw 0), so setting the
 // group's rotation.y to a heading aims the bow where you paddle.
@@ -116,17 +128,43 @@ class Boat {
     this.deckY = water + FLOAT;     // world Y of the gunwale — where a rider sits
     this.group = buildCanoe();
     this.group.position.set(x, water + FLOAT, z);
+    this.group.rotation.order = 'YXZ';        // heading first, so pitch and roll are the hull's own
     this.group.rotation.y = yaw;
     this._ph = Math.random() * Math.PI * 2;   // bob phase, so boats don't bob in lockstep
+    // the ride, while someone's aboard (rock): roll and pitch (rad), heave (units)
+    this.roll = 0; this.pitch = 0; this.heave = 0;
+    this._rt = 0; this._stroke = 0; this._effort = 0;
   }
   placeAt(x, z, yaw){ this.x = x; this.z = z; this.yaw = yaw; }
+  // One frame of the ride: the water rocks the hull, more in wind and most with the
+  // wind on the beam (waves roll a hull from the side, pitch it end-on); paddling
+  // adds a lean into each stroke, alternating sides, and a dip of the bow as the
+  // blade pulls. `paddling` is whether the paddle's going; (wx, wz) the wind blowing toward.
+  rock(dt, paddling, wx = 0, wz = 0){
+    const t = (this._rt += dt), w = Math.hypot(wx, wz);
+    this._effort += ((paddling ? 1 : 0) - this._effort) * Math.min(1, dt * STROKE_EASE);
+    if (this._effort > 0.01) this._stroke += dt / STROKE; else this._stroke = 0;
+    // the wind's angle to the keel (forward is -Z at yaw 0: sin, cos of yaw)
+    const beam = w > 0.01 ? Math.abs((-Math.sin(this.yaw) * wz + Math.cos(this.yaw) * wx) / w) : 0.5;
+    const ph = this._ph, e = this._effort, s = this._stroke * Math.PI;
+    const rollA = (SWAY_ROLL + SWAY_WIND * w) * (0.5 + 0.7 * beam);
+    const pitchA = SWAY_PITCH * (1 + w) * (1.2 - 0.7 * beam);
+    this.roll = rollA * (Math.sin(t * 0.9 + ph) + 0.35 * Math.sin(t * 2.1 + ph * 1.7))   // two swells, never quite in step
+              + e * STROKE_ROLL * Math.sin(s);                                           // a stroke one side, the next the other
+    this.pitch = pitchA * Math.sin(t * 0.7 + ph * 0.6)
+              - e * STROKE_DIP * Math.max(0, Math.sin(2 * s));                           // each pull dips the bow
+    this.heave = SWAY_HEAVE * (1 + 0.5 * w) * Math.sin(t * 1.3 + ph)
+              + e * 0.012 * Math.sin(2 * s);
+  }
   update(dt, t){
     this.group.position.set(this.x, this.water + FLOAT, this.z);
     this.group.rotation.y = this.yaw;
     if (this.aboard){
-      this.group.position.y = this.water + FLOAT;    // glued steady under the rider
-      this.group.rotation.z = 0;
+      this.group.position.y = this.water + FLOAT + this.heave;   // under the rider, rocking as they feel it
+      this.group.rotation.z = this.roll;
+      this.group.rotation.x = this.pitch;
     } else {
+      this.group.rotation.x = 0;
       this.group.position.y = this.water + FLOAT + Math.sin(t * 1.3 + this._ph) * 0.05;   // gentle bob
       this.group.rotation.z = Math.sin(t * 0.9 + this._ph) * 0.04;                   // slow roll
     }

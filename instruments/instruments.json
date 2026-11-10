@@ -417,5 +417,23 @@
     "rate": 16000
    }
   ]
+ },
+ "clap": {
+  "gm": 0,
+  "preset": "Standard",
+  "attack": 0.0,
+  "release": 0.1,
+  "sustain": false,
+  "perc": true,
+  "zones": [
+   {
+    "file": "clap-0.wav",
+    "lo": 39,
+    "hi": 39,
+    "root": 39,
+    "cents": 0,
+    "rate": 20000
+   }
+  ]
  }
 }

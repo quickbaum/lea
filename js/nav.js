@@ -16,7 +16,7 @@
 // then re-price the cells they cross (refreshWear), so the folk take the paths.
 
 import { SIZE, WORLD_R, WATER } from './config.js';
-import { height, groundPace, slopePace, wornPace, builtAt } from './terrain.js';
+import { height, groundPace, slopePace, wornPace, builtAt, bridges } from './terrain.js';
 
 const CELL = 2.5;
 const SQRT2 = 1.41421356;
@@ -101,6 +101,35 @@ export class NavGrid {
       for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++){
         if (!this.inb(c, r)) continue;
         if (Math.hypot(this.cxOf(c) - o.x, this.czOf(r) - o.z) < rad) walk[r * cols + c] = 0;
+      }
+    }
+    // the bridges: open along each deck's middle whatever the cells' centres fell on — a
+    // footbridge is narrower than two cells, and a deck's edge drops to the water beside it.
+    // So a route's waypoint in one of these cells is put on the deck's middle line, not the
+    // cell's centre: that can lie off the deck, beside its end or over the water, and anyone
+    // making for it went down the bank and pushed at the river (logs/here, 2026-11-10)
+    // And the bank alongside a deck is shut, a cell's width each side: where the bank hasn't yet
+    // dropped below the water it was open ground, and a route stepped up onto the deck over its rail.
+    // You go on at the end. (First, for every bridge, so it can't shut another's deck.)
+    for (const b of bridges()){
+      const dx = (b.bx - b.ax) / b.len, dz = (b.bz - b.az) / b.len, w = b.hw + this.cell;
+      for (let u = 0.5; u <= b.len - 0.5; u += 0.5) for (let v = -w; v <= w + 1e-6; v += 0.5){
+        const c = this.col(b.ax + dx * u - dz * v), r = this.row(b.az + dz * u + dx * v);
+        if (this.inb(c, r)) walk[r * cols + c] = 0;
+      }
+    }
+    this.onDeck = new Map();
+    for (const b of bridges()){
+      const dx = (b.bx - b.ax) / b.len, dz = (b.bz - b.az) / b.len, half = Math.min(b.hw - 0.6, 1.2);
+      for (let u = -1.5; u <= b.len + 1.5; u += 0.5) for (let v = -half; v <= half + 1e-6; v += 0.5){
+        const c = this.col(b.ax + dx * u - dz * v), r = this.row(b.az + dz * u + dx * v);
+        if (!this.inb(c, r)) continue;
+        const i = r * cols + c;
+        walk[i] = 1;
+        if (!this.onDeck.has(i)){
+          const along = Math.max(-1.5, Math.min(b.len + 1.5, (this.cxOf(c) - b.ax) * dx + (this.czOf(r) - b.az) * dz));
+          this.onDeck.set(i, [b.ax + dx * along, b.az + dz * along]);
+        }
       }
     }
   }
@@ -230,7 +259,7 @@ export class NavGrid {
     const cells = [];
     for (let i = gIdx; i !== -1; i = came[i]) cells.push(i);
     cells.reverse();
-    const pts = cells.map(i => [this.cxOf(i % cols), this.czOf((i / cols) | 0)]);
+    const pts = cells.map(i => this.onDeck?.get(i) ?? [this.cxOf(i % cols), this.czOf((i / cols) | 0)]);
     const gs = cells.map(i => gscore[i]);
     pts[pts.length - 1] = [gx, gz];          // end exactly at the target
     return this._smooth(pts, timed ? gs : null);
@@ -279,12 +308,12 @@ export class NavGrid {
       const t = k / n;
       if (!this.walkAt(this.col(a[0] + dx * t), this.row(a[1] + dz * t))) return false;
     }
-    // ...and no shortcut past a building's corner: the cells are coarser than a
-    // corner, so a straight run can clip one between their centres
+    // ...and no shortcut past a building's corner, nor over the water by a bridge's end: the
+    // cells are coarser than either, so a straight run can clip one between their centres
     const m = Math.ceil(dist / 0.6);
     for (let k = 1; k < m; k++){
-      const t = k / m;
-      if (builtAt(a[0] + dx * t, a[1] + dz * t, 0.6)) return false;
+      const t = k / m, x = a[0] + dx * t, z = a[1] + dz * t;
+      if (builtAt(x, z, 0.6) || height(x, z) <= WATER - 0.1) return false;
     }
     return true;
   }

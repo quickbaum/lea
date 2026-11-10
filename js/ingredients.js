@@ -43,6 +43,23 @@ export const INGREDIENTS = {
                temper: [1, -1], virtues: ['wisdom'], pic: ['sprites/items/hazelnut.png'], size: [1, 1], stack: 12, eat: { stamina: 5, sp: 2 } },
   chamomile: { hyph: 'chamo-mile', keep: 3, from: 'meadows', color: '#e6dea0',
                temper: [1, -1], virtues: ['soothing'], pic: ['flowers/flowers41.png', 'flowers/flowers13.png'], size: [1, 1], stack: 8, eat: { stamina: 3, health: 3 } },
+  // ---- what you take from what already grows (gen/wild.js, docs/forage.md "From what
+  // grows"): the player's alone for now, so no food group (the folk don't trade or crave
+  // them), and only a temper where I'm fairly sure of the old tables ----
+  'juniper berries': { hyph: 'juni-per berries', keep: 60, from: 'junipers', color: '#3b4866', temper: [3, -1], size: [1, 1], stack: 12 },
+  // raw elderberries upset the stomach; cooked, they're a remedy (the rob, recipes.js)
+  elderberries: { hyph: 'elder-berries', raw: true, keep: 2, from: 'elder bushes', color: '#2e1a34', size: [1, 1], stack: 8 },
+  elderflowers: { hyph: 'elder-flowers', keep: 1, from: 'elder bushes', color: '#efe6c4', size: [1, 1], stack: 6 },
+  'pine needles': { keep: 4, from: 'pines', color: '#6f7f4a', size: [1, 1], stack: 8 },
+  // the inner bark, the soft white layer under the scales: the famine bread of the north
+  'pine bark':  { raw: true, keep: 20, from: 'pines', color: '#c8a87a', size: [1, 2], stack: 4 },
+  // willow was cold and dry; its bark was boiled against fevers and aches
+  'willow bark': { keep: 30, from: 'willows', color: '#8a6a48', temper: [-1, -2], size: [1, 2], stack: 4 },
+  heather:   { label: 'heather tips', keep: 6, from: 'heath', color: '#9a5a8a', size: [1, 1], stack: 8 },
+  primroses: { hyph: 'prim-roses', keep: 1, from: 'woodland edge', color: '#f0e070', pic: ['flowers/flowers53.png'], size: [1, 1], stack: 8 },
+  // the violet is cold and moist in the first degree, in every table
+  violets:   { hyph: 'vio-lets', keep: 1, from: 'woodland edge', color: '#6a4aa0', temper: [-1, 1], pic: ['flowers/flowers49.png'], size: [1, 1], stack: 8 },
+
   roots:     { group: 'roots', raw: true, worth: 0.8, from: 'ground', dish: 'root stew', color: '#6f8f3a',
                temper: [1, -1], pic: ['sprites/items/roots.png'], size: [1, 2], stack: 3 },
   acorns:    { group: 'nuts', raw: true, worth: 0.4, from: 'oaks', dish: 'acorn porridge', color: '#9c6b35',
@@ -105,6 +122,9 @@ export const INGREDIENTS = {
   // anything raw, and are where most spell points come from. group 'dish': each is its
   // own for variety (vitals.js), and not a food group the folk trade by. ----
   'hazel porridge':  { group: 'dish', from: 'a cook', color: '#a07a4a', temper: [1, 0],  size: [2, 1], stack: 1, eat: { stamina: 30, sp: 4 } },
+  'elderberry rob':  { group: 'dish', from: 'a cook', color: '#3e1c3c', size: [1, 2], stack: 1, eat: { health: 14, sp: 3 } },
+  'primrose pottage': { group: 'dish', from: 'a cook', color: '#e2d27a', size: [2, 1], stack: 1, eat: { stamina: 26, sp: 4 } },
+  'violet pottage':  { group: 'dish', from: 'a cook', color: '#7e64a6', temper: [-1, 1], size: [2, 1], stack: 1, eat: { stamina: 24, health: 4, sp: 4 } },
   'bean broth':      { group: 'dish', from: 'a cook', color: '#6f7a40', temper: [0, 1],  size: [2, 1], stack: 1, eat: { stamina: 30, health: 5 } },
   'salted eel':      { group: 'dish', from: 'a cook', color: '#5a5640', temper: [0, -1], size: [2, 1], stack: 1, eat: { stamina: 25 } },
   'blindfish broth': { group: 'dish', from: 'a cook', color: '#b9c4c8', temper: [-1, 1], size: [2, 1], stack: 1, eat: { health: 15, sp: 6 } },
@@ -120,6 +140,12 @@ export const INGREDIENTS = {
   'fish stew':      { group: 'dish', from: 'a cook', color: '#a8a68a', size: [2, 1], stack: 1, eat: { stamina: 24, health: 3 } },
   'pottage':        { group: 'dish', from: 'a cook', color: '#6f7a40', size: [2, 1], stack: 1, eat: { stamina: 22, health: 3 } },
   'chamomile tea':  { group: 'dish', from: 'a cook', color: '#d8c56a', size: [1, 2], stack: 1, eat: { stamina: 8, health: 2 } },
+  // the hedge dishes: what anyone knows to make of what grows wild (recipes.js `hedge`)
+  'elderflower tea': { group: 'dish', from: 'a cook', color: '#e6dcaa', size: [1, 2], stack: 1, eat: { stamina: 6, health: 3 } },
+  'pine-needle tea': { group: 'dish', from: 'a cook', color: '#a9b072', size: [1, 2], stack: 1, eat: { stamina: 6, health: 4 } },
+  'willow-bark tea': { group: 'dish', from: 'a cook', color: '#9a7850', size: [1, 2], stack: 1, eat: { health: 12 } },
+  'heather tea':     { group: 'dish', from: 'a cook', color: '#b07a98', size: [1, 2], stack: 1, eat: { stamina: 8, health: 2 } },
+  'bark porridge':   { group: 'dish', from: 'a cook', color: '#9a7448', size: [2, 1], stack: 1, eat: { stamina: 16 } },
   'plain boil':     { group: 'dish', from: 'a cook', color: '#857a60', size: [2, 1], stack: 1, eat: { stamina: 14 } },
 
   // ---- the valuables (flora.js; trade.js VALUABLES): pretty things, worth a trade,
@@ -140,13 +166,16 @@ export const INGREDIENTS = {
   // folk's hunters keep them). Board and wire come up the road with the traders (js/traders.js) ----
   // elder's soft pith pushes out of a green stem, leaving a tube: the old pipe and whistle wood
   // cut from shrubs, stacked by a fire or laid into a new one (docs/cooking.md); use: lay a fire
-  wood: { label: 'firewood', group: 'material', use: 'fire', worth: 0.3, from: 'shrubs', color: '#6b4a2a', size: [1, 2], stack: 4 },
+  wood: { label: 'firewood', group: 'material', use: 'fire', worth: 0.3, from: 'shrubs', color: '#6b4a2a', pic: ['sprites/items/firewood.png'], size: [1, 2], stack: 4 },
   elder: { label: 'elder stem', group: 'material', worth: 0.5, from: 'elder bushes', color: '#8a7a4e', size: [1, 3], stack: 4,
            look: ['An elder stem', 'A straight green stem, soft at the heart.'] },
   hide:  { group: 'material', worth: 1.2, from: 'a kill', color: '#9a7a5a', size: [2, 2], stack: 2,
            look: ['A hide', 'Scraped clean and dried stiff.'] },
-  fleece: { group: 'material', worth: 1.5, from: 'shearing', color: '#d8ccb0', size: [3, 2], stack: 1,
+  fleece: { group: 'material', worth: 1.5, from: 'shearing', color: '#d8ccb0', pic: ['sprites/items/fleece.png'], size: [3, 2], stack: 1,
             look: ['A fleece', 'All in a piece, greasy and warm, and it smells of sheep.'] },
+  // wing feathers off the woodland floor (gen/flora.js finds): for tying flies (docs/fishing.md)
+  feathers: { group: 'material', worth: 0.2, from: 'woodland floor', color: '#8a6a48', size: [1, 1], stack: 12,
+              look: ['A feather', 'A wing feather, barred brown, lying in the leaf litter.'] },
   gut:   { group: 'material', worth: 0.8, from: 'a kill', color: '#d8c8a0', size: [1, 1], stack: 6,
            look: ['Gut string', 'Cleaned, twisted and dried into a cord.'] },
   board: { label: 'seasoned board', group: 'material', worth: 1.5, from: 'foreign parts', color: '#b08a5a', size: [1, 3], stack: 2,
@@ -192,6 +221,18 @@ export const INGREDIENTS = {
   // ---- keys (gen/under.js KEY_SETS; docs/under.md "Keys and chests"): the chapel crypt's
   // locked rooms, the bow of each the emblem on its doors. Kept after use, in the pack like
   // anything else for now (a key ring is wanted). Not food, not for trade ----
+  // ---- tackle (js/tackle.js, docs/fishing.md "Tackle"): the best one you carry is the one you fish
+  // with. Not food, not for the pot; a pole you make, a jointed rod you get off a villager who fishes ----
+  'fishing pole': { span: 2.2, group: 'tool', worth: 0.8, from: 'shrubs', color: '#8a6a3e', size: [1, 4], stack: 1,
+                    look: ['A fishing pole', 'A straight shoot, trimmed, a line tied off at the tip.'] },
+  'jointed rod':  { span: 2.6, group: 'tool', worth: 3, from: 'a village', color: '#6e4a2a', size: [1, 4], stack: 1,
+                    look: ['A jointed rod', 'Three lengths of ash, ferruled to fit, the top one hazel. Bends right down to the hand.'] },
+  // ---- cards (js/cards.js, docs/cards.md): foreign goods, off a trader on the road or out of an old
+  // chest. Carry one and anyone will sit down to a game; a fifth of the villagers have their own.
+  // The picture is the ace for now, until the Lea has its own deck ----
+  'pack of cards': { span: 0.3, group: 'tool', use: 'cards', worth: 2, from: 'foreign parts', color: '#7a1f1f', size: [1, 2], stack: 1,
+                     look: ['A pack of cards', 'Fifty-two, in four suits, soft at the corners from use.'], pic: ['sprites/cards/AS.png'] },
+
   'lancet key': { span: 0.42, group: 'key', use: 'unlock', size: [1, 1], stack: 1,
                   look: ['A lancet key', 'Iron, heavy, its bow worked as a lancet window.'], pic: ['sprites/keys/cathedral5.png'] },
   'vesica key': { span: 0.42, group: 'key', use: 'unlock', size: [1, 1], stack: 1,
@@ -209,7 +250,7 @@ export const RARE      = tableOf('rare');
 export const KEEP      = tableOf('keep');
 export const SNACK_KINDS  = kindsWhere(e => e.snack);
 export const KEEPER_KINDS = kindsWhere(e => e.snack === 'keep');
-export const FOOD_GROUP = tableOf('group', e => e.group && e.group !== 'garden' && e.group !== 'trinket' && e.group !== 'dish' && e.group !== 'instrument' && e.group !== 'material' && e.group !== 'key');
+export const FOOD_GROUP = tableOf('group', e => e.group && e.group !== 'garden' && e.group !== 'trinket' && e.group !== 'dish' && e.group !== 'instrument' && e.group !== 'material' && e.group !== 'key' && e.group !== 'tool');
 export const DISH_KINDS = kindsWhere(e => e.group === 'dish');
 export const CROP_KINDS = kindsWhere(e => e.group === 'garden');
 export const TRINKETS   = kindsWhere(e => e.group === 'trinket');

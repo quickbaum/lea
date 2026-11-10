@@ -160,13 +160,13 @@ export function makeTraders({ seed = 1, places = [], fars = [], road, pick = () 
   // trader's seen on the road rather than cutting across country
   function routeTo(t, q){
     const pts = [], here = t.at ? byId.get(t.at) : null;
-    if (here?.gate) pts.push(here.gate);
+    if (here?.gate) pts.push(...(here.lane || []), here.gate);   // down a long lane a hop at a time (traderSites)
     const a = posS(t), b = q.s, dir = b > a ? 1 : -1;
     for (let s = a + dir * TRADE.HOP; (b - s) * dir > TRADE.HOP * 0.5; s += dir * TRADE.HOP){
       const k = Math.max(0, Math.min(road.xs.length - 1, Math.round(s / road.step)));
       pts.push({ x: road.xs[k], z: road.zs[k], s });
     }
-    if (q.gate) pts.push(q.gate);
+    if (q.gate) pts.push(q.gate, ...(q.lane || []).slice().reverse());
     pts.push({ x: q.x, z: q.z, arrive: q.id });
     return pts;
   }
@@ -249,7 +249,7 @@ export function makeTraders({ seed = 1, places = [], fars = [], road, pick = () 
       // why: what they were at when the time ran out, and how much of the way they'd made
       const doing = n.convo ? 'talk' : n.actionLabel || 'idle';
       stats.lapsedDoing[doing] = (stats.lapsedDoing[doing] || 0) + 1;
-      if (stats.lapses.length < 20) stats.lapses.push({ who: n.name, job: j.kind, doing, target: n.brain?.target?.kind || null, day: +now.toFixed(2), of: +(j.d ?? 0).toFixed(0), left: +Math.hypot(j.x - n.x, j.z - n.z).toFixed(0), food: +(n.needs?.food ?? 0).toFixed(2), x: Math.round(n.x), z: Math.round(n.z), toX: Math.round(j.x), toZ: Math.round(j.z), path: n.brain?.path?.length ?? null, ferry: !!n.brain?._ferry, indoors: !!n._indoors, sleeping: !!n.sleeping, sitting: !!n.sitting });
+      if (stats.lapses.length < 40) stats.lapses.push({ who: n.name, job: j.kind, doing, target: n.brain?.target?.kind || null, day: +now.toFixed(2), of: +(j.d ?? 0).toFixed(0), left: +Math.hypot(j.x - n.x, j.z - n.z).toFixed(0), food: +(n.needs?.food ?? 0).toFixed(2), x: Math.round(n.x), z: Math.round(n.z), toX: Math.round(j.x), toZ: Math.round(j.z), path: n.brain?.path?.length ?? null, ferry: !!n.brain?._ferry, indoors: !!n._indoors, sleeping: !!n.sleeping, sitting: !!n.sitting });
       // that stretch again, unless it's beaten them twice: then on to the next
       if (j.pt && (j.tries || 0) < 1){ const t = heldBy.get(n); t.route.unshift(j.pt); t.retry = 1; }
       else if (j.pt?.arrive){ const t = heldBy.get(n); arrive(t, byId.get(j.pt.arrive), now); }
@@ -368,13 +368,25 @@ export function makeTraders({ seed = 1, places = [], fars = [], road, pick = () 
   return { name: 'trade', bias: 4.0, tol, work, list, jobs, tick, done, stats, resale, wanted, edible, observe, put, room, wealth, tip, of: n => heldBy.get(n) || null, stops };
 }
 
+// A lane's way points from the place out toward the road, a hop apart, stopping half a hop short of the end (the
+// gate's there). Some lanes run 700u; one leg that long is past what A* finds from the village end, and a trader
+// stood at the well for days (bublog lea-round-fixes). No `s` on them: they're not on the road.
+export function lanePoints(lane){
+  const pts = [], n = lane.xs.length;
+  let acc = 0, next = TRADE.HOP;
+  for (let k = 1; k < n; k++){
+    acc += Math.hypot(lane.xs[k] - lane.xs[k - 1], lane.zs[k] - lane.zs[k - 1]);
+    if (acc >= next && lane.length - acc > TRADE.HOP * 0.5){ pts.push({ x: lane.xs[k], z: lane.zs[k] }); next = acc + TRADE.HOP; }
+  }
+  return pts;
+}
 // Where the traders stop, from the world's own plan: each settlement, by the place its lane meets the road, and
 // each end of the road. (Used by the game and by the harness, so both have the same round.)
 export function traderSites({ S, road, walkable, radius, houses, placeNames = [], farNames = [] }){
   const places = S.places.map((p, i) => {
     const j = (S.junctions || []).find(q => q.place === p);
     return { id: `s${i}`, name: placeNames[i]?.name || `place ${i}`, x: p.well?.x ?? p.x, z: p.well?.z ?? p.z, s: j?.s ?? road.nearest(p.x, p.z).s, gate: j ? { x: j.x, z: j.z } : null,
-      houses: () => houses().filter(h => p.buildings.includes(h.b)) };
+      lane: j ? lanePoints(j.lane) : [], houses: () => houses().filter(h => p.buildings.includes(h.b)) };
   }).filter(p => p.houses().length);
   const fars = roadEnds(road, walkable, radius).map((e, i) => ({ id: `far${i}`, name: farNames[i] || `far ${i}`, ...e, ...farGoods(i) }));
   return { places, fars };

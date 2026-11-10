@@ -1,8 +1,10 @@
 // cook-view.js — sitting down at a fire to cook (docs/cooking.md). The world keeps running. The
 // camera, the pack and what comes out of the pot are main.js's; this is what's drawn over the
-// view: the recipe on a loose leaf, the place over the pot things are dropped, the one thing
-// the dish wants doing now. All the cooking itself is recipes.js potAct.
-//   const cook = makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, onFeed, onDouse, mayDouse, book });
+// view: the recipe on a loose leaf, the place over the pot things are dropped and stirred, the
+// board where prep is done by hand (tap, rub, pull, press), the one thing the dish wants doing
+// now. All the cooking itself is recipes.js potAct.
+//   const cook = makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, onFeed, onDouse, mayDouse, book, onStir });
+//   (onStir(angle): each move of a stir, its angle round the pot on screen, for the spoon)
 //   cook.open(fire), cook.close(), cook.tick(dt, { x, y, r }), cook.drop(box, ev) → did it land?
 // Stage 2 lets you use any empty pot; asking first comes with the rest of the NPC pots.
 
@@ -12,28 +14,99 @@ import { ensureCss } from './page.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+// the work on the board is done a piece at a time, by the step's gesture (recipes.js `how`)
+const TAP_N = 10, RUB_PX = 720, PULL_PX = 60, PULLS = 3, STIR_TURNS = 2;   // (a piece takes PULLS pulls, of PULL_PX each)
+const HOW_SAYS = { tap: 'tap each one on the board', rub: 'rub them on the board', pull: 'pull each one along the board', press: 'hold on the board' };
+// what some recipe puts in a pot, whether or not it's food on its own (pine needles, willow bark: gen/wild.js)
+const IN_RECIPE = new Set(Object.values(RECIPES).flatMap(R => [...R.base, ...R.steps.flatMap(s => s.item || [])]));
 const SLIP = { caught: 'caught a little', without: 'did without' };
 const WHY = { 'not-yours': who => who ? `That's ${who}'s pot.` : "That's someone's pot.", cold: () => 'The fire is out.', ready: () => 'It wants ladling out first.',
               'prep-first': () => 'That wants working first, on the board.', 'straight-in': () => 'There is nothing to work there. It goes straight in the pot.',
               'too-late': () => 'Too late to add more of that.', full: () => 'The pot is full.', wrong: () => "That isn't what it wants.", 'not-yet': () => 'Not yet.', 'no-step': () => 'There is nothing to do but wait.' };
 
-export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, onFeed, onDouse, mayDouse, book }){
+export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, onFeed, onDouse, mayDouse, book, onStir }){
   ensureCss();
   let fire = null, chosen = null, paper = null, paperKey = '', working = false, sayT = 0, lastState = '';
   const root = el('div', 'cook hide'); root.id = 'cook';
   const zone = el('div', 'cook-zone'), says = el('div', 'cook-says'), saysMain = el('div'), saysFire = el('div', 'cook-fireline'), controls = el('div', 'cook-controls'), board = el('div', 'cook-board');
   says.append(saysMain, saysFire);
   root.append(zone, board, says, controls);
-  // the board across your knees: what a dish's first work is done on, before anything goes in the pot.
-  // Hold on it to work.
-  board.onpointerdown = e => { if (fire?.pot.board && potView(fire.pot).now?.do === 'prep'){ working = true; e.preventDefault(); } };
   document.body.appendChild(root);
 
-  const stopWork = () => { working = false; };   // (let go anywhere)
-  addEventListener('pointerup', stopWork); addEventListener('pointercancel', stopWork);
+  // ---- the board across your knees: a dish's first work, before anything goes in the pot ------------
+  // Each unit on it is a piece, worked by the step's gesture: tapped (a stroke a tap), rubbed, pulled
+  // along, or held on (press). pieces[i] is the work done on piece i, a whole 1 for each gesture in
+  // the step's `how`; one gesture's work is done before the next's starts. The pot's own clock
+  // (p.st) is kept at the share of the pieces' work that's done, so the sim is the same as ever.
+  let pieces = [], grip = null;
+  const prepNow = () => { const now = fire?.pot.board && fire.pot.raw > 0 && potView(fire.pot).now; return now?.do === 'prep' ? now : null; };
+  const phase = (i, hw) => Math.min(hw.length - 1, Math.floor(pieces[i]));
+  const wants = (i, hw, g) => pieces[i] < hw.length && hw[phase(i, hw)] === g;
+  const chips = () => board.querySelectorAll('.cook-chip');
+  // the piece under the pointer if it wants this gesture, else the nearest that does
+  function pick(ev, g, hw){
+    let best = -1, bd = Infinity;
+    chips().forEach((c, i) => {
+      if (!wants(i, hw, g)) return;
+      const r = c.getBoundingClientRect(), d = Math.hypot(ev.clientX - r.left - r.width / 2, ev.clientY - r.top - r.height / 2);
+      if (d < bd){ bd = d; best = i; }
+    });
+    return best;
+  }
+  function work(i, gain, now){
+    pieces[i] = Math.min(Math.floor(pieces[i]) + 1, pieces[i] + gain);
+    drawChip(i, now);
+    const total = pieces.length * now.how.length, done = pieces.reduce((a, b) => a + b, 0);
+    const want = done >= total - 1e-6 ? now.t + 1e-3 : now.t * done / total;
+    if (want > fire.pot.st) act('prep', want - fire.pot.st);
+  }
+  const overBoard = ev => { const b = board.getBoundingClientRect(); return ev.clientX >= b.left && ev.clientX <= b.right && ev.clientY >= b.top && ev.clientY <= b.bottom; };
+  board.onpointerdown = e => {
+    const now = prepNow(); if (!now) return;
+    e.preventDefault(); try { board.setPointerCapture(e.pointerId); } catch {}
+    const hw = now.how, t = pick(e, 'tap', hw);
+    if (t >= 0){ work(t, 1 / (now.n || TAP_N), now); chips()[t]?.animate([{ transform: 'translateY(2px) scale(.92)' }, { transform: 'none' }], { duration: 110 }); }
+    grip = { x: e.clientX, y: e.clientY, lx: e.clientX, ly: e.clientY, pull: pick(e, 'pull', hw), pulled: 0 };
+    if (grip.pull >= 0) grip.from = pieces[grip.pull];
+    working = pieces.some((_, i) => wants(i, hw, 'press'));
+  };
+  board.onpointermove = e => {
+    const now = prepNow(); if (!grip || !now) return;
+    const hw = now.how, d = Math.hypot(e.clientX - grip.lx, e.clientY - grip.ly);
+    grip.lx = e.clientX; grip.ly = e.clientY;
+    if (overBoard(e)){ const i = pick(e, 'rub', hw); if (i >= 0){ work(i, d / RUB_PX, now); const c = chips()[i]; if (c) c.style.rotate = `${(Math.random() - .5) * 16}deg`; } }
+    if (grip.pull >= 0){                                   // pulled along: as far as it's drawn from where you took it
+      const i = grip.pull, c = chips()[i], dx = e.clientX - grip.x, dy = e.clientY - grip.y, far = Math.hypot(dx, dy);
+      const gain = Math.min(1, far / PULL_PX) / PULLS - grip.pulled;
+      if (gain > 0){ grip.pulled += gain; work(i, gain, now); }
+      if (c){ const k = Math.min(1, 12 / Math.max(1, far)); c.style.translate = `${dx * k}px ${dy * k}px`; }
+      if (pieces[i] >= Math.floor(grip.from) + 1){ if (c) c.style.translate = ''; grip.pull = -1; }   // that one's done; take hold of the next
+    }
+  };
+  const letGo = () => { if (grip?.pull >= 0) { const c = chips()[grip.pull]; if (c) c.style.translate = ''; } grip = null; working = false; };
+  board.onpointerup = board.onpointercancel = letGo;
+  addEventListener('pointerup', letGo); addEventListener('pointercancel', letGo);   // (let go anywhere)
+
+  // ---- stirring: round and round in the pot -------------------------------------------------------------
+  let stirA = null, stirTurn = 0;
+  const stirNow = () => fire && mine() && fire.pot.raw > 0 && potView(fire.pot).now?.do === 'stir';
+  const angleAt = e => { const r = zone.getBoundingClientRect(), dx = e.clientX - r.left - r.width / 2, dy = e.clientY - r.top - r.height / 2;
+                         return Math.hypot(dx, dy) < r.width * 0.12 ? null : Math.atan2(dy, dx); };   // (through the middle isn't round)
+  zone.onpointerdown = e => { if (!stirNow()) return; e.preventDefault(); try { zone.setPointerCapture(e.pointerId); } catch {} stirA = angleAt(e); stirring = true; };
+  zone.onpointermove = e => {
+    if (!stirring || !stirNow()) return;
+    const a = angleAt(e); if (a == null) return;
+    onStir?.(a);
+    if (stirA != null){ let d = a - stirA; d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI; stirTurn += d; }   // one way round counts; back and forth doesn't
+    stirA = a;
+    root.style.setProperty('--stir', Math.min(1, Math.abs(stirTurn) / (2 * Math.PI * STIR_TURNS)));
+    if (Math.abs(stirTurn) >= 2 * Math.PI * STIR_TURNS){ stirring = false; stirTurn = 0; act('stir'); }
+  };
+  let stirring = false;
+  zone.onpointerup = zone.onpointercancel = () => { stirring = false; stirA = null; };
 
   function open(f){
-    fire = f; chosen = null; paperKey = ''; working = false; sayT = 0;
+    fire = f; chosen = null; paperKey = ''; working = false; sayT = 0; pieces = []; boardKey = ''; grip = null; stirTurn = 0;
     f.hands = true;
     root.classList.remove('hide');
     refresh();
@@ -41,7 +114,7 @@ export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, 
   }
   function close(){
     if (!fire) return;
-    fire.hands = false; fire = null; working = false;
+    fire.hands = false; fire = null; working = false; grip = null; stirring = false;
     root.classList.add('hide');
     if (paper){ const leaf = paper; paper = null; (book?.receive(leaf) || Promise.resolve()).then(() => leaf.remove()); }
   }
@@ -84,7 +157,7 @@ export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, 
   }
   function drawRecipe(id, view){
     const R = RECIPES[id], cooking = !empty();
-    paper.appendChild(el('div', 'page-running', R.book ? 'Copied from an old book' : 'As the folk make it'));
+    paper.appendChild(el('div', 'page-running', R.book ? 'Copied from an old book' : R.hedge ? 'As anyone makes it' : 'As the folk make it'));
     paper.appendChild(el('h2', 'page-title', cap(id)));
     if (R.intro) paper.appendChild(el('p', 'page-first', R.intro));
     paper.appendChild(el('p', 'cook-take', `Take ${R.base.join(' or ')}.`));
@@ -109,13 +182,12 @@ export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, 
     const key = `${mine()}|${p.ready > 0}|${now ? now.do + now.say : ''}`;
     if (key === controlsKey) return;
     controlsKey = key;
-    controls.textContent = ''; working = false;
+    controls.textContent = ''; stirTurn = 0; root.style.setProperty('--stir', 0);
     if (p.ready > 0 && mine()){
       controls.append(button('Ladle it into your pack', () => { onLadle(fire); refresh(); }), button('Eat a bowl', () => { onEat(fire); refresh(); }));
     } else if (empty()) controls.append(douseButton());
     else if (now && mine()){
-      if (now.do === 'stir') controls.append(button('Stir', () => act('stir')));
-      else if (now.do === 'add') controls.append(button('Do without it', () => act('without')));
+      if (now.do === 'add') controls.append(button('Do without it', () => act('without')));
     }
   }
   // putting a fire out: arms first (a second click, within a moment, does it)
@@ -144,8 +216,8 @@ export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, 
     if (p.ready > 0) return fire.potReport();
     if (!now) return 'It boils.';
     if (now.do === 'add') return `It wants ${now.item.join(' or ')}: drag it in.`;
-    if (now.do === 'prep') return `${cap(now.say)}: hold on the board.`;
-    if (now.do === 'stir') return 'Stir it, before it catches.';
+    if (now.do === 'prep'){ const i = pieces.findIndex((_, i) => pieces[i] < now.how.length); return `${cap(now.say)}: ${HOW_SAYS[now.how[i >= 0 ? phase(i, now.how) : 0]] || HOW_SAYS.press}.`; }
+    if (now.do === 'stir') return 'Stir it round the pot, before it catches.';
     return `${cap(now.say)}.`;
   }
   // the board shows what's on it, one chip to a unit; once worked, they fly to the pot
@@ -154,18 +226,41 @@ export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, 
     const p = fire.pot, up = empty() || !!p.board;
     if (!up && boardKey && boardKey !== 'off') tipIn();
     board.classList.toggle('off', !up);
-    const key = up ? `${p.kind}|${p.board ? p.raw : 0}` : 'off';
+    const now = p.board && prepNow();
+    const key = up ? `${p.kind}|${p.board ? p.raw : 0}|${now ? now.how.join() : ''}` : 'off';
     if (key === boardKey) return;
     boardKey = key;
     board.textContent = '';
-    if (!up) return;
-    if (!p.board){ board.append(el('span', 'cook-board-hint', 'Work it here')); return; }
-    const e = ingredient(p.kind) || {};
+    if (!up || !now){ pieces = []; if (up) board.append(el('span', 'cook-board-hint', 'Work it here')); return; }
+    // a piece put on now starts fresh; on sitting back down, the work so far is shared out evenly
+    const was = pieces.length ? null : Math.min(1, p.st / now.t) * now.how.length;
+    while (pieces.length < p.raw) pieces.push(was ?? 0);
+    pieces.length = p.raw;
+    const e = ingredient(p.kind) || {}, n = now.how.includes('tap') ? now.n || TAP_N : 1;
     for (let i = 0; i < p.raw; i++){
       const c = el('span', 'cook-chip'); c.style.setProperty('--tint', e.color || '#8a7a50');
-      if (e.pic){ const im = el('img'); im.src = e.pic[0]; im.draggable = false; im.alt = ''; c.append(im); }
+      for (let j = 0; j < n; j++){                          // cut into n slivers, that part as it's chopped
+        const sl = el('span', 'cook-sliver');
+        if (n > 1) sl.style.clipPath = `inset(0 ${100 * (n - 1 - j) / n}% 0 ${100 * j / n}%)`;
+        if (e.pic){ const im = el('img'); im.src = e.pic[0]; im.draggable = false; im.alt = ''; sl.append(im); }
+        c.append(sl);
+      }
       board.append(c);
+      drawChip(i, now);
     }
+  }
+  // how a piece looks for the work done on it
+  function drawChip(i, now){
+    const c = chips()[i]; if (!c) return;
+    const hw = now.how, w = pieces[i], part = g => { const k = hw.indexOf(g); return k < 0 ? 0 : Math.max(0, Math.min(1, w - k)); };
+    const sl = c.querySelectorAll('.cook-sliver'), cuts = Math.round(part('tap') * sl.length);
+    sl.forEach((s, j) => { s.style.translate = sl.length > 1 ? `${(Math.min(j, cuts) - cuts / 2) * Math.min(2.5, 20 / sl.length)}px 0` : ''; });
+    const rub = part('rub');
+    c.style.filter = rub ? `brightness(${0.8 + 0.35 * rub}) saturate(${1 - 0.3 * rub})` : '';
+    c.style.scale = rub ? `${1 - 0.18 * rub}` : '';
+    c.classList.toggle('pulled', part('pull') > 0);
+    c.style.setProperty('--pull', part('pull'));
+    c.classList.toggle('done', w >= hw.length);
   }
   function tipIn(){
     const z = zone.getBoundingClientRect();
@@ -176,7 +271,7 @@ export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, 
       fly.animate({ transform: `translate(${z.left + z.width / 2 - r.left}px, ${z.top + z.height / 2 - r.top}px) scale(.5)`, opacity: .2 }, { duration: 380, easing: 'cubic-bezier(.45, .05, .55, .95)' }).onfinish = () => fly.remove();
     }
   }
-  function refresh(){ if (!fire) return; drawPaper(); drawControls(); drawBoard(); saysMain.textContent = saysNow(); saysFire.textContent = fire.lit ? fireWords() : ''; }
+  function refresh(){ if (!fire) return; zone.classList.toggle('stir', !!stirNow()); drawPaper(); drawControls(); drawBoard(); saysMain.textContent = saysNow(); saysFire.textContent = fire.lit ? fireWords() : ''; }
 
   // ---- each frame -------------------------------------------------------------------------------
   function tick(dt, at){
@@ -186,7 +281,8 @@ export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, 
       zone.style.cssText = `left:${px - r}px;top:${py - r}px;width:${2 * r}px;height:${2 * r}px`;
       board.style.left = `${stacked ? px + r + 8 : px - w / 2}px`; board.style.top = `${stacked ? py - h / 2 : py + r + 8}px`;   // under the pot, or beside it if the pack is under both
     }
-    if (working) act('prep', dt);
+    const pressing = working && prepNow();                 // held on: every piece that wants pressing, together
+    if (pressing) pieces.forEach((_, i) => { if (wants(i, pressing.how, 'press')) work(i, dt * pressing.how.length / pressing.t, pressing); });
     const now = fire.pot.raw > 0 && potView(fire.pot).now;
     root.style.setProperty('--frac', now ? now.frac : 0);
     const state = `${fire.pot.step}|${fire.pot.raw}|${fire.pot.ready}`;    // a step gone by shows at once; the rest can lag a little
@@ -209,7 +305,7 @@ export function makeCookView({ world, pack, known, cookOf, say, onEat, onLadle, 
       if (onBoard){ say('That goes in the pot.'); return true; }
       got = act('add', kind);
     }
-    else if (!(e.raw || e.eat) || e.group === 'dish' || e.group === 'trinket'){ say("That won't go in a pot."); return true; }
+    else if (!(e.raw || e.eat || IN_RECIPE.has(kind)) || e.group === 'dish' || e.group === 'trinket'){ say("That won't go in a pot."); return true; }   // (the hedge things aren't food, but teas are made of them)
     else if (empty()){
       const take = known().filter(id => RECIPES[id].base.includes(kind));
       if (chosen && !take.includes(chosen)){ say("That isn't what this wants. Turn the leaf to make something else."); return true; }

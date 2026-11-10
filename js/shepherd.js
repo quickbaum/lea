@@ -7,7 +7,7 @@
 // pipe: the flock has a tune it knows as its call, which is how they're moved and brought in, and a lost sheep that hears it comes.
 // Sitting, they play for themselves, and while they do they're slower to notice things. Nomad shepherds aren't here yet.
 import { dayRound, temperament } from './plans.js';
-import { giveInstrument, phrasesKnown, phraseCount, learnTune, drilled, tunesOf, playThrough } from './music-sim.js';
+import { giveInstrument, phrasesKnown, phraseCount, learnTune, drilled, tunesOf, playThrough, playOut } from './music-sim.js';
 import { FOLK_TUNES } from './tunes.js';
 
 // who keeps them: out of the household with the most hands, someone it can spare, and the steadiest of those. The parents
@@ -170,7 +170,7 @@ function pipe(round, n, now, dt){
   else if (!n.sitting) return;                                // for themselves, only sitting down
   if ((P.gap -= dt) > 0) return;
   const mine = tunesOf(n, now), id = call || !mine.length ? f.call : mine[Math.floor(Math.random() * mine.length)];
-  P.id = id; P.go = playThrough(n, id, now);
+  P.id = id; const go = P.go = playOut(n, id, now, () => n.piping?.go === go) ?? null;   // whoever's free nearby may join in (music-sim.js)
   if (!P.go) P.gap = IDLE_GAP[0];
 }
 

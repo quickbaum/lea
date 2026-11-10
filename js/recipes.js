@@ -1,6 +1,8 @@
 // recipes.js — dishes as steps, and who knows them. A pot over a fire works
 // through its dish one step at a time (stepPot, from Campfire.update):
-//   prep  — work someone at the fire does (crack the acorns); helpers speed it
+//   prep  — work someone at the fire does (crack the acorns); helpers speed it. `how` is
+//           the player's gesture on the board (cook-view.js): 'tap' (n strokes a piece, default 10),
+//           'rub', 'pull', 'press' (hold; the default), or a list of them in turn
 //   wait  — time on the fire
 //   stir  — must be done by someone who knows to, before the step's time runs out
 //   add   — an ingredient someone at the fire carries goes in (berries at the end)
@@ -25,29 +27,29 @@ import { RAW_KINDS, RARE } from './ingredients.js';
 
 export const RECIPES = {
   'acorn porridge': { base: ['acorns'], steps: [
-    { do: 'prep', t: 7,  say: 'crack the acorns' },
+    { do: 'prep', t: 7,  how: 'tap', n: 5, say: 'crack the acorns' },
     { do: 'wait', t: 10, say: 'let it simmer' },
     { do: 'stir', t: 7,  say: 'stir it' },
     { do: 'add',  t: 12, item: ['berries'], say: 'berries at the end' },
     { do: 'wait', t: 4,  say: 'let it sit' },
   ] },
   'rabbit stew': { base: ['meat'], steps: [
-    { do: 'prep', t: 9,  say: 'joint the rabbit' },
+    { do: 'prep', t: 9,  how: 'tap', n: 8, say: 'joint the rabbit' },
     { do: 'add',  t: 12, item: ['roots', 'cattail root'], say: 'some roots' },
     { do: 'wait', t: 10, say: 'let it simmer' },
     { do: 'stir', t: 7,  say: 'stir it' },
-    { do: 'add',  t: 12, item: ['mushrooms', 'morels'], say: 'mushrooms near the end' },
+    { do: 'add',  t: 12, item: ['mushrooms', 'morels', 'juniper berries'], say: 'mushrooms near the end, or a few juniper berries' },
     { do: 'wait', t: 4,  say: 'let it sit' },
   ] },
   'root stew': { base: ['roots', 'cattail root', 'morels'], steps: [
-    { do: 'prep', t: 6,  say: 'scrub the roots' },
+    { do: 'prep', t: 6,  how: 'rub', say: 'scrub the roots' },
     { do: 'wait', t: 12, say: 'let it boil' },
     { do: 'stir', t: 7,  say: 'stir it' },
   ] },
   // what's caught on the bank (docs/fishing.md), with an onion from a village if
   // anyone has one, or a root
   'fish stew': { base: ['fish', 'eels'], steps: [
-    { do: 'prep', t: 6,  say: 'gut the fish' },
+    { do: 'prep', t: 6,  how: 'pull', say: 'gut the fish' },
     { do: 'wait', t: 8,  say: 'let it simmer' },
     { do: 'add',  t: 10, item: ['onions', 'leeks', 'roots', 'cattail root'], say: 'an onion or a root' },
     { do: 'wait', t: 4,  say: 'let it sit' },
@@ -56,7 +58,7 @@ export const RECIPES = {
   // the wild in it if there's any to be had (trade.js, docs/trade.md). Villagers
   // grow up knowing it; the folk learn it in talk.
   'pottage': { base: ['turnips', 'parsnips', 'cabbages', 'onions', 'leeks', 'beans', 'peas'], village: true, steps: [
-    { do: 'prep', t: 6,  say: 'chop the greens' },
+    { do: 'prep', t: 6,  how: 'tap', say: 'chop the greens' },
     { do: 'wait', t: 10, say: 'let it boil' },
     { do: 'add',  t: 10, item: ['meat', 'fish', 'eels', 'mushrooms', 'morels', 'roots', 'hazelnuts'], say: 'something from the wild, if there is any' },
     { do: 'stir', t: 7,  say: 'stir it' },
@@ -65,33 +67,76 @@ export const RECIPES = {
   'chamomile tea': { base: ['chamomile'], warms: true, steps: [
     { do: 'wait', t: 8,  say: 'steep the flowers' },
   ] },
+  // Hedge dishes: what anyone knows to make of what grows wild (gen/wild.js). The player
+  // knows them from the start (main.js recipesRead). The folk aren't born knowing them, and
+  // never crave them: they don't gather what goes in them (docs/forage.md "From what grows").
+  'elderflower tea': { hedge: true, base: ['elderflowers'], warms: true, steps: [
+    { do: 'wait', t: 8,  say: 'steep the flowers' },
+  ] },
+  'pine-needle tea': { hedge: true, base: ['pine needles'], warms: true, steps: [
+    { do: 'prep', t: 5,  how: 'tap', n: 6, say: 'bruise the needles' },
+    { do: 'wait', t: 8,  say: 'steep them' },
+  ] },
+  'willow-bark tea': { hedge: true, base: ['willow bark'], warms: true, steps: [
+    { do: 'prep', t: 6,  how: 'pull', say: 'shave the bark' },
+    { do: 'wait', t: 12, say: 'boil it till it\'s bitter' },
+  ] },
+  'heather tea': { hedge: true, base: ['heather'], warms: true, steps: [
+    { do: 'wait', t: 8,  say: 'steep the tips' },
+  ] },
+  // pine bark meal stretched the flour in hungry years; here acorns or nuts stretch the bark
+  'bark porridge': { hedge: true, base: ['pine bark'], steps: [
+    { do: 'prep', t: 8,  how: 'tap', n: 8, say: 'pound the inner bark to meal' },
+    { do: 'wait', t: 10, say: 'let it simmer' },
+    { do: 'add',  t: 10, item: ['acorns', 'hazelnuts', 'roots'], say: 'acorns or nuts to stretch it' },
+    { do: 'stir', t: 7,  say: 'stir it' },
+  ] },
   // Found in books, not known: the kitchen books on the crypts' shelves (gen/under.js
   // shelves(), docs/under.md "Books"). Nobody is born knowing them (`book`), so they stay
   // out of the folk's pots and cravings until they're taught. Some want what only a hard
   // place gives (RARE); `intro` is the book's own opening line.
   'foxfire draught': { book: true, base: ['foxfire'], intro: 'Of the shining cap that grows in the deep places, and a draught of it against the dark.', steps: [
-    { do: 'prep', t: 6,  say: 'slice the foxfire thin' },
+    { do: 'prep', t: 6,  how: 'tap', n: 12, say: 'slice the foxfire thin' },
     { do: 'wait', t: 10, say: 'simmer them till the shine goes out of the water' },
     { do: 'add',  t: 10, item: ['chamomile'], say: 'chamomile to settle it' },
     { do: 'wait', t: 6,  say: 'let it stand' },
   ] },
   'blindfish broth': { book: true, base: ['blindfish'], intro: 'Of the white fish of the under-lakes, that never saw the sun.', steps: [
-    { do: 'prep', t: 6,  say: 'clean the fish' },
+    { do: 'prep', t: 6,  how: 'pull', say: 'clean the fish' },
     { do: 'add',  t: 10, item: ['cave salt'], say: 'a pinch of the cave salt' },
     { do: 'wait', t: 10, say: 'let it simmer' },
     { do: 'add',  t: 10, item: ['leeks', 'onions', 'roots'], say: 'a leek or a root' },
     { do: 'stir', t: 7,  say: 'stir it' },
   ] },
   'salted eel': { book: true, base: ['eels'], intro: 'To keep eels through the winter, as the cellarer did.', steps: [
-    { do: 'prep', t: 8,  say: 'skin the eels' },
+    { do: 'prep', t: 8,  how: 'pull', say: 'skin the eels' },
     { do: 'add',  t: 10, item: ['cave salt'], say: 'rub them with cave salt' },
     { do: 'wait', t: 12, say: 'smoke them slowly' },
   ] },
   'hazel porridge': { book: true, base: ['hazelnuts'], intro: 'A porridge for fast days, of hazelnuts.', steps: [
-    { do: 'prep', t: 7,  say: 'crack and grind the nuts' },
+    { do: 'prep', t: 7,  how: ['tap', 'rub'], n: 5, say: 'crack and grind the nuts' },
     { do: 'wait', t: 10, say: 'let it simmer' },
     { do: 'stir', t: 7,  say: 'stir it' },
     { do: 'add',  t: 10, item: ['berries'], say: 'berries if there are any' },
+  ] },
+  'elderberry rob': { book: true, base: ['elderberries'], intro: 'A rob of elderberries, to be kept against the cough and the cold months.', steps: [
+    { do: 'prep', t: 6,  how: 'rub', say: 'strip the berries from their stalks' },
+    { do: 'wait', t: 12, say: 'boil them down slowly' },
+    { do: 'stir', t: 7,  say: 'stir it, lest it catch' },
+    { do: 'wait', t: 6,  say: 'let it thicken' },
+  ] },
+  // the flower pottages are made with almond milk in the old books; the hazel stands in
+  'primrose pottage': { book: true, base: ['primroses'], intro: 'A pottage of primroses, for the spring.', steps: [
+    { do: 'prep', t: 6,  how: 'rub', say: 'bray the flowers' },
+    { do: 'add',  t: 10, item: ['hazelnuts'], say: 'hazelnuts, ground, for the milk' },
+    { do: 'wait', t: 10, say: 'let it simmer' },
+    { do: 'stir', t: 7,  say: 'stir it' },
+  ] },
+  'violet pottage': { book: true, base: ['violets'], intro: 'A pottage of violets, cold and moist, for hot days.', steps: [
+    { do: 'prep', t: 6,  how: 'pull', say: 'pick the flowers from their stalks' },
+    { do: 'add',  t: 10, item: ['hazelnuts'], say: 'hazelnuts, ground, for the milk' },
+    { do: 'wait', t: 10, say: 'let it simmer' },
+    { do: 'stir', t: 7,  say: 'stir it' },
   ] },
   'bean broth': { book: true, base: ['beans', 'peas'], intro: 'The brothers\' broth, of beans.', steps: [
     { do: 'wait', t: 12, say: 'soak and boil the beans' },
@@ -105,6 +150,7 @@ export const RECIPES = {
 // and the like later), and the foods that must be cooked: both are ingredients.js's now
 export { RARE, RAW_KINDS };
 export const BOOK_RECIPES = Object.keys(RECIPES).filter(id => RECIPES[id].book);
+export const HEDGE_RECIPES = Object.keys(RECIPES).filter(id => RECIPES[id].hedge);
 export const recipeFor = kind => Object.keys(RECIPES).find(id => !RECIPES[id].book && RECIPES[id].base.includes(kind)) || null;   // (a book's dish isn't known: docs/under.md "Books")
 
 const AT_FIRE      = 3.5;    // close enough to the pot to work at it
@@ -127,7 +173,7 @@ function cookbook(n){
   const home = n.group ? 'g' + n.group.id : 'n' + n.id;
   const elder = n.role === 'elder' || n.role === 'mother' || n.role === 'father';
   for (const id in RECIPES){
-    if (RECIPES[id].book) continue;                // found in books, never grown up with
+    if (RECIPES[id].book || RECIPES[id].hedge) continue;   // found in books, never grown up with; the hedge dishes, the folk don't gather for
     const born = RECIPES[id].village ? !!n.home : hash01(home, 'r:' + id) < (elder ? 0.85 : 0.6);   // a village dish: every household knows it, nobody else does
     if (born) n.recipes.set(id, { heritage: true });
   }
@@ -176,6 +222,7 @@ export function startPot(p, kind, by = null, now = 0){
   p.recipe = (by && bookDishFor(by, kind, now)) || recipeFor(kind); p.step = 0; p.st = 0; p.stall = 0; p.q = 1;
   p.helpers = new Map(); p.missing = null; p.fetching = 0; p.stuck = false;
   p.mine = false; p.helper = false; p.holdT = 0; p.slips = {}; p.noted = false; p.board = false;
+  p.added = [];                                    // what's gone in after the base, in order (the close view floats it)
 }
 
 export function stepPot(f, w, dt){
@@ -218,9 +265,10 @@ export function stepPot(f, w, dt){
     next(p);                                       // someone who knows to has stirred it
   } else if (s.do === 'add'){
     const giver = here.find(n => carries(n, s.item));
-    if (giver){ takeOne(giver, carries(giver, s.item), now); next(p); return; }
+    if (giver){ const k = carries(giver, s.item); takeOne(giver, k, now); (p.added ||= []).push(k); next(p); return; }
     const proj = w.projects && w.projects.find(q => q.fire === f && q.stash.size);   // or from a shared plan's basket
-    if (proj && proj.takeStash(s.item, 1).n > 0){ next(p); return; }
+    const got = proj && proj.takeStash(s.item, 1);
+    if (got && got.n > 0){ (p.added ||= []).push(got.kind); next(p); return; }
     p.missing = s.item;
     if ((p.st += dt) >= (p.fetching > 0 ? FETCH_WAIT : ADD_WAIT)){ p.q -= Q_ADD; tally(w, 'without'); next(p); }   // done without
   }
@@ -293,7 +341,7 @@ export function potAct(f, w, act, arg){
   if (act === 'add'){
     if (s.do !== 'add') return no('not-yet');
     if (!s.item.includes(arg)) return no('wrong');
-    next(p);
+    (p.added ||= []).push(arg); next(p);
     return { ok: true, took: { kind: arg, n: 1 } };
   }
   if (act === 'stir'){
@@ -321,7 +369,8 @@ export function potView(p){
     state: !cooking || i < p.step ? 'done' : i === p.step ? 'now' : 'todo' }));
   const s = cooking && r ? r.steps[p.step] : null;
   return { dish: potDish(p), recipe: p.recipe || null, mine: !!p.mine, helper: !!p.helper, board: !!p.board, raw: p.raw, ready: p.ready, q: Math.max(0, p.q ?? 1),
-           steps, now: s ? { do: s.do, say: s.say, item: s.item || null, frac: Math.min(1, p.st / s.t) } : null };
+           steps, now: s ? { do: s.do, say: s.say, item: s.item || null, t: s.t, frac: Math.min(1, p.st / s.t),
+                       how: s.do === 'prep' ? [].concat(s.how || 'press') : null, n: s.n || null } : null };
 }
 
 // ---- what talk reads -------------------------------------------------------------

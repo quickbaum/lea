@@ -11,7 +11,7 @@
 //   book.goto(name)                           flip to the page with data-anchor="name"; a click on [data-goto] does this
 //   book.key(e)                               a keydown while open; true if the book took it
 //   book.say(text)                            a word under the book, for a moment
-//   book.close(); book.isOpen                 closed, it isn't gone: it lies tilted in the bottom right corner, half off the window
+//   book.close(); book.isOpen                 closed, it isn't gone: it lies tilted in the bottom left corner, half off the window
 //   book.dock()                               make it, small, before anything opens it
 //   book.receive(el)                          el flies into it, put away; a promise for the landing
 //
@@ -42,7 +42,7 @@ const BEND = 7;            // degrees each slice lags the one before, at the hei
 const TURN_MS = 680, RIFFLE_MS = 520, RIFFLE_GAP = 85, RIFFLE_MAX = 6;
 const TAB_H = .105, TAB_W = .154, TAB_STEP = .114, TAB_TOP = .075, TAB_ROOT = -8;   // a tab's size and spacing, of the page's height; its inner end, px from the page's box (tucked under the top page)
 const HINT = '← → or a folded corner to turn · a tab for its section · Esc to close';
-const DOCK_W = 270, DOCK_DEG = -11, DOCK_RIGHT = 60, DOCK_FOOT = 65;   // put away: its width, tilt, and its middle from the window's right and foot (px, off the board)
+const DOCK_W = 270, DOCK_DEG = 11, DOCK_LEFT = 60, DOCK_FOOT = 65;   // put away: its width, tilt, and its middle from the window's left and foot (px, off the board)
 const MIN_PW = 40;                                 // px: a page never lays out narrower, however small the window (a collapsed one measures 0, or less after the margins)
 const PAD = 90;                                    // px round the drawn parts, for their shadows
 
@@ -354,13 +354,13 @@ export function makeBook({ sections, onClose, onSection, onIcon }){
     }
     for (const k of ['--dx', '--dy', '--zs', '--rz']) bookEl.style.removeProperty(k);
   }
-  // how far the whole book moves, shrinks and turns to lie put away. On a desktop, in the bottom right
-  // corner after mocks/hud mock.psd; on a phone, where that's under the thumb, small under the ring
+  // how far the whole book moves, shrinks and turns to lie put away. On a desktop, in the bottom left
+  // corner (it was the bottom right, after mocks/hud mock.psd, till the bag took that); on a phone, where that's under the thumb, small under the ring
   function toIcon(){
     const { w, h, lipX, lipY, lipFoot } = geo, touch = document.documentElement.classList.contains('touch');
     const v = document.getElementById('vitals')?.getBoundingClientRect(), seen = v && v.width;
     const iw = touch ? 64 : DOCK_W, zs = iw / (2 * w + 2 * lipX), ih = (h + lipY + lipFoot) * zs;
-    const cx = touch && seen ? v.left + v.width / 2 : innerWidth - DOCK_RIGHT;
+    const cx = touch && seen ? v.left + v.width / 2 : DOCK_LEFT;
     const cy = touch && seen ? v.bottom + 6 + ih / 2 : innerHeight - DOCK_FOOT;
     const deg = touch ? 0 : DOCK_DEG, a = deg * Math.PI / 180;
     // the book scales and turns about .book's transform-origin, 62% down; its drawn middle is a little above that

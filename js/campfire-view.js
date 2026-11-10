@@ -12,6 +12,7 @@ import { height } from './terrain.js';
 import { WOOD_CAP, STORE_CAP } from './agents.js';
 import { KIN_DYES as THATCH_DYES, kinMark, patternMask } from './kin-mark.js';
 import { crisp } from './textures.js';
+import { CloseHearth } from './hearth-close.js';
 
 const clamp01 = v => (v < 0 ? 0 : v > 1 ? 1 : v);
 const _emberCol = new THREE.Color();
@@ -446,7 +447,7 @@ export class CampfireView {
         this.potGroup.add(leg);
       }
       const hook = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, apex - potY - 0.12, 4), potMat);
-      hook.position.y = (apex + potY + 0.04) / 2; this.potGroup.add(hook);    // a short chain to the rim
+      hook.position.y = (apex + potY + 0.04) / 2; hook.userData.chain = true; this.potGroup.add(hook);    // a short chain to the rim
     } else {                                                // spit
       potY = 0.5; const barY = 0.9;
       for (let s = -1; s <= 1; s += 2){
@@ -457,12 +458,13 @@ export class CampfireView {
       const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 1.2, 5), cookWoodMat);
       bar.rotation.z = Math.PI/2; bar.position.y = barY; this.potGroup.add(bar);
       const hook = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, barY - potY - 0.12, 4), potMat);
-      hook.position.y = (barY + potY + 0.04) / 2; this.potGroup.add(hook);
+      hook.position.y = (barY + potY + 0.04) / 2; hook.userData.chain = true; this.potGroup.add(hook);
     }
     const belly = new THREE.Mesh(new THREE.SphereGeometry(0.32, 12, 8, 0, Math.PI*2, 0, Math.PI*0.62), potMat);
     belly.scale.y = 0.8; belly.position.y = potY;
     const rim = new THREE.Mesh(new THREE.TorusGeometry(0.27, 0.035, 6, 16), potMat);
     rim.rotation.x = Math.PI/2; rim.position.y = potY + 0.16;
+    belly.userData.simple = rim.userData.simple = true;     // (the close hearth swaps these for a turned cauldron)
     // fuel reaching above here would clip up into the cauldron, so it's hidden
     // while the pot is set (you cook over coals, not a standing stack of sticks).
     this._potClear = potY - 0.12;
@@ -501,6 +503,12 @@ export class CampfireView {
 
     fire.group = this.group = g;
     this.update(0);          // mirror the starting state (woodpile, visibility)
+  }
+
+  // sat at this fire: dress it up close (hearth-close.js), and back again when you get up
+  setClose(on, seat){
+    if (on && !this.close) this.close = new CloseHearth(this, seat);
+    else if (!on && this.close){ this.close.dispose(); this.close = null; }
   }
 
   update(dt){
@@ -607,13 +615,14 @@ export class CampfireView {
     // dish, bubbling gently while it cooks over a live flame.
     this.potGroup.visible = potted;
     if (potted){
-      this.potBroth.visible = fire.pot.raw + fire.pot.ready > 0 && !fire.pot.board;   // (still on the board: nothing's in the pot yet)
+      this.potBroth.visible = fire.pot.raw + fire.pot.ready > 0 && !fire.pot.board && !this.close;   // (still on the board: nothing's in the pot yet; sat at it, the close hearth draws it)
       this.potBroth.material.color.setHex(BROTH_TINT[fire.pot.kind] || 0x6b5230);
       if (fire.pot.raw > 0 && fire.lit){
         const bub = 0.5 + 0.5 * Math.sin(this._t = (this._t || 0) + dt * 6);  // gentle bubbling
         this.potBroth.position.y = this._brothY + bub * 0.015;
       }
     }
+    if (this.close) this.close.update(dt);
   }
 }
 

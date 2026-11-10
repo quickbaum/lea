@@ -340,7 +340,7 @@ function arrival(L, m){
 // floorAt, walkable, isOpen }
 export function buildLevel(spec){
   const L = spec.kind === 'cave' ? buildCave(spec) : buildCrypt(spec);
-  L.id = spec.id; L.kind = spec.kind;
+  L.id = spec.id; L.kind = spec.kind; L.seed = spec.seed;   // (a palace's band starts its round of tunes and rhythms by it: main.js)
   finish(L);
   for (const m of L.mouths){ const [x, z] = arrival(L, m); m.inX = x; m.inZ = z; }
   if (L.cavern?.lake) launch(L);
@@ -506,7 +506,7 @@ function wallSpot(L, regions, rr, reach, w, d){
 // crypt one holds an instrument (another than the one on its tomb, if it has one:
 // instruments()): in a crypt with locked rooms, behind a door; else on its deepest floor.
 // Placed by a hash of the level, not r(), so nothing else dealt moves.
-const CHEST = { w: 1.5, d: 0.8, h: 0.78 };
+const CHEST = { w: 1.5, d: 0.8, h: 0.78 }, CARDS_EVERY = 2;
 function chests(L, spec, rr){
   L.chests = [];
   const put = (regions, reach, holds) => {
@@ -521,6 +521,8 @@ function chests(L, spec, rr){
   const plain = R => (R.type === 'room' || R.type === 'vault') && R.kind !== 'head' && R.kind !== 'landing' && R.w >= 3 && R.h >= 3;
   const shuffled = a => a.map(v => [rr(), v]).sort((p, q) => p[0] - q[0]).map(p => p[1]);
   const kind = CRYPT_INSTRUMENTS[((typeof spec.id === 'number' ? spec.id : 0) + 2) % CRYPT_INSTRUMENTS.length];
+  // and every other crypt's chest has an old pack of cards with the instrument (docs/cards.md)
+  const holds = typeof spec.id === 'number' && spec.id % CARDS_EVERY === 0 ? [kind, 'pack of cards'] : [kind];
   const lk = L.locked || [], salve = lk.find(q => q.salve), rooms = lk.filter(q => !q.salve), byRi = ri => [L.regions[ri]];
   if (salve && rooms.length){
     // the other doors' key: out in the open, as far from the way in as can be
@@ -531,8 +533,8 @@ function chests(L, spec, rr){
     // the salve's key behind the first of those doors; the instrument behind the second
     const behind = cellsFrom(L, new Set([salve.room]));
     if (!put(byRi(rooms[0].room), behind, [salve.key])) L.unkeyed = [...(L.unkeyed || []), salve.key];
-    if (!(rooms[1] && put(byRi(rooms[1].room), behind, [kind]))) put(shuffled(L.regions.filter(R => plain(R) && R.fl === L.floors - 1)), behind, [kind]);
-  } else put(shuffled(L.regions.filter(R => plain(R) && R.fl === L.floors - 1)), cellsFrom(L, new Set()), [kind]);
+    if (!(rooms[1] && put(byRi(rooms[1].room), behind, holds))) put(shuffled(L.regions.filter(R => plain(R) && R.fl === L.floors - 1)), behind, holds);
+  } else put(shuffled(L.regions.filter(R => plain(R) && R.fl === L.floors - 1)), cellsFrom(L, new Set()), holds);
 }
 // The fairy salve's book (stillroom.js), on a shelf of its own in the locked room it's kept in
 const SHELF = { w: 2.4, d: 0.5 };

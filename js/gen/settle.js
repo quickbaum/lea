@@ -123,7 +123,7 @@ function footprint(b, pad = 0){
 // size: the world's side; height / habitat: the land as graded for the road;
 // water: the water plane; road: the Old Road (road.js); worldR: how far out
 // things may stand
-export function planSettlements({ size, seed, height, habitat, water, road, worldR, roadW = 3.6 }){
+export function planSettlements({ size, seed, height, habitat, water, road, worldR, roadW = 3.6, river = null }){
   const r = mulberry32(seed >>> 0);
   const half = size / 2;
 
@@ -253,7 +253,7 @@ export function planSettlements({ size, seed, height, habitat, water, road, worl
     }
   }
 
-  const lanes = planLanes({ size, places, buildings: all, fields, height, water, road });
+  const lanes = planLanes({ size, places, buildings: all, fields, height, water, road, river });
   const junctions = planJunctions({ lanes, road, roadW, buildings: all, fields, height, water });
   return { places, buildings: all, lanes, fields, junctions };
 }
@@ -393,12 +393,12 @@ function layFarmstead(place, r, height, fits){
 // the Old Road or a lane already laid — so a farmstead's track joins the
 // village lane where that is shorter, and the lanes branch like a lace (5).
 // The village goes first. Cheaper along a lane already there, so they share.
-function planLanes({ size, places, buildings, fields, height, water, road }){
+function planLanes({ size, places, buildings, fields, height, water, road, river }){
   const half = size / 2, G = Math.round(size / CELL) + 1, X = c => c * CELL - half;
   const H = new Float32Array(G * G), K = new Float32Array(G * G);
   for (let j = 0; j < G; j++) for (let i = 0; i < G; i++){
     const x = X(i), z = X(j), k = j * G + i, d = (H[k] = height(x, z)) - water;
-    K[k] = d < 0.3 ? 400 : d < 1.4 ? 5 : 1;
+    K[k] = river && river(x, z) ? 25 : d < 0.3 ? 400 : d < 1.4 ? 5 : 1;   // a river: a timber bridge
   }
   for (const b of buildings){                      // lanes go round buildings, not through
     const R = Math.hypot(b.hl, b.hw) + 3;

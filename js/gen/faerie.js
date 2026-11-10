@@ -206,12 +206,44 @@ export function groundsDoor(L, id){
 // otherwise there and back), its points no nearer a pier than its radius and a little,
 // and under the vault. faerie-places-view.js wisps() draws them.
 const WISP_CLEAR = 0.35;
+export const SPIRAL_ROOM = [1.1, 0.8, 0.55, 0.35, 0.2];   // the spirals tried, widest first (u)
+// eight points r round path point i, in the plane across the path's way there: k 0 and 4 level across
+// it, 2 and 6 above and below (more or less: up, as the path's slope allows)
+export function ring(P, i, r, rv = r){
+  const a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)], c = P[i];
+  let tx = b[0] - a[0], ty = b[1] - a[1], tz = b[2] - a[2]; const tl = Math.hypot(tx, ty, tz) || 1; tx /= tl; ty /= tl; tz /= tl;
+  let nx = -tz, nz = tx; const nl = Math.hypot(nx, nz); if (nl < 1e-3){ nx = 1; nz = 0; } else { nx /= nl; nz /= nl; }   // across, level
+  const bx = ty * nz, by = tz * nx - tx * nz, bz = -ty * nx;                                                            // across, up
+  return Array.from({ length: 8 }, (_, k) => { const q = k * Math.PI / 4, u = Math.cos(q) * r, v = Math.sin(q) * rv; return [c[0] + nx * u + bx * v, c[1] + by * v, c[2] + nz * u + bz * v]; });
+}
 export function palaceWisps(L){
   const piers = L.props.filter(p => p.kind === 'pier'), paths = [];
   const ceil = (x, z) => L.ceilAt ? L.ceilAt(x, z) : Infinity;
   const clear = ([x, y, z]) => L.isOpen(x, z) && y < ceil(x, z) - 0.6 && y > L.floorAt(x, z) + 1
     && piers.every(p => Math.hypot(p.x - x, p.z - z) > (p.r || 0.8) + WISP_CLEAR);
-  const keep = path => { if (path.pts.length > 8 && path.pts.every(clear)) paths.push(path); };
+  // how wide a spiral a light may wind round the path (wisps.js), [across, up]: the most, of a few, that
+  // points round it in the plane across its way keep clear everywhere, with less to spare than the path
+  const loose = (near, [x, y, z]) => L.isOpen(x, z) && y < ceil(x, z) - 0.3 && y > L.floorAt(x, z) + 0.5
+    && near.every(p => Math.hypot(p.x - x, p.z - z) > (p.r || 0.8) + 0.12);
+  // (across and up apart: under the vault there's often room to the side but little above, so a spiral goes oval)
+  const nearOf = P => {                                     // (only the piers it could reach)
+    const xs = P.map(p => p[0]), zs = P.map(p => p[2]), m = SPIRAL_ROOM[0] + 2;
+    return piers.filter(p => p.x > Math.min(...xs) - m && p.x < Math.max(...xs) + m && p.z > Math.min(...zs) - m && p.z < Math.max(...zs) + m);
+  };
+  const roomOf = (P, pick, near) => {
+    for (const r of SPIRAL_ROOM) if (P.every((p, i) => i % 3 || ring(   // (of a path's points and the halfway points between, alternately)
+      P, i, r).filter((_, k) => pick(k)).every(q => loose(near, q)))) return r;
+    return 0;
+  };
+  // and the oval the two make, all round it (under a dome, its slant can reach where neither does):
+  // shrunk till it fits. A light lifted with the pitch winds a smaller oval inside it (wisps.js)
+  const ovalOf = (P, [ru, rv], near) => {
+    for (let f = 1; f > 0.15; f *= 0.7) if (P.every((p, i) => i % 3 || ring(P, i, ru * f, rv * f).every(q => loose(near, q)))) return [ru * f, rv * f];
+    return [0, 0];
+  };
+  // (checked between its points too: a vault's step can fall between two, and a light goes along the line)
+  const dense = P => P.flatMap((p, i) => { const q = P[i + 1] || (null); return q ? [p, [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2, (p[2] + q[2]) / 2]] : [p]; });
+  const keep = path => { const D = dense(path.pts); if (path.pts.length > 8 && D.every(clear)){ const near = nearOf(D); path.room = ovalOf(D, [roomOf(D, k => k % 4 === 0, near), roomOf(D, k => k % 4 === 2, near)], near); paths.push(path); } };
   // how high a light may go at (x, z): from a little over the floor to a little under the vault
   const lo = (x, z) => L.floorAt(x, z) + 1.2, hi = (x, z) => Math.min(ceil(x, z) - 1, lo(x, z) + 40);
   const between = (x, z, f, cap = Infinity) => { const a = lo(x, z); return a + (Math.min(hi(x, z), cap) - a) * f; };   // f 0..1
@@ -298,7 +330,7 @@ export function stairWisps(G){
   for (let th = G.thMax; th >= 0; th -= 0.02) pts.push(weave(1, th));
   const up = [];
   for (let t = 0; t <= 1; t += 0.002){ const a = t * Math.PI * 2 * 7; up.push([Math.cos(a) * 1.4, -0.5 + t * (G.top + 6), Math.sin(a) * 1.4]); }
-  return [{ pts, loop: true }, { pts: up, loop: false }];
+  return [{ pts, loop: true, room: [0.35, 0.35] }, { pts: up, loop: false, room: [1.1, 1.1] }];   // (between the columns, little room; up the open well, plenty)
 }
 
 // ---- the Turning Stair: a double helix, after Bramante's in the Vatican (1505) and

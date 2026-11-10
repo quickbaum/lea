@@ -23,12 +23,12 @@
   #vitals svg{display:block;width:100%;height:100%;}
   #vitals .hit{pointer-events:stroke;}
   #vitals.winded .st{opacity:.55;}
-  /* the backpack, after mocks/backpack_1.psd (js/bag-view.js): off the window's right edge, its foot tucked
-     behind the book, so it goes by the bottom; a short window slides it down behind the book, not up into the ring */
-  #bag{position:fixed;right:-6px;top:max(318px,calc(100vh - 379px));width:198px;height:256px;z-index:24;cursor:pointer;}
+  /* the backpack, after mocks/backpack_1.psd (js/bag-view.js): in the bottom right corner, off the window's right edge
+     and its foot off the bottom (the book's in the bottom left); a short window slides it further down, not up into the ring */
+  #bag{position:fixed;right:-6px;top:max(318px,calc(100vh - 226px));width:198px;height:256px;z-index:24;cursor:pointer;}
   #bag:hover{filter:brightness(1.12);}
   #bag .back,#bag .flap{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
-  /* open, on its way into the pack's card: its straps come up over the ring as on the board, its foot still behind the book */
+  /* open, on its way into the pack's card: its straps come up as on the board, its foot still off the bottom */
   #bag .open-back{position:absolute;left:-2px;top:-89px;width:225px;height:345px;pointer-events:none;display:none;}
   #bag.open{z-index:27;pointer-events:none;}
   #bag.open .back,#bag.open .flap{display:none;}
@@ -137,7 +137,7 @@
   #settings .checks{display:grid;grid-template-columns:1fr 1fr;gap:8px 18px;margin-top:14px;font-size:13px;}
   #settings .checks label{display:flex;align-items:center;gap:8px;cursor:pointer;}
   #settings .checks input{accent-color:#9ab87f;}
-  #meter{position:fixed;left:10px;bottom:46px;z-index:30;font:12px monospace;color:#dccfa0;
+  #meter{position:fixed;left:215px;bottom:46px;z-index:30;font:12px monospace;color:#dccfa0;
          background:rgba(0,19,11,.7);border:1px solid #5a6b50;border-radius:4px;padding:3px 7px;pointer-events:none;}
   .hide{display:none!important;}
 
@@ -221,8 +221,8 @@
     font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;font-family:monospace;}
   #look-btn:hover{background:#1a3a1a;}
   body.cursor-mode #look-btn,body.mouselook #look-btn{display:block;}
-  /* the corner buttons, in a row so they never overlap whatever their labels */
-  #corner-btns{position:fixed;left:10px;bottom:10px;z-index:30;display:flex;gap:6px;}
+  /* the corner buttons, in a row so they never overlap whatever their labels; right of the book put away in the corner */
+  #corner-btns{position:fixed;left:215px;bottom:10px;z-index:30;display:flex;gap:6px;}
   #spell-btn,#map-btn,#stop-tune{position:relative;
     background:rgba(0,19,11,.7);color:#dccfa0;border:1px solid #5a6b50;border-radius:4px;
     font-size:13px;letter-spacing:1px;padding:5px 12px;cursor:pointer;
@@ -318,7 +318,7 @@
       <div id="loading-track"><div id="loading-fill"></div></div>
     </div>
     <p class="enter hide" id="enter-text">CLICK TO ENTER</p>
-    <p class="controls hide" id="controls-text">WASD/&uarr;&darr; move &middot; mouse/&larr;&rarr; look &middot; shift run &middot; space jump &middot; E talk &middot; I pack &middot; J journal &middot; R rest &middot; C spells &middot; O sound &middot; esc release</p>
+    <p class="controls hide" id="controls-text">WASD/&uarr;&darr; move &middot; mouse/&larr;&rarr; look &middot; shift run &middot; space jump &middot; E talk &middot; tab next &middot; I pack &middot; J journal &middot; R rest &middot; C spells &middot; O sound &middot; esc release</p>
   </div>
 </div>
 <button id="look-btn" title="Return to mouselook (L)">L to Look</button>
@@ -328,7 +328,7 @@
 <button id="rest-btn" title="Pass time (R)">Zzz</button>
 <div id="rest-panel" class="hide"></div>
 <div id="inv-panel" class="hide"></div>
-<input id="cheat" class="hide" type="text" autocomplete="off" spellcheck="false" maxlength="40">
+<input id="cheat" class="hide" type="text" autocomplete="off" spellcheck="false" maxlength="200">
 <button id="gear" title="Sound settings (O)">⚙</button>
 <div id="settings" class="hide">
   <div class="panel">
@@ -352,6 +352,12 @@
       <label><input type="checkbox" id="gfx-map"> minimap</label>
       <label><input type="checkbox" id="gfx-meter"> frame meter</label>
     </div>
+    <h2 class="sub">Look</h2>
+    <div class="checks">
+      <label><input type="checkbox" id="gfx-dither"> dither</label>
+    </div>
+    <div class="row"><label for="gfx-dither-levels">DITHER LEVELS</label>
+      <input type="range" id="gfx-dither-levels" min="2" max="8" step="1"><span class="val" id="gfx-dither-levels-val"></span></div>
     <button class="done" id="settings-done">DONE</button>
     <p class="credit" style="margin:10px 0 0;font:11px/1.4 monospace;opacity:.6;text-align:center">Speech icons by Lorc, Delapouite and Skoll — <a href="https://game-icons.net" target="_blank" rel="noopener" style="color:inherit">game-icons.net</a>, CC BY 3.0. Lettering on the sign: Alagard, by Hewett Tsoi. Sayings: Hávamál tr. H. A. Bellows (1923); Proverbs, JPS 1917; traditional songs.</p>
   </div>

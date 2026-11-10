@@ -22,7 +22,7 @@ import { nudge, regard } from './ties.js';
 import { ate as hadFood, lack, worth, strike, ends, wishOf, cropAt, isCrop, CROPS, HUSBANDRY, nextCrop, ROAD_GOODS, useWorth, baseWorth, isWild, isCraft, craftWorth, craftStyles, CRAFT } from './trade.js';
 import { makeTraders, TRADE } from './traders.js';
 import { Conversation, DEFAULT_TALK, parted } from './convo.js';
-import { stepMusic, instrumentOf, tunesOf, dancePose, craftsKnown, giveInstrument, practiceWant, stepPractice, roadTune, bringTune, SET_GAP, tuneWeight, phraseCount } from './music-sim.js';
+import { stepMusic, instrumentOf, tunesOf, dancePose, joiningNow, craftsKnown, giveInstrument, practiceWant, stepPractice, roadTune, bringTune, SET_GAP, tuneWeight, phraseCount } from './music-sim.js';
 import { CRAFTS, addGoods, takeGoods, goodsOf, missingFor } from './making.js';
 import { DRUMS } from './arrange.js';
 import { FELLOWSHIPS, FELLOWSHIP_IDS, REACH as FELLOW_REACH, meetingOpen, occasion, memberHash, isMember } from './fellowships.js';
@@ -493,6 +493,21 @@ const FISH_REACH   = 220;       // how far they'll walk to fish (further for a p
 const FISH_DIST    = DIST_COST * 0.4;   // …so the walk counts for less
 const FISH_SKIP    = 0.08;      // days before trying again a spot where nothing bit
 // …and from a boat, out on a ground in the deep water (gen/fishing.js fishingGrounds)
+// a villager who fishes (docs/fishing.md "Villagers who fish"): an evening at the water now and then, when
+// the village is near enough to it. Not for food: their crofts feed them. It's what they like doing
+export const ANGLERS = { SHARE: 0.35 };   // of the grown villagers, this many like to fish… (0: none; tools/sim-econ.mjs --no-anglers)
+const ANGLER_REACH = 180;       // …if there's a bank this near home
+const ANGLER_PULL  = 0.6;       // how much an evening's fishing calls them
+const ANGLER_EVERY = 2;         // days between their evenings at the water, at most once a day
+const ANGLER_HOLD  = 0.25;      // days an outing holds once begun: the walk there (180u is about 2 minutes, a fifth of a day)
+// an angler: a grown villager who likes to fish, with a bank within ANGLER_REACH of home. `spots` the banks
+// (agents.fishing); the answer's kept once there are any. main.js asks the same, so only they talk of it
+export function isAngler(n, spots){
+  if (!n.home || n.role === 'child' || n.postRider || !(hashUnit('angler|' + n.id + '|' + (n.name || '')) < ANGLERS.SHARE)) return false;
+  if (n._bankNear == null && spots?.length) n._bankNear = spots.some(s => Math.hypot(s.x - n.home.x, s.z - n.home.z) <= ANGLER_REACH);
+  return !!n._bankNear;
+}
+function hashUnit(str){ let h = 2166136261 >>> 0; for (const c of str) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return (h % 10007) / 10007; }
 const BOAT_BITE    = 1.4;       // the deep holds more, and bigger, and nobody fishes it from the bank
 const BOAT_OUT     = 160;       // how far they'll paddle out to a ground
 const BOAT_FISH_T  = [60, 110]; // seconds out on the water
@@ -1520,6 +1535,13 @@ class Brain {
       return;
     }
 
+    // joining someone's playing out of doors (music-sim.js joinIn): stopped where they are, facing them, till it's played out
+    const J = npc.joining ? joiningNow(npc) : null;
+    if (J){
+      npc.moving = false; npc.heading = Math.atan2(J.host.x - npc.x, J.host.z - npc.z); npc.actionLabel = 'playing along';
+      return;
+    }
+
     // 2/3. an active ferry owns movement outright (walk to a boat → glide across →
     // step off the far bank); otherwise maybe begin one, else run the normal loop.
     this._ferryCd -= dt;
@@ -1683,7 +1705,7 @@ class Brain {
     const seat = this.target?.sit && this.target.ref instanceof Campfire && npc.sitting ? this.target.ref : null;
     if (seat && w.night > MUSIC_DARK && !seat.home){
       if (this._stayFire !== seat){ this._stayFire = seat; this._stayT = STAY; }
-      if (seat.music?.tune) this._stayT = Math.max(this._stayT, 12);   // nobody leaves mid-tune
+      if (seat.music?.tune) this._stayT = Math.max(this._stayT, 12);   // nobody leaves mid-tune (between a session's tunes they may: a session runs long)
       if (w.night > 0.5) this._camp = seat;
     } else if (!seat) this._stayFire = null;
     // Maslow-ish gating: belonging waits on survival, and the finer wants (a taste
@@ -1741,7 +1763,7 @@ class Brain {
 
     for (const fire of this.fires){
       if (this._blacklist.has(fire) || !fire.done) continue;   // skip unreachable & still-being-built hearths
-      const tune = fire.music?.tune, inst = instrumentOf(npc);
+      const tune = fire.music?.tune || fire.music?.session, inst = instrumentOf(npc);   // (a session's rhythm draws them as a tune does)
       const player = fire.lit && w.night > MUSIC_DARK && inst && (DRUMS.has(inst) || tunesOf(npc, w.time).length);
       // an evening at the fire, for its own sake: folk sitting at a lit one after dark
       const others = fire.lit && w.night > MUSIC_DARK ? fire.slots.size - (fire.slots.has(npc) ? 1 : 0) : 0;
@@ -1972,18 +1994,25 @@ class Brain {
     let wished = false;
     if (w.fishing.length && w.rain < RAIN_SEEK && (w.day > 0.2 || w.evening > 0) && raw < rawCap){
       const fw = Math.max(wants.get('fish') || 0, wants.get('eels') || 0);
-      const pull = Math.max(n.food * p.food, fw);
+      // an angler's evening: once in ANGLER_EVERY days or so, after the field, to a bank within ANGLER_REACH of home
+      // Once it's begun it holds for a while (ANGLER_HOLD), so dusk falling on the way doesn't turn them round
+      if (!this._fish && !(this._outingTill > w.time) && npc.home && isAngler(npc, w.fishing) && w.evening > 0.15 && w.night < 0.3
+        && w.time - (this._angledAt ?? -9) > ANGLER_EVERY * (0.6 + 0.8 * hashUnit('ang-gap|' + npc.id + '|' + Math.floor(w.time)))){
+        this._outingTill = w.time + ANGLER_HOLD; this._angledAt = w.time;   // (counted from setting off: one evening, whatever comes of it)
+      }
+      const outing = !this._fish && this._outingTill > w.time;
+      const pull = Math.max(n.food * p.food, fw, outing ? ANGLER_PULL : 0);
       const sitting = this._fish && this._fish.s;
       if (sitting || pull > 0.35){
         const skip = this._fishSkip || (this._fishSkip = new Map());
         let spot = sitting, sd = Infinity;
         if (!spot) for (const s of w.fishing){
           if ((s.taken && s.taken !== npc) || s.stock < FISH_LOW || (skip.get(s) || -1) > w.time) continue;
-          if (npc.home && Math.hypot(s.x - npc.home.x, s.z - npc.home.z) > VILLAGE_WILD) continue;   // a villager keeps to the village
+          if (npc.home && Math.hypot(s.x - npc.home.x, s.z - npc.home.z) > (outing ? ANGLER_REACH : VILLAGE_WILD)) continue;   // a villager keeps to the village, but for an angler's evening
           const d = Math.hypot(s.x - npc.x, s.z - npc.z) / (0.5 + s.stock);
           if (d < sd){ sd = d; spot = s; }
         }
-        if (spot) consider('fish', spot.x, spot.z, {}, spot, { tol: 1.0, sit: true, reach: fw ? FISH_REACH * 1.5 : FISH_REACH, distCost: FISH_DIST,
+        if (spot) consider('fish', spot.x, spot.z, {}, spot, { tol: 1.0, sit: true, reach: fw ? FISH_REACH * 1.5 : outing ? ANGLER_REACH + 40 : FISH_REACH, distCost: FISH_DIST,
           bias: sitting ? FISH_BIAS * 1.6 : FISH_BIAS * pull * (0.5 + 0.5 * spot.stock),
           satisfy: (a, dt2) => this.fishAt(a, spot, dt2) });
         // or a canoe out to the deep water: better fishing, if there's one free near
@@ -2429,11 +2458,11 @@ class Brain {
       if (home){
         if (w.rain > RAIN_SEEK)
           consider('indoors', home.x, home.z, { warmth: HUT_WARMTH * w.rain }, home,
-            { tol: home.reach, inside: true, sit: true, bias: SHELTER_BIAS * HUT_INDOORS * rainUrge,
+            { tol: home.reach, reach: 300, inside: true, sit: true, bias: SHELTER_BIAS * HUT_INDOORS * rainUrge,
               satisfy: (a, dt2) => home.shelter(a, dt2) });
         if (w.night > SLEEP_NIGHT && n.rest > SLEEP_AT && n.warmth < SLEEP_TURNIN)
           consider('sleep', home.x, home.z, { rest: HUT_REST }, home,
-            { tol: home.reach, inside: true, sit: true, bias: SLEEP_BIAS * w.night, satisfy: (a, dt2) => home.sleep(a, dt2) });
+            { tol: home.reach, reach: 300, inside: true, sit: true, bias: SLEEP_BIAS * w.night, satisfy: (a, dt2) => home.sleep(a, dt2) });   // (reach: from the field, or an angler's bank)
 
         // the day's work. A spell in the field — hoeing, weeding — then a while
         // off before the next; a ripe field is reaped and carried in. Work is a
@@ -3023,7 +3052,8 @@ class Brain {
   fishAt(a, s, dt){
     const w = this.world;
     if (s.taken && s.taken !== a){ this.target = null; return; }   // someone else got there first
-    if (!this._fish || this._fish.s !== s){ this._fish = { s, left: FISH_T[0] + Math.random() * (FISH_T[1] - FISH_T[0]) }; w.catches.sittings++; }
+    if (!this._fish || this._fish.s !== s){ this._fish = { s, left: FISH_T[0] + Math.random() * (FISH_T[1] - FISH_T[0]) }; w.catches.sittings++;
+      if (a.home){ this._outingTill = 0; w.catches.anglers = (w.catches.anglers || 0) + 1; } }   // (a villager's evening at the water: counted)
     s.taken = a; a.fishing = s; a.heading = s.face; a.sitting = true;
     this._fish.left -= dt;
     if (Math.random() < w.biteRate(s, a) * dt){
@@ -4605,8 +4635,8 @@ export class AgentWorld {
     return FISH_RATE * s.stock * rise * skill * (s.kind === 'eels' ? 0.8 : 1) * (s.boat ? BOAT_BITE : 1);
   }
   // a fish on the line: how many, and the stock they take
-  landFish(s){
-    const n = s.kind === 'eels' ? 1 + (Math.random() < 0.3 ? 1 : 0) : 1 + (Math.random() < 0.45 ? 1 : 0);
+  landFish(s, two = 1){   // (two: × the chance of two at once; the player's rod, js/tackle.js)
+    const n = s.kind === 'eels' ? 1 + (Math.random() < 0.3 * two ? 1 : 0) : 1 + (Math.random() < 0.45 * two ? 1 : 0);
     s.stock = Math.max(0, s.stock - FISH_TAKE * n);
     this.catches[s.kind] = (this.catches[s.kind] || 0) + n;
     return n;

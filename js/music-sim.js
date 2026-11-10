@@ -16,6 +16,17 @@
 //   by the player. A drummer needs no tune: they keep the beat under whatever's played.
 //   Several players make an ensemble, each with a part (arrange.js parts): the tune, a
 //   counter-line under it, the tune an octave down, the drum.
+//   A session (docs/music.md "Planned: rhythm first"): music at the fire starts with a rhythm in
+//   one meter (rhythm.js LEA_PATTERNS), on the tabor, or clapped by whoever's sitting there
+//   without an instrument if nobody has one. The drummer sets the tempo from the first tune, and
+//   it winds down as the night gets late. The rhythm goes a few cycles alone, then the musicians
+//   take turns: each starts a tune they know in that meter's family, at that tempo, its first bar
+//   on a cycle's head, and whoever else knows it plays a part. The rhythm carries on between tunes.
+//   They go round what they know (never the same tune twice running, if there's another) for a
+//   handful of tunes, or until nobody has one in that meter; after a rest, the next may be in another.
+//   A clapper who gets up hands the clapping to someone else sitting there.
+//   A Gentry tune is played in the rests, with no rhythm, and now and then within a session.
+//   A musician with nobody to keep a rhythm plays as before: below.
 //   Playing: after dark at a lit fire, whoever sits there with an instrument plays, alone
 //   or with others (whoever's coming to the fire with an instrument is waited for a while, and
 //   whoever stands in earshot with one joins in); a full night gathering (agents.js Campfire.gathering) is rarer than an
@@ -36,11 +47,12 @@
 //   (stepPractice, arrange.js roughen); main.js sounds it. What it buys you hear at the fire.
 
 import { TUNE_IDS, FOLK_TUNES, tune, schedule, phraseSchedule } from './tunes.js';
-import { DRUMS, parts, liftFor, roughen } from './arrange.js';
+import { DRUMS, parts, partNotes, liftFor, roughen } from './arrange.js';
 import { firstPlan, dropPlan } from './plans.js';
 import { memoryOf } from './recipes.js';
 import { addNews } from './gossip.js';
 import { craftsOf } from './making.js';
+import { leaPattern, familyOf, gridOf, cycleSec, tuneBeatSec, shape } from './rhythm.js';
 
 const TUNE_HALF = 3, TUNE_GONE = 8;   // days a learnt tune holds whole, then half (× memoryOf)
 const BORN = 0.45, BORN_ELDER = 0.75; // the chance of growing up with each of the folk's own tunes
@@ -52,6 +64,13 @@ const SEAT = 2;                       // how far out from the ring counts as sit
 const EARSHOT = 18;                   // how near you must be to learn a tune by ear (u)
 const DARK = 0.35;                    // how dark it must be to play (agents.js NIGHT_GATHER)
 const WAIT = 45;                      // how long the first to sit will wait for others coming with instruments (s)
+const LEAD_IN = [2, 3], BETWEEN = [1, 2];   // a session's cycles of rhythm alone before the first tune, and between tunes
+const RHYTHM_ONLY = 8;                // cycles a rhythm with no tune over it goes on for
+const SESSION_TUNES = [4, 8];         // how many tunes a session goes on for, round and round what they know
+const CLAPPERS = 4;                   // most who clap at a fire
+const TEMPO_BAND = 0.25;              // how far a tune's own tempo may be from the session's
+const GENTRY_BEAT = 0.35;             // the share of sessions that take a Gentry tune too (they sound good with a beat)
+const WIND = 0.18;                    // how much slower the rhythm is by the small hours
 const DANCE_OUT = 1.4, DANCE_STEP = 0.55, DANCE_MAX = 14, DANCE_IN = 2;   // the ring's way out past the seats (u); a step a beat (u); most dancers at a fire; seconds to get up into the ring
 
 const hash01 = (a, b) => { let h = 2166136261 >>> 0; for (const c of a + '|' + b) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; return (h % 10007) / 10007; };
@@ -177,13 +196,60 @@ function newGo(n, S, now){
 }
 // the whole of what n knows of a tune, at speed, as well as they can: { kind, id, notes, length, left }, sounded by main.js
 // as a go at practice is (a shepherd on their pipe, js/shepherd.js). Playing it keeps it
-export function playThrough(n, id, now){
+export function playThrough(n, id, now, { solo = true } = {}){
   const k = phrasesKnown(n, id, now), kind = instrumentOf(n);
   if (!k || !kind) return null;
   const base = schedule(id, knownSet(k)), up = liftFor(schedule(id).notes, kind);
-  const s = roughen({ notes: base.notes.map(x => ({ ...x, midi: x.midi + up })), length: base.length }, fluencyOf(n, id, now), whoOf(n) + id + Math.floor(now * 600), { solo: true });
+  const s = roughen({ notes: base.notes.map(x => ({ ...x, midi: x.midi + up })), length: base.length }, fluencyOf(n, id, now), whoOf(n) + id + Math.floor(now * 600), { solo });
   learnTune(n, id, now, k); drilled(n, id, now, HAND_PLAYED);
-  return { kind, id, notes: s.notes, length: s.length, left: s.length };
+  return { kind, id, k, notes: s.notes, length: s.length, left: s.length };
+}
+// a whole tune played out of doors (a shepherd's, a trader's at a well, a practice with company): whoever's
+// free in earshot may join in (joinIn); with company, the player doesn't falter, or they'd lose each other.
+// `still()`: is that go still the one sounding
+export function playOut(n, id, now, still, w = world){
+  const js = w ? joinersFor(n, id, w) : [];
+  const go = playThrough(n, id, now, { solo: !js.length });
+  if (go && js.length) joinIn(n, go, id, w, js, still);
+  return go;
+}
+// ---- joining in, outside (docs/music.md "Planned: rhythm first", decisions 5 and 6) ----------------
+// Someone plays a whole tune outside: the shepherd to the flock, a trader at a well, someone at their
+// practice, you. Whoever's within earshot, free (fed, warm, awake, not busy with music of their own) and
+// has an instrument may stop and play along from the start: a part of it if they know some of it
+// (arrange.js parts, as at a fire), the Lea's pattern for its meter if theirs is a drum. They stand and
+// play that one, perhaps the next, and go on their way. n.joining: { host, id, go, still }; the Brain
+// (agents.js) gives up their feet while it lasts, and main.js sounds `go` as it does a practice.
+const JOIN_HUNGER = 0.6, JOIN_REST = 0.15, JOIN_MOST = 3;   // too hungry or cold to stop; days before joining again; most at once
+let world = null;                                       // the world last stepped (the shepherd's round hasn't one of its own)
+export const joiningNow = n => { const J = n.joining; if (!J) return null; if (!J.still() || J.go.left <= 0){ n.joining = null; return null; } return J; };
+export function joinersFor(host, id, w = world){
+  if (!w || !id) return [];
+  const out = [];
+  for (const n of w.npcs){
+    if (n === host || out.length >= JOIN_MOST || !instrumentOf(n) || Math.hypot(n.x - host.x, n.z - host.z) > EARSHOT) continue;
+    if (n.sleeping || n._indoors || n.sheltered || n.talking || n.dance || n.practice || n.piping?.go || n.shepherding || joiningNow(n)) continue;
+    if ((n._joinRest ?? -1) > w.time || (n.needs?.food ?? 0) > JOIN_HUNGER || (n.needs?.warmth ?? 0) > JOIN_HUNGER) continue;
+    if (!DRUMS.has(n.instrument) && !phrasesKnown(n, id, w.time)) continue;
+    out.push(n);
+  }
+  return out;
+}
+export function joinIn(host, go, id, w, js, still){
+  const ps = [{ kind: go.kind }, ...js.map(n => ({ kind: n.instrument }))], as = parts(ps, id), hostK = go.k ?? phraseCount(id);
+  const st = w.musicStats ??= { played: 0, learnt: 0, tunes: {} };
+  js.forEach((n, i) => {
+    const part = as[i + 1], drum = DRUMS.has(n.instrument), k = drum ? hostK : Math.min(hostK, phrasesKnown(n, id, w.time));
+    let s = partNotes(id, part, drum ? null : knownSet(k), n.instrument);
+    if (drum) s = { notes: s.notes.filter(x => x.t < go.length), length: go.length };
+    else { s = roughen(s, fluencyOf(n, id, w.time), whoOf(n) + id + part); learnTune(n, id, w.time, k); drilled(n, id, w.time, HAND_PLAYED); }
+    const at = () => go.length - go.left;
+    n.joining = { host, id, part, go: { kind: n.instrument, notes: s.notes, length: s.length, get left(){ return s.length - at(); } }, still };
+    n._joins = n._joinedHost === host ? (n._joins || 0) + 1 : 1; n._joinedHost = host;
+    if (n._joins >= 1 + Math.floor(hash01(whoOf(n), 'joins') * 2)) n._joinRest = w.time + JOIN_REST;   // that one, perhaps the next
+    st.joined = (st.joined || 0) + 1;
+    st.joinedBy ??= {}; st.joinedBy[part] = (st.joinedBy[part] || 0) + 1;
+  });
 }
 // ---- playing on the road ----------------------------------------------------------------
 // A trader plays as they walk (docs/economy.md): a tune, a while's quiet, another. Sounded by main.js as a shepherd's pipe is
@@ -211,7 +277,8 @@ export function roadTune(n, w, on, dt, roll, gap = ROAD_GAP){
   const known = tunesOf(n, w.time), choice = known.length > 1 ? known.filter(id => id !== P.last) : known;
   if (!choice.length || !instrumentOf(n) || DRUMS.has(n.instrument)){ P.gap = gap[1]; return; }
   P.id = P.last = choice[Math.floor(roll() * choice.length)];
-  P.go = playThrough(n, P.id, w.time);
+  world = w;
+  const go = P.go = n.moving ? playThrough(n, P.id, w.time) : playOut(n, P.id, w.time, () => n.piping?.go === go, w);   // walking, nobody stops to join
   R.played++;
 }
 
@@ -230,7 +297,11 @@ export function stepPractice(n, w, dt, id){
       S.go = null; S.goes++; S.gap = GAP[0] + Math.random() * (GAP[1] - GAP[0]);
     }
   } else if ((S.gap -= dt) <= 0 && S.left > 0){
-    S.go = newGo(n, S, now);
+    // company: they stop drilling and play it through at speed, with whoever's joined (decision 6)
+    world = w;
+    const company = phrasesKnown(n, S.id, now) && joinersFor(n, S.id, w).length;
+    if (company){ const go = S.go = playOut(n, S.id, now, () => n.practice?.go === go, w); if (go) P.company = (P.company || 0) + 1; }
+    else S.go = newGo(n, S, now);
     if (!S.go) S.left = 0;
     else {
       P.goes++;
@@ -272,7 +343,9 @@ export const giveInstrument = (n, kind) => { n.instrument = kind; };
 // A tune starts after dark at a lit fire with a player sitting at it, and goes on while the
 // fire burns and any of its players is still sitting there (the dark can come and go under it).
 export function stepMusic(f, w, dt){
+  world = w;
   const M = f.music ??= { rest: REST[0] * Math.random() };
+  if (M.session){ stepSession(f, w, dt, M); return; }
   if (M.tune){
     const seated = sittingAt(f, w);
     if (!f.lit || !M.players.some(p => seated.includes(p.npc))){ sitDown(M); f.music = { rest: REST[1], last: M.tune }; return; }
@@ -290,11 +363,18 @@ export function stepMusic(f, w, dt){
   M.waited = 0;
   const players = near;
   const drummers = players.filter(n => DRUMS.has(n.instrument)), tuneful = players.filter(n => !DRUMS.has(n.instrument));
+  // somebody to keep a rhythm: a drummer, or else hands. Then it's a session, unless this rest is
+  // for a quiet Gentry tune and somebody knows one
+  const clappers = drummers.length ? [] : sittingAt(f, w).filter(n => !instrumentOf(n) && !n.sleeping && !n.talking).slice(0, CLAPPERS);
+  const quiet = M.quiet && tuneful.some(n => tunesOf(n, w.time).some(id => tune(id).style === 'gentry'));
+  if ((drummers.length || clappers.length) && !quiet){ startSession(f, w, M, drummers, clappers, tuneful); return; }
+  const gentryOnly = !!quiet;
   // the tune they know best between them (not the one just played, if there's another): the
   // pipers and fiddlers choose; drummers only if there's nobody else
   const choosers = tuneful.length ? tuneful : drummers;
   let best = null;
   for (const id of TUNE_IDS){
+    if (gentryOnly && tune(id).style !== 'gentry') continue;
     const ks = choosers.map(n => phrasesKnown(n, id, w.time)), sum = ks.reduce((a, k) => a + k, 0);
     if (!sum) continue;
     const score = sum / phraseCount(id) - (id === M.last ? 1.5 : 0);   // and not the same one twice running, if they've another
@@ -327,9 +407,9 @@ const sitDown = M => { for (const n of M.dancers || []) if (n.dance?.M === M) n.
 // the angle of their seat, and d.t0, when)
 function joinDance(f, w, M){
   if (M.dancers.length >= DANCE_MAX) return;
-  const at = Math.max(0, M.length - M.left);
+  const at = clockOf(M);
   for (const n of sittingAt(f, w)){
-    if (n.dance?.M === M || n.sleeping || n.talking || M.players.some(p => p.npc === n) || M.dancers.length >= DANCE_MAX) continue;
+    if (n.dance?.M === M || n.sleeping || n.talking || M.players.some(p => p.npc === n) || M.rhythm?.some(r => r.npc === n) || M.dancers.length >= DANCE_MAX) continue;
     n.dance = { M, f, a: Math.atan2(n.z - f.z, n.x - f.x), r0: Math.hypot(n.x - f.x, n.z - f.z), t0: at };
     M.dancers.push(n);
     w.musicStats.danced = (w.musicStats.danced || 0) + 1;
@@ -339,9 +419,15 @@ const DANCES = ['ring', 'turn', 'in-out'];
 export function dancePose(n){
   const d = n.dance, M = d?.M;
   if (!M || d.f.music !== M){ if (d) n.dance = null; return null; }
-  const T = tune(M.tune), crotchet = 60 / T.bpm, compound = T.meter[1] === 8 && T.meter[0] % 3 === 0;
-  const beat = compound ? crotchet * 1.5 : crotchet * 4 / T.meter[1], bar = T.meter[0] / T.meter[1] * 4 * crotchet;
-  const kind = DANCES[Math.floor(hash01(M.tune, 'dance') * DANCES.length)], dir = hash01(M.tune, 'dir') < 0.5 ? -1 : 1;
+  // in a session, the rhythm's beat and bar, and a figure for the session; else the tune's
+  let beat, bar;
+  if (M.session){ beat = 60 / M.bpm; bar = beat * M.G.bar / M.G.base; }
+  else {
+    const T = tune(M.tune), crotchet = 60 / T.bpm, compound = T.meter[1] === 8 && T.meter[0] % 3 === 0;
+    beat = compound ? crotchet * 1.5 : crotchet * 4 / T.meter[1]; bar = T.meter[0] / T.meter[1] * 4 * crotchet;
+  }
+  const key = M.session ? M.key : M.tune;
+  const kind = DANCES[Math.floor(hash01(key, 'dance') * DANCES.length)], dir = hash01(key, 'dir') < 0.5 ? -1 : 1;
   const R = d.f.ringR + DANCE_OUT, P = 4 * bar;
   // how far round, in seconds' going: on all through; back and forth every four bars; or slower, round while closing in and opening out
   const round = at => { const ph = at % (2 * P); return kind === 'turn' ? (ph < P ? ph : 2 * P - ph) : kind === 'in-out' ? at * 0.6 : at; };
@@ -351,7 +437,7 @@ export function dancePose(n){
     const r = d.r0 + (ring - d.r0) * Math.max(0, b), a = d.a + dir * (round(at) - round(d.t0)) * DANCE_STEP / beat / R;
     return [d.f.x + Math.cos(a) * r, d.f.z + Math.sin(a) * r];
   };
-  const at = Math.max(d.t0, M.length - M.left), [x, z] = place(at), [x2, z2] = place(at + 0.1);
+  const at = Math.max(d.t0, clockOf(M)), [x, z] = place(at), [x2, z2] = place(at + 0.1);
   const fb = beat > 0 ? (at / beat) % 1 : 0;
   return { x, z, heading: Math.atan2(x2 - x, z2 - z), moving: Math.hypot(x2 - x, z2 - z) > 1e-3, hop: Math.sin(Math.PI * fb), sway: Math.sin(Math.PI * at / beat) };
 }
@@ -373,4 +459,119 @@ function heardAt(x, z, w, id, most){
     w.musicStats.learnt++; got++;
   }
   return got;
+}
+
+// ---- a session: rhythm first ------------------------------------------------------------
+// f.music while a session's on: { session, pat, G, bpm, cyc (a cycle, s), t (s since it began; 0 a cycle's
+// head), rhythm: [{ npc, kind: 'tabor'|'clap', row }], tune (the one playing now, or null), start (when on
+// the session's clock its notes' 0 falls: its pick-up before a cycle's head), scale (its seconds → the
+// session's), players, length, left, next (the cycle head the next tune comes in on), turn, played, dancers }
+// The clock a dancer keeps: a session's own, or a lone tune's
+const clockOf = M => M.session ? M.t : Math.max(0, M.length - M.left);
+// how late in the night it is, 0 at dusk to 1 in the small hours (w.time: days, 0 midnight)
+const lateness = w => Math.max(0, Math.min(1, (((w.time ?? 0) % 1) - 0.75 + 1) % 1 / 0.4));
+// the tempo the drummer sets (beats a minute): the first tune's own, wound down by the hour, and a
+// little by who they are (or, clapping, by whoever started it)
+export const sessionTempo = (id, w, who) => 60 / tuneBeatSec(id) * (1 - WIND * lateness(w)) * (0.96 + 0.08 * hash01(whoOf(who), 'tempo'));
+// may tune id be played in this session? Its meter in the family, its own tempo near the session's
+const fitsSession = (M, id) => familyOf(tune(id).meter) === M.family && Math.abs(60 / tuneBeatSec(id) / M.bpm0 - 1) <= TEMPO_BAND && (tune(id).style !== 'gentry' || M.gentry);
+// the musicians round the fire who might start a tune or play one: tuneful, awake, in earshot
+const tunefulNear = (f, w) => w.npcs.filter(n => instrumentOf(n) && !DRUMS.has(n.instrument) && !n.sleeping && !n.sheltered && Math.hypot(n.x - f.x, n.z - f.z) < EARSHOT);
+
+function startSession(f, w, M, drummers, clappers, tuneful){
+  const gentry = Math.random() < GENTRY_BEAT;
+  // the first tune: the one they know best between them, preferring a family they've more in, and
+  // not the last session's family if there's another
+  let best = null;
+  for (const id of TUNE_IDS){
+    if (tune(id).style === 'gentry' && !gentry) continue;
+    const ks = tuneful.map(n => phrasesKnown(n, id, w.time)), sum = ks.reduce((a, k) => a + k, 0);
+    if (!sum) continue;
+    const fam = familyOf(tune(id).meter);
+    const score = sum / phraseCount(id) + 0.1 * TUNE_IDS.filter(o => familyOf(tune(o).meter) === fam && tuneful.some(n => phrasesKnown(n, o, w.time))).length - (fam === M.lastFamily ? 1 : 0);
+    if (!best || score > best.score) best = { id, score };
+  }
+  const first = best?.id ?? null;
+  // with no tune to play, the drum still has its say: the plain walk, at a walking pace
+  const pat = first ? leaPattern(tune(first).meter) : leaPattern([4, 4]), G = gridOf(pat);
+  const lead = (drummers[0] || clappers[0]);
+  const bpm0 = first ? 60 / tuneBeatSec(first) : 100, bpm = first ? sessionTempo(first, w, lead) : 100 * (1 - WIND * lateness(w));
+  const cyc = cycleSec(G, bpm);
+  const S = f.music = { session: true, pat, G, key: pat.name + ':' + Math.floor(w.time * 24), family: familyOf(pat.meter), gentry, bpm, bpm0, cyc, t: 0,
+    rhythm: drummers.map(n => ({ npc: n, kind: 'tabor', row: 'tabor' })).concat(clappers.map(n => ({ npc: n, kind: 'clap', row: 'hands' }))),
+    tune: null, players: [], length: 0, left: 0, first, next: cyc * (LEAD_IN[0] + Math.floor(Math.random() * (LEAD_IN[1] - LEAD_IN[0] + 1))),
+    turn: 0, played: [], dancers: [], last: M.last, until: first ? Infinity : cyc * RHYTHM_ONLY,
+    tunes: SESSION_TUNES[0] + Math.floor(Math.random() * (SESSION_TUNES[1] - SESSION_TUNES[0] + 1)) };
+  const st = w.musicStats ??= { played: 0, learnt: 0, tunes: {} };
+  st.sessions = (st.sessions || 0) + 1;
+  st.byMeter ??= {}; st.byMeter[pat.meter.join('/')] = (st.byMeter[pat.meter.join('/')] || 0) + 1;
+  if (clappers.length) st.clapped = (st.clapped || 0) + 1;
+  joinDance(f, w, S);
+}
+function endSession(f, w, S, why){
+  sitDown(S);
+  const E = (w.musicStats.sessionEnds ??= {}); E[why] = (E[why] || 0) + 1;
+  // a rest, and the next may be a quiet one: a Gentry tune with no rhythm, if anyone has one
+  f.music = { rest: REST[0] + Math.random() * (REST[1] - REST[0]), last: S.tune || S.played.at(-1) || S.last, lastFamily: S.family, quiet: true };
+  const st = w.musicStats; if (st){ st.sessionTunes ??= []; st.sessionTunes.push(S.played.length); }
+}
+function stepSession(f, w, dt, S){
+  S.t += dt;
+  // whoever keeps the rhythm stays to keep it: a drummer in earshot and awake, a clapper sitting there
+  const seated = sittingAt(f, w);
+  S.rhythm = S.rhythm.filter(r => !r.npc.sleeping && (r.kind === 'tabor' ? Math.hypot(r.npc.x - f.x, r.npc.z - f.z) < EARSHOT : seated.includes(r.npc)));
+  // hands: a clapper gone, someone else sitting there without an instrument takes it up
+  if (S.rhythm.every(r => r.kind === 'clap') && S.rhythm.length < CLAPPERS){
+    for (const n of seated){
+      if (S.rhythm.length >= CLAPPERS) break;
+      if (instrumentOf(n) || n.sleeping || n.talking || S.rhythm.some(r => r.npc === n) || S.players.some(p => p.npc === n)) continue;
+      if (n.dance?.M === S) n.dance = null;
+      S.rhythm.push({ npc: n, kind: 'clap', row: 'hands' });
+    }
+  }
+  const why = !f.lit ? 'fire out' : !S.rhythm.length ? 'no rhythm' : S.t > S.until ? (S.played.length || S.tune ? 'done' : 'rhythm alone') : null;
+  if (why){ if (S.tune) heard(f, w, S); endSession(f, w, S, why); return; }
+  joinDance(f, w, S);
+  if (S.tune){
+    S.left = S.start + S.length - S.t;
+    if (!S.players.some(p => seated.includes(p.npc) || Math.hypot(p.npc.x - f.x, p.npc.z - f.z) < EARSHOT)){ S.tune = null; S.next = nextHead(S, S.t, BETWEEN[0]); return; }
+    if (S.left > 0) return;
+    heard(f, w, S);
+    S.played.push(S.tune); S.tune = null;
+    S.next = nextHead(S, S.t, BETWEEN[0] + Math.floor(Math.random() * (BETWEEN[1] - BETWEEN[0] + 1)));
+    return;
+  }
+  if (S.until !== Infinity || S.t < S.next - S.cyc) return;   // a cycle ahead of its head, the next tune is chosen, so its pick-up can sound
+  // whose turn it is: they start a tune they know in this meter, near its tempo, one not played yet
+  // in this session before one that has been, never the one just played if they've another; if they've
+  // none, the next musician. Once the session's had its tunes, or nobody has one, it's done after a cycle
+  const near = tunefulNear(f, w), just = S.played.at(-1);
+  let id = null;
+  if (S.played.length >= S.tunes){ S.until = S.next; return; }
+  if (!S.played.length && S.first && near.some(n => phrasesKnown(n, S.first, w.time))) id = S.first;
+  for (let i = 0; !id && i < near.length; i++){
+    const n = near[(S.turn + i) % near.length];
+    const mine = tunesOf(n, w.time).filter(t => fitsSession(S, t));
+    const pick = mine.find(t => !S.played.includes(t)) ?? mine.find(t => t !== just) ?? (near.length === 1 ? mine[0] : null);
+    if (pick){ id = pick; S.turn += i + 1; }
+  }
+  if (!id){ S.until = S.next; return; }
+  playInSession(f, w, S, id, near);
+}
+// the cycle head `cycles` after the one at or after t
+const nextHead = (S, t, cycles) => (Math.ceil(t / S.cyc - 1e-6) + cycles) * S.cyc;
+function playInSession(f, w, S, id, near){
+  const scale = (60 / S.bpm) / tuneBeatSec(id), pick = shape(id).pickBeats * 60 / S.bpm;
+  const ps = near.map(n => ({ npc: n, kind: n.instrument, k: phrasesKnown(n, id, w.time), f: fluencyOf(n, id, w.time) })).filter(p => p.k > 0);
+  if (!ps.length){ S.next = nextHead(S, S.t, 1); return; }   // nobody here has it after all (it's gone from them, they've gone): try again next cycle
+  for (const p of ps){ learnTune(p.npc, id, w.time, p.k); drilled(p.npc, id, w.time, HAND_PLAYED); }
+  parts(ps, id).forEach((part, i) => { ps[i].part = part; });
+  for (const p of ps) p.len = schedule(id, knownSet(p.k)).length * scale;
+  Object.assign(S, { tune: id, players: ps, scale, start: S.next - pick, length: Math.max(...ps.map(p => p.len)) });
+  S.left = S.start + S.length - S.t;
+  const st = w.musicStats;
+  st.played++; st.tunes[id] = (st.tunes[id] || 0) + 1; st.inSession = (st.inSession || 0) + 1;
+  st.parts ??= {};
+  for (const p of ps) st.parts[p.part] = (st.parts[p.part] || 0) + 1;
+  if (ps.length + S.rhythm.length > 1) st.bands = (st.bands || 0) + 1;
 }

@@ -174,5 +174,13 @@ body.pack-dragging .cook-zone { outline: 2px dashed #ffe9b0cc; outline-offset: -
 .cook-board.off { display: none; }
 body.pack-dragging .cook-board { outline: 2px dashed #ffe9b0cc; outline-offset: 2px; }
 .cook-board-hint { font: 12px 'Homemade Apple', cursive; color: #f3e6c4b0; pointer-events: none; }
-.cook-chip { width: 22px; height: 22px; border-radius: 40%; background: var(--tint); box-shadow: 0 1px 2px #0009; overflow: hidden; pointer-events: none; }
-.cook-chip img { width: 100%; height: 100%; object-fit: cover; }
+.cook-chip { position: relative; width: 28px; height: 28px; pointer-events: none; transition: scale .15s, filter .15s; }
+.cook-sliver { position: absolute; inset: 0; border-radius: 40%; background: var(--tint); box-shadow: 0 1px 2px #0009; overflow: hidden; transition: translate .08s; }
+.cook-sliver img { width: 100%; height: 100%; object-fit: cover; }
+.cook-chip.pulled .cook-sliver::after { content: ''; position: absolute; left: 15%; right: 15%; top: 48%; height: 2px; background: #f3e6c4cc; transform-origin: left; transform: scaleX(var(--pull)); }   /* the line drawn along it */
+.cook-chip.done .cook-sliver { box-shadow: 0 0 0 1px #ffe9b0aa, 0 1px 2px #0009; }
+/* stirring: the pot takes the pointer, and a ring fills as you go round */
+.cook-zone.stir { pointer-events: auto !important; cursor: grab; touch-action: none;
+  background: conic-gradient(from -90deg, #ffe9b0aa calc(var(--stir, 0) * 360deg), #ffe9b026 0);
+  -webkit-mask: radial-gradient(circle closest-side, #0000 calc(100% - 6px), #000 calc(100% - 5px)); mask: radial-gradient(circle closest-side, #0000 calc(100% - 6px), #000 calc(100% - 5px)); }
+.cook-zone.stir:active { cursor: grabbing; }

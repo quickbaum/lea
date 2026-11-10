@@ -76,7 +76,7 @@ export const farWord = d => d < 150 ? 'a short hop' : d < 400 ? 'a fair walk' : 
 // through it, and how steep it is. Built once, on the first route asked for.
 const GROUND = ['meadow', 'heath', 'wood', 'grove', 'rock', 'wet', 'wetmeadow', 'field', 'lane', 'water'];
 const GROUND_OF = { meadow: 0, green: 0, yard: 8, lane: 8, road: 8, beach: 0, heath: 1, woodland: 2, grove: 3, rock: 4,
-  marsh: 5, fen: 5, carr: 5, wetmeadow: 6, field: 7, lake: 9 };
+  marsh: 5, fen: 5, carr: 5, wetmeadow: 6, field: 7, lake: 9, bridge: 8 };
 // what a step costs per unit, by ground: the road style wants the road, the scenic style
 // the woods and heath and never the road (it is the other way, after all)
 const COST = {

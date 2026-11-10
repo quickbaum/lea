@@ -4,6 +4,7 @@ import { WATER, WORLD_R, AREA, WORLD_SEED } from '../config.js';
 import { height, terrainType, soilRichness, groundSink, treeCover, habitat, roadBand, builtBand } from '../terrain.js';
 import { rand, randint, fork, mulberry32 } from '../rng.js';
 import { makeGrassTexture, makePussywillowTexture, makeCattailTexture, makeAcornTexture, makeMushroomTexture, makeTrinketTexture, makeVineTexture, makeFernTexture, makeRedwoodFoliageTexture, makeSedgeTexture, makeCottonGrassTexture, makeHeatherTexture, crisp } from '../textures.js';
+import { makeWild, elderInFlower } from './wild.js';
 import { makeLeafAtlas, makeWillowAtlas, makeClumpAtlas } from './leaf.js';
 import { makeBark, makeBirchBark, makeRedwoodBark, makeRowanBark } from './bark.js';
 import { generateTree, leafMaterial, TREE_SPECIES, SHRUB_SPECIES, REDWOOD_SPECIES, OAK_SPECIES, BIRCH_SPECIES, ROWAN_SPECIES, PINE_SPECIES, ALDER_SPECIES, WILLOW_SPECIES, SPRUCE_SPECIES, JUNIPER_SPECIES, YEW_SPECIES } from './tree.js';
@@ -522,7 +523,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
                                          pussywillows = D(1680), cattails = D(2080),
                                          hazels = D(56), daisies = D(120), roots = D(72), mushrooms = D(80), acornPatches = D(64),
                                          cattailRoots = D(48), elders = D(48),
-                                         shells = D(96), stones = D(120), ambers = D(40), quartzes = D(48),
+                                         shells = D(96), stones = D(120), ambers = D(40), quartzes = D(48), feathers = D(110),
                                          pines = D(150), alders = D(120), willows = D(40), spruceForests = D(0.8), spruceStands = D(4), juniperGroups = D(15), yews = D(8), sedges = D(6000), cottongrass = D(2500), heather = D(9000) } = {}){
   const atlas = makeLeafAtlas(fork(rng));
   const bark  = makeBark(fork(rng));
@@ -1056,6 +1057,24 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
     const s = landSpot(new Set(['rock', 'grass'])); if (s) dropValuable(s[0], s[1], 'quartz', trinketMats.quartz);
   }
 
+  // --- feathers on the woodland floor, by the trees (docs/fishing.md "Tying flies"): there are no birds
+  // yet, so they just lie about where birds would be. For you only: they aren't valuables, the folk
+  // don't gather them, and one comes back slowly after it's taken ---
+  const finds = [];
+  const featherMat = new THREE.MeshLambertMaterial({ map: makeTrinketTexture('feathers'), alphaTest: 0.5, side: THREE.DoubleSide });
+  // their own stream, seeded off where the trees stand, so taking draws from frng or rng doesn't move what comes after
+  let fst = (((treePos[0]?.[0] ?? 1) * 7919 + (treePos[0]?.[1] ?? 1) * 104729) ^ 0xfea7) | 0;
+  const qrng = () => { fst = (fst + 0x6d2b79f5) | 0; let t = Math.imul(fst ^ (fst >>> 15), 1 | fst); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  for (let i = 0; i < feathers; i++){
+    const base = treePos[Math.floor(qrng() * treePos.length)]; if (!base) break;
+    const a = qrng() * Math.PI * 2, r = 0.6 + qrng() * 2.2;
+    const x = base[0] + Math.cos(a) * r, z = base[1] + Math.sin(a) * r;
+    if (Math.hypot(x, z) >= WORLD_R || !['grass', 'mud'].includes(terrainType(x, z))) continue;
+    const f = makeGroundFood(scene, qrng, { x, z, n: 1, size: 0.3, spread: 0.1, mat: featherMat, kind: 'feathers', yieldRange: [1, 2], regrow: 240 });
+    f.find = true; f.verb = 'pick up the feather';
+    finds.push(f);
+  }
+
   // --- flowers: curated sprite set, each species in its own monospecies patches ---
   // Each flower ID gets PATCHES_PER dedicated patch centres drawn from a shared pool.
   // Flowers only scatter around their own centres, so you see tight same-species clumps.
@@ -1148,12 +1167,16 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
   // grown before them moves.
   {
     const elderBodies = variants({ ...SHRUB_SPECIES[1], targetHeight: 2.6 });
+    // some are in flower instead of berry (wild.js elderInFlower, by where they stand: no
+    // draw on the seed): cream umbels, the chamomile's head tinted
+    const elderFlowerMat = (() => { const t = new THREE.TextureLoader().load('flowers/heads/flowers13.png'); t.magFilter = THREE.NearestFilter; t.minFilter = THREE.NearestFilter; t.colorSpace = THREE.SRGBColorSpace;
+      return new THREE.MeshLambertMaterial({ map: t, color: 0xfff0c8, alphaTest: 0.1, side: THREE.DoubleSide }); })();
     for (let i = 0; i < elders; i++){
       const s = landSpot(new Set(['grass', 'mud'])); if (!s) continue;
       const body = pickBody(elderBodies);
       const fruitSpots = fruitPositions(body.leafGeo.boundingBox, 8, 0.3, 0.9, frng);
       plants.push(makePlant(scene, frng, { x: s[0], z: s[1], body, barkMat, leafMat: clumpLeafMat,
-        fruitMat: fruitMats.blue, fruitSpots, fruitSize: 0.2, kind: 'elder', yieldRange: [1, 2], regrow: 50 }));
+        fruitMat: elderInFlower(s[0], s[1]) ? elderFlowerMat : fruitMats.blue, fruitSpots, fruitSize: 0.2, kind: 'elder', yieldRange: [1, 2], regrow: 50 }));
     }
   }
 
@@ -1247,9 +1270,19 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
 
   if (ground) shadeGroundUnderTrees(ground, spotGrid([...willowPos, ...sprucePos].map(([x, z]) => [x, z, 3.6]).concat(yewPos.map(([x, z]) => [x, z, 6]))));
 
+  // what you can take from what already grows (wild.js): needles, bark, berries, heather,
+  // an elder's blossom or berries, primroses and violets. Made from what's planted, after
+  // it's all planted; nothing in it draws on the seed.
+  const elderPlants = plants.filter(p => p.kind === 'elder');
+  const wild = makeWild({ pines: pinePos.filter(standsOn), junipers: juniperPos, willows: willowPos, elders: elderPlants,
+    heather: heatherGroups.flatMap(g => g.items.map(i => [i.x, i.z])), flowers });
+  for (const e of elderPlants) e.aim = () => ({ dx: 0, y: 0.8, dz: 0 });   // the stems are cut at the foot; up in the leaves is wild.js's
+
   return {
     plants,
+    wild,
     valuables,                                        // rare finds: shells, stones, amber, quartz
+    finds,                                            // what's yours for the picking up: feathers (not the folk's)
     flowers,                                          // individually-pickable wildflowers (for the women's crowns, agents.js)
     trees: [...treePos.filter(standsOn), ...redwoodPos, ...oakPos.filter(standsOn), ...birchPos.filter(standsOn), ...rowanPos.filter(standsOn), ...pinePos.filter(standsOn), ...alderPos, ...willowPos, ...sprucePos, ...juniperPos, ...yewPos],
     // the same trunks, but with identity: species and age. The mycelium network is
@@ -1286,7 +1319,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       ...yewPos.map(([x, z, sc, , , , rr])     => ({ x, z, r: 1.4, roots: rr * sc })),
       ...shrubRecs,
     ],
-    update(dt){ for (const p of plants) p.tick(dt); for (const v of valuables) v.tick(dt); for (const f of flowers) f.tick(dt); },
+    update(dt){ wild.update(dt); for (const p of plants) p.tick(dt); for (const v of valuables) v.tick(dt); for (const f of finds) f.tick(dt); for (const f of flowers) f.tick(dt); },
     // Turn the fruit/berry cards to face the camera. Every ripe plant rewrites its
     // instance matrices here and re-uploads them, so plants past the fog are hidden
     // and skipped outright — a thousand tiny buffer uploads a frame for berries
@@ -1306,6 +1339,7 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
         p.billboard(q);
       }
       for (const v of valuables) if (inSight(v)) v.billboard(q);
+      for (const f of finds) if (inSight(f)) f.billboard(q);
       // flowers: Y-only rotation so they stay upright (just turn to face the camera)
       if (_flowerBillboards.length){
         _fEuler.setFromQuaternion(q, 'YXZ');
@@ -1337,6 +1371,6 @@ export function plantWorld(scene, rng, { ground = null, trees = D(1280), shrubs 
       return best;
     },
     // every gatherable thing (plants + valuables), for cursor-aimed E selection
-    pickables(){ return plants.concat(valuables); },
+    pickables(){ return plants.concat(valuables, finds); },
   };
 }

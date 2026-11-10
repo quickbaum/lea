@@ -6,8 +6,8 @@ import { makeTexture, makeGrain } from './textures.js';
 // The land itself is generated in js/gen/land.js (seeded noise, region fields,
 // habitats; pure so node tools can map it). This module keeps the API the rest
 // of the game was written against: height, biome colour, the five surface types.
-import { height, habitat, fields, HABITATS, road, roadBand, settlements, ruins, under, builtBand, solidAt, builtAt } from './gen/land.js';
-export { height, habitat, HABITATS, road, roadBand, settlements, ruins, under, builtBand, solidAt, builtAt };
+import { height, habitat, fields, HABITATS, road, roadBand, settlements, ruins, under, builtBand, solidAt, builtAt, groundHeight, underDeck, rivers, riverBand, bridges } from './gen/land.js';
+export { height, habitat, HABITATS, road, roadBand, settlements, ruins, under, builtBand, solidAt, builtAt, groundHeight, underDeck, rivers, riverBand, bridges };
 
 function hash(x, z){
   const n = Math.sin(x*127.1 + z*311.7) * 43758.5453;
@@ -173,13 +173,14 @@ export class Ground {
     const col = this.color = new Uint8Array(n * 3);
     for (let r = 0; r < cols; r++) for (let c = 0; c < cols; c++){
       const i = r * cols + c, x = c * step - half, z = r * step - half;
-      const h = height(x, z);
-      const base = biome(x, z, h);
+      // under a bridge the mesh is the river's bed and banks, not the deck (that's the bridge's own mesh)
+      const deck = underDeck(x, z), h = deck ? groundHeight(x, z) : height(x, z);
+      const base = deck ? HABITATS[h < WATER ? 'lake' : 'marsh'].color : biome(x, z, h);
       // Steep slopes expose bedrock regardless of altitude.
       // Finite-difference slope over ±1 unit; grade in rock colour above 0.35 slope.
       const e = 1.0;
-      const dhx = (height(x+e,z) - height(x-e,z)) * 0.5;
-      const dhz = (height(x,z+e) - height(x,z-e)) * 0.5;
+      const dhx = (groundHeight(x+e,z) - groundHeight(x-e,z)) * 0.5;
+      const dhz = (groundHeight(x,z+e) - groundHeight(x,z-e)) * 0.5;
       const sl  = Math.hypot(dhx, dhz);
       const rb  = h > WATER ? Math.max(0, Math.min(1, (sl - 0.35) * 3.5)) : 0;
       const j   = 0.92 + hash(x*3.3, z*3.3) * 0.16;
@@ -211,10 +212,10 @@ export class Ground {
       const g = (r0 + r) * cols + (c0 + c), v = r * nc + c;
       const x = (c0 + c) * step - half, z = (r0 + r) * step - half;
       src[v] = g;
-      P[v*3] = x; P[v*3+1] = height(x, z); P[v*3+2] = z;
+      P[v*3] = x; P[v*3+1] = groundHeight(x, z); P[v*3+2] = z;     // the ground, not a bridge's deck
       // normal from the heightfield itself, so tiles meet without a lighting seam
-      const dx = (height(x + step, z) - height(x - step, z)) / (2 * step);
-      const dz = (height(x, z + step) - height(x, z - step)) / (2 * step);
+      const dx = (groundHeight(x + step, z) - groundHeight(x - step, z)) / (2 * step);
+      const dz = (groundHeight(x, z + step) - groundHeight(x, z - step)) / (2 * step);
       const len = Math.hypot(dx, 1, dz);
       N[v*3] = -dx / len; N[v*3+1] = 1 / len; N[v*3+2] = -dz / len;
       U[v*2] = (c0 + c) / SEG * uvScale; U[v*2+1] = (1 - (r0 + r) / SEG) * uvScale;

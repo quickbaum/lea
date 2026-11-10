@@ -24,6 +24,7 @@ const STEP = 2;                // profile sample spacing (the height grid's spac
 const CELL = 8;                // the planning grid
 const AGGER = 0.5;             // how far the road stands above the ground it smooths (~1/3 m)
 const RULING = 0.06;           // the grade a loaded cart takes in its stride (1 in 16)
+const BRIDGE = 40;             // what a cell of river costs to cross: a stone bridge is dear, but cheaper than a long way round
 
 const smooth = (a, b, v) => { const t = Math.max(0, Math.min(1, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
 
@@ -33,8 +34,9 @@ const DIRS = [[1,0],[0,1],[-1,0],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1],
   [2,1],[1,2],[-1,2],[-2,1],[-2,-1],[-1,-2],[1,-2],[2,-1]];
 
 // size: the world's side; height(x, z): the ungraded land; water: the water
-// plane; fields(x, z): the region fields (land.js), for rugged ground
-export function planRoad({ size, seed, height, water, fields }){
+// plane; fields(x, z): the region fields (land.js), for rugged ground;
+// river(x, z): is a river's channel here (a bridge, not a detour round the lake)
+export function planRoad({ size, seed, height, water, fields, river = null }){
   const r = mulberry32(seed >>> 0);
   const half = size / 2;
   const G = Math.round(size / CELL) + 1;
@@ -46,7 +48,8 @@ export function planRoad({ size, seed, height, water, fields }){
     const x = X(i), z = X(j), h = height(x, z), d = h - water, k = j * G + i;
     H[k] = h;
     let c = 1;
-    if (d < 0.3) c = 400;                            // open water: go round it
+    if (river && river(x, z)) c = BRIDGE;            // a river: bridge it, once, as square on as the ground allows
+    else if (d < 0.3) c = 400;                       // open water: go round it
     else if (d < 1.4) c = 4;                         // marsh and wet meadow: soft, keep off
     if (d > 12) c *= 1 + (d - 12) / 10;              // the highlands: a long haul up, keep low
     if (fields(x, z).rough > 0.6) c *= 2;            // crags and broken ground

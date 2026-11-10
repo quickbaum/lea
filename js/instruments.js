@@ -15,6 +15,10 @@
 //   inst.setRoom('cave')                                   (ROOMS)
 //   const p = await inst.play('vielle', schedule(id))       (tunes.js schedule; arrange.js parts)
 //   p.place(gain, pan)  — where the player stands from you; p.stop(); p.done (a promise)
+//   inst.play('darbuka', { notes: [{ t, k: 'D' }] })        (a drum with no samples: drums.js, each note a stroke)
+//   { at }: start at that ctx time instead of now, so parts asked for apart keep time together
+
+import { isSynthDrum, strike } from './drums.js';
 
 const BANK = 'instruments/';
 const LEAD = 0.08;          // seconds between asking and the first note
@@ -100,21 +104,23 @@ export class Instruments {
 
   // play notes ([{ t, dur, midi }], from tunes.js schedule) on an instrument. A little
   // unevenness in time and loudness, so it sounds played rather than printed.
-  async play(name, { notes, length }, { gain = 1, pan = 0, voice = false } = {}){
+  async play(name, { notes, length }, { gain = 1, pan = 0, voice = false, at = null } = {}){
     this.init();
     if (!this.ctx) return null;
-    const I = await this._load(name);
+    const synth = isSynthDrum(name), I = synth ? { release: 0.5 } : await this._load(name);
     const ctx = this.ctx, out = ctx.createGain(), panner = ctx.createStereoPanner();
     out.gain.value = gain; panner.pan.value = pan;
     out.connect(panner); panner.connect(voice ? this.master : this.music);
-    const t0 = ctx.currentTime + LEAD, srcs = [];
+    const now = ctx.currentTime, t0 = at ?? now + LEAD, srcs = [];
     for (const n of notes){
       const jitter = (Math.random() - 0.5) * 0.012;
+      if (t0 + n.t + jitter < now) continue;                  // (asked for late: what's past is past)
+      if (synth){ strike(ctx, out, name, n.k, t0 + n.t + jitter, (n.vel ?? 1) * (0.92 + Math.random() * 0.16)); continue; }
       srcs.push(this._note(I, out, n.midi, t0 + n.t + jitter, n.dur * 0.94, (n.vel ?? 0.82) * (0.92 + Math.random() * 0.16)));
     }
     let finish, stopped = false;
     const done = new Promise(res => { finish = res; });
-    const timer = setTimeout(() => finish(true), (length + LEAD + I.release) * 1000);
+    const timer = setTimeout(() => finish(true), (length + t0 - now + I.release) * 1000);
     return {
       done,
       place(g, p){ out.gain.setTargetAtTime(g, ctx.currentTime, 0.1); panner.pan.setTargetAtTime(Math.max(-1, Math.min(1, p)), ctx.currentTime, 0.1); },

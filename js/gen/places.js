@@ -23,7 +23,7 @@ const N = Math.ceil(SIZE / STEP);
 
 // ---- kinds ----------------------------------------------------------------------
 // habitat → region kind. Beach is a thin rim and the road a thin line, never regions in their own right.
-const KIND_OF = { lake: 'lake', beach: null, road: null, lane: null, yard: null, green: 'meadow', field: 'meadow', marsh: 'marsh', fen: 'fen', carr: 'carr',
+const KIND_OF = { lake: 'lake', beach: null, road: null, lane: null, bridge: null, yard: null, green: 'meadow', field: 'meadow', marsh: 'marsh', fen: 'fen', carr: 'carr',
   wetmeadow: 'wetmeadow', meadow: 'meadow', woodland: 'wood', grove: 'grove', heath: 'heath', rock: 'rock' };
 
 // name templates per kind: `t` is the name ({N} = the generated part), `at` how

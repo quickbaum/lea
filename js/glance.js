@@ -13,6 +13,8 @@
 //   the mouse or thumb  bake() both into the player's own view, and no glances for a while
 //
 // One look per stop: standing still, you aren't dragged round by whoever wanders past.
+// Tab (step) moves the eye on to the next thing in reach, left to right as you see them, and
+// round again; Shift+Tab goes back. It's asked for, so it looks even when the mouse was used.
 // Pure, no THREE: tools/check-glance.mjs drives it.
 
 export const GLANCE = {
@@ -53,7 +55,7 @@ function damp(cur, goal, vel, smooth, dt){
 
 export function createGlance(){
   let vl = 0, vf = 0, vy = 0, vp = 0, idle = 0, clock = 0, armed = true, turned = false;
-  let target = null, passed = null, handsOffUntil = 0, moved = 0, movedFrom = -1, settleUntil = 0;
+  let target = null, passed = null, handsOffUntil = 0, moved = 0, movedFrom = -1, settleUntil = 0, step = 0;
 
   const note = what => { me.log.push(`${clock.toFixed(1)} s: ${what}`); if (me.log.length > 8) me.log.shift(); };
   const toward = (eye, q, yaw, pitch) => {
@@ -77,11 +79,28 @@ export function createGlance(){
       clock += dt;
       let goalY = 0, goalP = 0, smooth = GLANCE.BACK;
       if (moving){
-        idle = 0; target = null; me.at = null; passed = null; armed = true; turned = false;
+        idle = 0; target = null; me.at = null; passed = null; armed = true; turned = false; step = 0;
       } else if (turning){
-        idle = 0; if (target) passed = target; target = null; me.at = null; armed = true; turned = true;
+        idle = 0; if (target) passed = target; target = null; me.at = null; armed = true; turned = true; step = 0;
       } else {
         idle += dt;
+        if (step){                 // Tab: the next thing in reach, in the order they stand across the view
+          const dir = step; step = 0;
+          const row = [];
+          things(q => {
+            const a = toward(eye, q, yaw, pitch);
+            if (a.dist >= 0.4 && a.dist <= (q.range ?? GLANCE.RANGE) && Math.abs(a.off) <= GLANCE.REACH && (q.los === false || clear(q.x, q.z))) row.push({ q, a });
+          });
+          row.sort((m, n) => n.a.off - m.a.off);           // left (off > 0) to right
+          let i = row.findIndex(r => r.q.ref === target);
+          if (i >= 0) i = (i + dir + row.length) % row.length;
+          else if (row.length){                            // nothing held: the first one past the middle of the view, that way
+            i = dir > 0 ? row.findIndex(r => r.a.off < me.y) : row.findLastIndex(r => r.a.off > me.y);
+            if (i < 0) i = dir > 0 ? 0 : row.length - 1;
+          }
+          if (i >= 0){ target = row[i].q.ref; me.at = row[i].q; armed = false; passed = null; idle = Math.max(idle, GLANCE.PAUSE); }
+          note(row.length ? `tab: ${i + 1} of ${row.length}` : 'tab: nothing in reach');
+        }
         if (target || (armed && idle >= GLANCE.PAUSE)){
           const seen = []; things(t => seen.push(t));
           if (target){
@@ -162,6 +181,9 @@ export function createGlance(){
       me.y = me.p = vy = vp = 0; target = null; me.at = null; armed = false; idle = 0;
       return out;
     },
+
+    // Tab (1) or Shift+Tab (-1): on to the next thing, on the next frame stood still
+    step(dir){ step = dir < 0 ? -1 : 1; },
 
     // E was pressed: if that used the thing up, the eye may go on to the next
     rearm(){ armed = true; passed = null; },

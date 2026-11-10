@@ -1011,7 +1011,7 @@ function* praiseChain(w, A, B){
     yield M(B, A, good ? 'praise-thanks' : 'meh-reply', 'pot', { feel: true });
   } else {
     yield M(A, B, good ? 'praise-other' : 'meh-other', 'pot', { dish: meal.kind, subj: meal.cook, feel: true });
-    if (good){ const d = RECIPES[meal.kind] ? meal.kind : Object.keys(RECIPES).find(id => RECIPES[id].base.includes(meal.kind)); if (d && !RECIPES[d].book) boostCraving(B, d, 0.35, w.time); }   // now they want some (not a book dish: nobody craves those)
+    if (good){ const d = RECIPES[meal.kind] ? meal.kind : Object.keys(RECIPES).find(id => RECIPES[id].base.includes(meal.kind)); if (d && !RECIPES[d].book && !RECIPES[d].hedge) boostCraving(B, d, 0.35, w.time); }   // now they want some (not a book dish: nobody craves those)
     if (good) nudge(A, meal.cook, 0, 0.06);
     const same = B._ate && B._ate.cook === meal.cook && B._ate.kind === meal.kind && w.time - B._ate.t < 0.3;
     if (same) markSaid(B, praiseKey(meal), w.time);              // agreeing counts as saying it
